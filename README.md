@@ -11,6 +11,8 @@
 | 构建与任务编排 | Turborepo 2.x | 多包并行、任务缓存与依赖顺序 |
 | 包管理 | npm workspaces | `apps/*` 作为工作区 |
 | 前端 | Next.js 16、React 19、TypeScript | App Router，默认启用 React Compiler |
+| UI 与状态 | shadcn/ui（Base UI）、Zustand、TanStack Query、nuqs | 组件与主题变量见 `apps/web/components.json`；异步数据与 URL 状态见 `AppProviders` |
+| 表单 | React Hook Form、Zod | 与 shadcn `Field` 等组合使用 |
 | 样式 | Tailwind CSS 4 | 与 `@tailwindcss/postcss` 集成 |
 | 代码质量（前端） | ESLint 9、`eslint-config-next` | `apps/web` 内执行 |
 | 后端 | Python 3.11+、FastAPI、Uvicorn | ASGI 服务，开发时热重载 |
@@ -26,26 +28,56 @@
 ├── turbo.json             # Turbo 任务：build / dev / lint
 ├── README.md
 ├── .gitignore
+├── docs/                  # 说明文档
+│   ├── frontend-architecture.md
+│   └── timing-agent-simplified.md
 └── apps/
-    ├── web/               # Next.js 前端
-    │   ├── app/           # App Router 页面与布局
-    │   ├── public/
+    ├── web/               # Next.js 前端（构建产物在 .next/，不入库说明）
+    │   ├── src/
+    │   │   ├── app/       # App Router
+    │   │   │   ├── favicon.ico
+    │   │   │   ├── globals.css
+    │   │   │   ├── layout.tsx
+    │   │   │   └── page.tsx
+    │   │   ├── components/
+    │   │   │   ├── home-content.tsx
+    │   │   │   ├── providers/
+    │   │   │   │   └── app-providers.tsx
+    │   │   │   └── ui/    # shadcn 生成的组件源码（accordion、button、card 等多文件）
+    │   │   ├── hooks/
+    │   │   │   └── use-mobile.ts
+    │   │   ├── lib/
+    │   │   │   ├── api.ts
+    │   │   │   ├── env.ts
+    │   │   │   └── utils.ts
+    │   │   └── stores/
+    │   │       └── use-ui-store.ts
+    │   ├── public/        # 静态资源（svg 等）
+    │   ├── components.json
     │   ├── next.config.ts
-    │   ├── tsconfig.json
+    │   ├── next-env.d.ts
+    │   ├── postcss.config.mjs
     │   ├── eslint.config.mjs
-    │   └── package.json
+    │   ├── tsconfig.json
+    │   ├── package.json
+    │   ├── .env.example
+    │   ├── README.md
+    │   ├── AGENTS.md
+    │   └── CLAUDE.md
     └── api/               # FastAPI 后端
         ├── app/
         │   ├── __init__.py
         │   └── main.py    # 应用入口与路由
+        ├── dist/
+        │   └── .gitkeep   # 占位，配合 Turbo outputs
         ├── package.json   # 供 Turbo 调用的 npm scripts（包装 python3 命令）
-        ├── pyproject.toml # Python 项目元数据与依赖声明
-        ├── requirements.txt
-        └── dist/          # `npm run build` 在 api 包内生成的占位输出（供 Turbo 缓存）
+        ├── pyproject.toml
+        └── requirements.txt
 ```
 
 **设计说明**
 
+- **文档** 统一放在根目录 `docs/`（如 `docs/frontend-architecture.md`、`docs/timing-agent-simplified.md`）。
 - **前端** `web` 为标准 Next.js 应用，生产构建产物位于 `apps/web/.next`。
 - **后端** `api` 为 Python 项目；根目录仍为其提供 `package.json`，使 Turbo 能以与其他包相同的方式调用 `dev` / `build` / `lint`，而无需单独维护一套与 npm 无关的调度器。
 - **`dist/.gitkeep`**：当前 `api` 的 `build` 脚本在完成字节码编译后会写入 `dist` 占位文件，以便与根目录 `turbo.json` 中的 `outputs`（`dist/**`）对齐，避免 Turbo 对「无输出任务」的告警。若后续改为打包 wheel 或 Docker 镜像，可改为真实构建产物路径。
@@ -198,11 +230,21 @@ npm run lint -w api
 
 ## 前端说明
 
-- **框架**：Next.js 16 App Router，入口在 `apps/web/app/`。
-- **React Compiler**：`next.config.ts` 中 `reactCompiler: true`。
-- **样式**：Tailwind CSS 4；全局样式见 `app/globals.css`（若模板有调整，以实际文件为准）。
+应用位于 **`apps/web`**，源码根目录为 **`apps/web/src`**。
 
-若需从浏览器请求后端 API，请使用完整 URL（如 `http://localhost:8000`），或在 Next 中配置 [rewrites](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites) / Route Handler 做代理，以避免 CORS 与 cookie 策略问题。
+- **路由与页面**：Next.js 16 App Router，页面与布局在 `apps/web/src/app/`（如 `layout.tsx`、`page.tsx`）。根布局挂载全局 `AppProviders`（`apps/web/src/components/providers/app-providers.tsx`）。
+- **React Compiler**：`apps/web/next.config.ts` 中 `reactCompiler: true`。
+- **样式**：Tailwind CSS 4；入口样式为 `apps/web/src/app/globals.css`（与 shadcn 主题变量、`@tailwindcss/postcss` 配合）。
+- **UI 组件**：shadcn/ui（`components.json` 的 preset 为 `base-nova`），生成代码在 `apps/web/src/components/ui/`；业务组件与同目录下的 `home-content.tsx` 等组合使用。
+- **全局状态**：Zustand，示例 store 见 `apps/web/src/stores/use-ui-store.ts`；适合会话内 UI 标志，不宜替代服务端数据的缓存层。
+- **异步数据**：TanStack Query，在 `AppProviders` 内提供 `QueryClientProvider`；示例请求见 `home-content.tsx` 中对 `GET /health` 的封装调用。
+- **URL 查询参数状态**：nuqs（与 `NuqsAdapter` 同包在 `AppProviders` 中）。使用 `useQueryState` 等依赖 `useSearchParams` 的页面，需有 **`Suspense` 边界**（首页在 `page.tsx` 已包一层），否则 `next build` 会报错。
+- **表单与校验**：React Hook Form + Zod（`@hookform/resolvers`），与 `src/components/ui/field.tsx` 等字段组件组合。
+- **调用后端**：浏览器侧基础地址由 `apps/web/src/lib/env.ts` 读取 `NEXT_PUBLIC_API_BASE_URL`；未配置时默认 `http://localhost:8000`。示例见 `apps/web/src/lib/api.ts` 与 `apps/web/.env.example`。
+
+更完整的分层约定、目录演进与检查清单见 **`docs/frontend-architecture.md`**。
+
+若需从浏览器请求后端 API，请保证上述公开地址与 FastAPI 的 CORS 配置一致；生产环境也可在 Next 中配置 [rewrites](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites) 或 Route Handler 做反向代理，以减少跨域与 cookie 策略问题。
 
 ---
 
