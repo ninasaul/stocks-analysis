@@ -3,8 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
-    "build": "python3 -m compileall app && mkdir -p dist && touch dist/.gitkeep",
-    "lint": "python3 -m compileall app"
+    "postinstall": "node scripts/ensure-venv.cjs",
+    "dev": "node scripts/with-venv.cjs -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8011",
+    "build": "node scripts/with-venv.cjs -m compileall app && mkdir -p dist && touch dist/.gitkeep",
+    "lint": "node scripts/with-venv.cjs -m compileall app"
   }
 }

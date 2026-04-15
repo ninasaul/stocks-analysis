@@ -131,8 +131,8 @@ npm run dev
 
 Turbo 会并行执行各 workspace 的 `dev` 脚本：
 
-- **web**：`next dev`，默认 [http://localhost:3000](http://localhost:3000)
-- **api**：`python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`，即 [http://localhost:8000](http://localhost:8000)
+- **web**：`next dev -p 4000`，默认 [http://localhost:4000](http://localhost:4000)
+- **api**：`python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8011`，即 [http://localhost:8011](http://localhost:8011)
 
 单独启动某一端（仍在根目录，使用 npm workspace 语法）：
 
@@ -168,7 +168,7 @@ npm run build -w web
 npm run start -w web
 ```
 
-默认监听 `3000` 端口（Next.js 行为以官方文档为准）。
+默认监听 `4000` 端口（由 `apps/web/package.json` 的 `dev` 脚本指定）。
 
 ### 生产启动后端
 
@@ -176,7 +176,7 @@ npm run start -w web
 
 ```bash
 cd apps/api
-python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8011
 ```
 
 生产环境建议配合进程管理（systemd、supervisor、Kubernetes 等）与 HTTPS 终止代理（如 Nginx）。
@@ -219,12 +219,12 @@ npm run lint -w api
 
 - **应用模块**：`apps/api/app/main.py` 中导出 `app`（FastAPI 实例）。
 - **健康检查**：`GET /health` 返回 JSON，例如 `{"status":"ok"}`。
-- **CORS**：已允许来源 `http://localhost:3000`，便于本地前后端联调。部署到其他域名时，请修改 `CORSMiddleware` 的 `allow_origins`，或使用环境变量驱动配置（可自行扩展 `main.py`）。
+- **CORS**：已允许来源 `http://localhost:4000`，便于本地前后端联调。部署到其他域名时，请修改 `CORSMiddleware` 的 `allow_origins`，或使用环境变量驱动配置（可自行扩展 `main.py`）。
 
 交互式文档（开发时默认开启）：
 
-- Swagger UI：`http://localhost:8000/docs`
-- ReDoc：`http://localhost:8000/redoc`
+- Swagger UI：`http://localhost:8011/docs`
+- ReDoc：`http://localhost:8011/redoc`
 
 ---
 
@@ -240,7 +240,7 @@ npm run lint -w api
 - **异步数据**：TanStack Query，在 `AppProviders` 内提供 `QueryClientProvider`；示例请求见 `home-content.tsx` 中对 `GET /health` 的封装调用。
 - **URL 查询参数状态**：nuqs（与 `NuqsAdapter` 同包在 `AppProviders` 中）。使用 `useQueryState` 等依赖 `useSearchParams` 的页面，需有 **`Suspense` 边界**（首页在 `page.tsx` 已包一层），否则 `next build` 会报错。
 - **表单与校验**：React Hook Form + Zod（`@hookform/resolvers`），与 `src/components/ui/field.tsx` 等字段组件组合。
-- **调用后端**：浏览器侧基础地址由 `apps/web/src/lib/env.ts` 读取 `NEXT_PUBLIC_API_BASE_URL`；未配置时默认 `http://localhost:8000`。示例见 `apps/web/src/lib/api.ts` 与 `apps/web/.env.example`。
+- **调用后端**：浏览器侧基础地址由 `apps/web/src/lib/env.ts` 读取 `NEXT_PUBLIC_API_BASE_URL`；未配置时默认 `http://localhost:8011`。示例见 `apps/web/src/lib/api.ts` 与 `apps/web/.env.example`。
 
 更完整的分层约定、目录演进与检查清单见 **`docs/frontend-architecture.md`**。
 
