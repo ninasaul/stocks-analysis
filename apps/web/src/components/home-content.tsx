@@ -90,7 +90,7 @@ export function HomeContent() {
             )}
             {health.isError && (
               <p className="text-destructive">
-                {health.error.message} (is the API running on port 8000?)
+                {health.error.message} (is the API running on port 8011?)
               </p>
             )}
             {health.isSuccess && (
