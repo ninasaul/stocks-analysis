@@ -1,6 +1,8 @@
 """反思机制模块"""
 from typing import Dict, Any
+import logging
 
+logger = logging.getLogger(__name__)
 
 class Reflector:
     """处理决策反思和经验总结"""
@@ -87,7 +89,7 @@ JSON 格式示例：
             result = self._safe_parse_json(response)
             return result
         except Exception as e:
-            print(f"反思分析失败: {e}")
+            logger.error(f"反思分析失败: {e}")
             return {
                 "error": "反思分析失败",
                 "message": str(e)
@@ -140,7 +142,7 @@ JSON 格式示例：
             result = self._safe_parse_json(response)
             return result
         except Exception as e:
-            print(f"交易反思分析失败: {e}")
+            logger.error(f"交易反思分析失败: {e}")
             return {
                 "error": "交易反思分析失败",
                 "message": str(e)

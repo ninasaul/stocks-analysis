@@ -388,10 +388,10 @@ class TimingScorer:
                     return float(normalized_flow)
                 else:
                     # 如果找不到合适的列，返回 0
-                    print(f"未找到主力净流入列，列名: {list(df.columns)}")
+                    logger.warning(f"未找到主力净流入列，列名: {list(df.columns)}")
                     return 0.0
         except Exception as e:
-            print(f"获取主力资金数据失败: {e}")
+            logger.error(f"获取主力资金数据失败: {e}")
         return 0.0
 
     # ========== 辅助方法 ==========

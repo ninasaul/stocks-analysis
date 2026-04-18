@@ -1,6 +1,9 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
+from typing import Optional
+import json
+import aiohttp
 
 from .data.fetcher import fetch_stock_data, fetch_fundamental
 from .data.indicators import TimingScorer
@@ -15,6 +18,9 @@ from .reflection.reflector import Reflector
 from .reflection.memory import SimpleMemory
 from .trading.manager import TradingManager
 from .trading.strategy import TradingStrategy
+from .dialogue.manager import dialogue_manager
+# 添加SSE端点用于流式响应
+from fastapi.responses import StreamingResponse
 
 app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION)
 
@@ -69,6 +75,14 @@ async def analyze_stock(
 
     result = {"ticker": ticker}
     result["name"] = stock_name
+    
+    # 添加最新数据日期
+    if history:
+        # 找到最新的日期
+        latest_date = max(item["date"] for item in history)
+        result["latest_data_date"] = latest_date
+    else:
+        result["latest_data_date"] = None
 
     # 2. 择时打分（10 维度）
     if mode in ("full", "time"):
@@ -296,3 +310,108 @@ async def reflect_on_trade(
         "transaction": latest_transaction,
         "reflection": reflection
     }
+
+
+@app.post("/api/dialogue/sync")
+async def dialogue_sync(
+    message: str = Query(..., description="用户消息"),
+    session_id: Optional[str] = Query(None, description="会话ID")
+) -> dict:
+    """
+    选股对话接口 - 同步响应版本
+    
+    Args:
+        message: 用户消息
+        session_id: 会话ID（可选，用于区分不同会话）
+    
+    Returns:
+        对话响应
+    """
+    logger.info(f"收到同步对话请求: {message[:50]}..., session_id: {session_id}")
+    
+    # 获取 LLM 响应（对话历史已在 DialogueManager 中存储）
+    response = await dialogue_manager.get_response(message, None, session_id)
+    
+    # 获取对话历史
+    history = dialogue_manager.get_history(session_id)
+    
+    # 获取当前选股条件
+    criteria = dialogue_manager.get_criteria()
+    
+    return {
+        "response": response,
+        "session_id": session_id or dialogue_manager.current_session_id,
+        "history": history,
+        "criteria": criteria
+    }
+
+
+@app.delete("/api/dialogue/history")
+async def clear_dialogue_history(
+    session_id: Optional[str] = Query(None, description="会话ID")
+) -> dict:
+    """
+    清除对话历史
+    
+    Args:
+        session_id: 会话ID（可选）
+    
+    Returns:
+        操作结果
+    """
+    success = dialogue_manager.clear_history(session_id)
+    return {
+        "success": success,
+        "message": "对话历史已清除" if success else "会话不存在"
+    }
+
+
+@app.get("/api/dialogue/history")
+async def get_dialogue_history(
+    session_id: Optional[str] = Query(None, description="会话ID")
+) -> dict:
+    """
+    获取对话历史
+    
+    Args:
+        session_id: 会话ID（可选）
+    
+    Returns:
+        对话历史
+    """
+    history = dialogue_manager.get_history(session_id)
+    return {
+        "history": history,
+        "session_id": session_id or dialogue_manager.current_session_id
+    }
+
+@app.post("/api/dialogue/stream")
+async def dialogue_stream(
+    message: str = Query(..., description="用户消息"),
+    session_id: Optional[str] = Query(None, description="会话ID")
+) -> StreamingResponse:
+    """
+    选股对话接口 - 流式响应版本
+    
+    Args:
+        message: 用户消息
+        session_id: 会话ID（可选，用于区分不同会话）
+    
+    Returns:
+        流式响应
+    """
+    logger.info(f"收到流式对话请求: {message[:50]}..., session_id: {session_id}")
+    
+    async def stream_generator():
+        async for chunk in dialogue_manager.get_streaming_response(message, None, session_id):
+            # 以SSE格式发送数据
+            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+    
+    return StreamingResponse(
+        stream_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive"
+        }
+    )

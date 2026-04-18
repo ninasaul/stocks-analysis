@@ -8,7 +8,6 @@ load_dotenv()
 
 # 日志级别
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
-print(f"LOG_LEVEL: {LOG_LEVEL}")  # 测试输出
 
 # 日志格式
 LOG_FORMAT = '%(levelname)s - %(asctime)s.%(msecs)03d - %(funcName)s:%(lineno)d - %(message)s'

@@ -1,18 +1,22 @@
 import requests
 import json
+import sys
 
 # 测试股票代码列表
 tickers = ["600519", "000002", "300750", "688256", "300308"]
 # API 接口 URL
 base_url = "http://localhost:8000/api/analyze"
 
-print("开始测试 /api/analyze 接口...\n")
+# 可选：指定LLM提供商
+provider = "aliyun"  # 可以是 "aliyun" 或 "deepseek"
+
+print(f"开始测试 /api/analyze 接口 (提供商: {provider})...\n")
 
 for ticker in tickers:
     # 构建请求参数
     params = {
         "ticker": ticker,
-        "mode": "time"
+        "mode": "full"
     }
     
     print(f"测试股票: {ticker}")
