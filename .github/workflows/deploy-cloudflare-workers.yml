@@ -10,6 +10,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: production
     permissions:
       contents: read
 
@@ -39,6 +40,12 @@ jobs:
             RESOLVED_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID_VAR:-$CF_ACCOUNT_ID_VAR}"
           fi
 
+          # Normalize values to avoid common copy/paste issues:
+          # - surrounding quotes from shell snippets
+          # - trailing newlines from multi-line paste
+          RESOLVED_API_TOKEN="$(printf '%s' "$RESOLVED_API_TOKEN" | tr -d '\r\n' | sed -e "s/^['\"]//" -e "s/['\"]$//")"
+          RESOLVED_ACCOUNT_ID="$(printf '%s' "$RESOLVED_ACCOUNT_ID" | tr -d '\r\n' | sed -e "s/^['\"]//" -e "s/['\"]$//")"
+
           echo "CLOUDFLARE_API_TOKEN=$RESOLVED_API_TOKEN" >> "$GITHUB_ENV"
           echo "CLOUDFLARE_ACCOUNT_ID=$RESOLVED_ACCOUNT_ID" >> "$GITHUB_ENV"
         env:
@@ -61,6 +68,38 @@ jobs:
           if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo "Missing CLOUDFLARE_ACCOUNT_ID."
             echo "Set one of: secret CLOUDFLARE_ACCOUNT_ID / CF_ACCOUNT_ID, or variable CLOUDFLARE_ACCOUNT_ID / CF_ACCOUNT_ID."
+            exit 1
+          fi
+
+      - name: Verify Cloudflare authentication
+        run: |
+          if ! curl -fsS "https://api.cloudflare.com/client/v4/user/tokens/verify" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" >/tmp/cf-token-verify.json; then
+            echo "Cloudflare token verification request failed."
+            echo "Check CLOUDFLARE_API_TOKEN is a valid Cloudflare API Token (not API Key) and not revoked."
+            exit 1
+          fi
+
+          if ! node -e 'const fs = require("node:fs"); const d = JSON.parse(fs.readFileSync("/tmp/cf-token-verify.json","utf8")); process.exit(d.success ? 0 : 1)'; then
+            echo "Cloudflare token is invalid."
+            echo "Please recreate token and grant required Workers permissions."
+            exit 1
+          fi
+
+      - name: Verify Cloudflare account access
+        run: |
+          if ! curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" >/tmp/cf-account-check.json; then
+            echo "Cloudflare account access check failed."
+            echo "Token may not have access to account $CLOUDFLARE_ACCOUNT_ID."
+            exit 1
+          fi
+
+          if ! node -e 'const fs = require("node:fs"); const d = JSON.parse(fs.readFileSync("/tmp/cf-account-check.json","utf8")); process.exit(d.success ? 0 : 1)'; then
+            echo "Cloudflare account access denied for account $CLOUDFLARE_ACCOUNT_ID."
+            echo "Ensure token belongs to the same account and includes Workers deploy permissions."
             exit 1
           fi
 
