@@ -12,6 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      # Support common secret/variable names to reduce CI setup mistakes.
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
 
     steps:
       - name: Checkout
@@ -26,8 +30,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate Cloudflare credentials
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "Missing CLOUDFLARE_API_TOKEN. Set repo secret CLOUDFLARE_API_TOKEN (or CF_API_TOKEN)."
+            exit 1
+          fi
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "Missing CLOUDFLARE_ACCOUNT_ID. Set repo secret/variable CLOUDFLARE_ACCOUNT_ID."
+            exit 1
+          fi
+
       - name: Deploy apps/web
         run: npm run deploy --workspace web
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
