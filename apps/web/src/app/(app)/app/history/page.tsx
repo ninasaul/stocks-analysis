@@ -59,6 +59,12 @@ const timeframeLabels: Record<string, string> = {
 
 type SortMode = "latest" | "confidence_desc" | "confidence_asc";
 
+const sortModeLabels: Record<SortMode, string> = {
+  latest: "按时间倒序",
+  confidence_desc: "按置信度从高到低",
+  confidence_asc: "按置信度从低到高",
+};
+
 function formatDate(timestamp: number) {
   return new Date(timestamp).toLocaleString();
 }
@@ -193,7 +199,7 @@ export default function HistoryPage() {
                         />
                         <Select value={actionFilter} onValueChange={(value) => setActionFilter(value ?? "all")}>
                           <SelectTrigger className="w-full">
-                            <SelectValue placeholder="动作" />
+                            <SelectValue>{actionLabels[actionFilter] ?? "全部动作"}</SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             <SelectGroup>
@@ -208,7 +214,7 @@ export default function HistoryPage() {
                         </Select>
                         <Select value={riskFilter} onValueChange={(value) => setRiskFilter(value ?? "all")}>
                           <SelectTrigger className="w-full">
-                            <SelectValue placeholder="风险等级" />
+                            <SelectValue>{riskLabels[riskFilter] ?? "全部风险"}</SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             <SelectGroup>
@@ -221,7 +227,7 @@ export default function HistoryPage() {
                         </Select>
                         <Select value={sortMode} onValueChange={(value) => setSortMode((value as SortMode | null) ?? "latest")}>
                           <SelectTrigger className="w-full">
-                            <SelectValue placeholder="排序方式" />
+                            <SelectValue>{sortModeLabels[sortMode]}</SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             <SelectGroup>

@@ -50,6 +50,7 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -69,6 +70,11 @@ const MODEL_OPTIONS = [
 type AnalysisDepth = 1 | 2 | 3 | 4 | 5;
 type AnalystRole = "market" | "fundamental" | "news" | "social";
 type LanguagePref = "zh" | "en";
+
+const languagePrefLabels: Record<LanguagePref, string> = {
+  zh: "中文",
+  en: "English",
+};
 
 const DEPTH_META: Record<
   AnalysisDepth,
@@ -847,14 +853,16 @@ export function AnalyzeRunConfigDialog({
                       onValueChange={(v) => v && setQuickModel(v)}
                     >
                       <SelectTrigger id={`${fieldId}-model-quick`} className="w-full min-w-0">
-                        <SelectValue />
+                        <SelectValue>{quickModel}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        {MODEL_OPTIONS.map((m) => (
-                          <SelectItem key={m} value={m}>
-                            {m}
-                          </SelectItem>
-                        ))}
+                        <SelectGroup>
+                          {MODEL_OPTIONS.map((m) => (
+                            <SelectItem key={m} value={m}>
+                              {m}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
                       </SelectContent>
                     </Select>
                   </Field>
@@ -866,14 +874,16 @@ export function AnalyzeRunConfigDialog({
                       onValueChange={(v) => v && setDeepModel(v)}
                     >
                       <SelectTrigger id={`${fieldId}-model-deep`} className="w-full min-w-0">
-                        <SelectValue />
+                        <SelectValue>{deepModel}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        {MODEL_OPTIONS.map((m) => (
-                          <SelectItem key={m} value={m}>
-                            {m}
-                          </SelectItem>
-                        ))}
+                        <SelectGroup>
+                          {MODEL_OPTIONS.map((m) => (
+                            <SelectItem key={m} value={m}>
+                              {m}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
                       </SelectContent>
                     </Select>
                   </Field>
@@ -927,11 +937,13 @@ export function AnalyzeRunConfigDialog({
                     }}
                   >
                     <SelectTrigger id={`${fieldId}-lang`} className="w-full min-w-0">
-                      <SelectValue />
+                      <SelectValue>{languagePrefLabels[language]}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="zh">中文</SelectItem>
-                      <SelectItem value="en">English</SelectItem>
+                      <SelectGroup>
+                        <SelectItem value="zh">中文</SelectItem>
+                        <SelectItem value="en">English</SelectItem>
+                      </SelectGroup>
                     </SelectContent>
                   </Select>
                 </Field>
