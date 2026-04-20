@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { ChartLineIcon, CircleUserIcon, HistoryIcon, MessageCircleIcon } from "lucide-react";
+import { ChartLineIcon, CircleUserIcon, HistoryIcon, MessageCircleIcon, StarIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -20,6 +20,7 @@ import {
 const nav = [
   { href: "/app/analyze", label: "股票预测", icon: ChartLineIcon },
   { href: "/app/pick", label: "选股对话", icon: MessageCircleIcon },
+  { href: "/app/watchlist", label: "自选", icon: StarIcon },
   { href: "/app/history", label: "历史与复盘", icon: HistoryIcon },
   { href: "/app/account", label: "账号", icon: CircleUserIcon },
 ] as const;

@@ -14,6 +14,7 @@ import {
 const labels: Record<string, string> = {
   analyze: "股票预测",
   pick: "选股对话",
+  watchlist: "自选",
   history: "历史与复盘",
   account: "账号",
 };
@@ -49,7 +50,7 @@ export function AppBreadcrumb() {
         {crumbs.map((c, i) => (
           <span key={`${c.href}-${c.label}`} className="contents">
             {i > 0 ? <BreadcrumbSeparator /> : null}
-            <BreadcrumbItem className="max-w-[12rem] truncate sm:max-w-none">
+            <BreadcrumbItem className="max-w-48 truncate sm:max-w-none">
               {c.current ? (
                 <BreadcrumbPage>{c.label}</BreadcrumbPage>
               ) : (
