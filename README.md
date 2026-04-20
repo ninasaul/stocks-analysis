@@ -1,5 +1,7 @@
 # stocks-analysis-simple
 
+产品名称：**智谱投研**。产品设计见 `docs/product-requirements.md`（其中 **5.6** 为股票分析 Agent 编排逻辑）。
+
 基于 [Turborepo](https://turbo.build/) 的 monorepo：前端为 [Next.js](https://nextjs.org/)（App Router），后端为 [FastAPI](https://fastapi.tiangolo.com/)（Python）。仓库根目录通过 npm workspaces 管理多个应用，并由 Turbo 统一编排 `dev`、`build`、`lint` 等任务。
 
 ---
