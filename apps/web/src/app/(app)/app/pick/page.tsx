@@ -156,6 +156,7 @@ const MAX_DRAFT_CHARS = 600;
 const DRAFT_STORAGE_PREFIX = "pick-draft:";
 const PICKER_OPTIONS_PANEL_KEY = "pick-options-panel-open";
 const MOCK_CONVERSATION_SEED_BASE_TS = 1713326400000;
+const COMPOSER_EDGE_OFFSET_PX = 10;
 
 const DEFAULT_PREFERENCE_SNAPSHOT: PreferenceSnapshot = {
   market: "CN",
@@ -549,6 +550,21 @@ export default function PickPage() {
     },
     [sessionId],
   );
+  const handleEditMessage = useCallback(
+    (message: PickerMessage) => {
+      if (message.role !== "user") return;
+      if (sendError) clearSendError();
+      setDraftForSession(message.content);
+      queueMicrotask(() => {
+        const el = draftTextareaRef.current;
+        if (!el) return;
+        el.focus();
+        const cursor = el.value.length;
+        el.setSelectionRange(cursor, cursor);
+      });
+    },
+    [clearSendError, sendError, setDraftForSession],
+  );
 
   const scrollChatToBottom = useCallback((behavior: ScrollBehavior) => {
     const viewport = chatViewportRef.current;
@@ -780,6 +796,11 @@ export default function PickPage() {
   }, [conversationListItems, conversationSearch]);
 
   const pickConditionItems = useMemo(() => pickConditionLines(preference_snapshot), [preference_snapshot]);
+  const deletingConversationItem = useMemo(
+    () => conversationListItems.find((item) => item.id === deletingConversationId) ?? null,
+    [conversationListItems, deletingConversationId],
+  );
+  const renameDraftTrimmed = renameDraft.trim();
 
   const switchConversation = useCallback(
     (conversationId: string) => {
@@ -808,7 +829,7 @@ export default function PickPage() {
 
   const submitRenameConversation = useCallback(() => {
     const targetId = editingConversationId;
-    const nextTitle = renameDraft.trim();
+    const nextTitle = renameDraftTrimmed;
     if (!targetId || !nextTitle) return;
 
     setConversationArchive((prev) =>
@@ -818,7 +839,7 @@ export default function PickPage() {
       prev[targetId] === nextTitle ? prev : { ...prev, [targetId]: nextTitle },
     );
     setEditingConversationId(null);
-  }, [editingConversationId, renameDraft]);
+  }, [editingConversationId, renameDraftTrimmed]);
 
   const confirmDeleteConversation = useCallback(() => {
     const targetId = deletingConversationId;
@@ -911,7 +932,7 @@ export default function PickPage() {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         const rect = el.getBoundingClientRect();
-        const gap = Math.ceil(rect.height + composerLiftPx + 12);
+        const gap = Math.ceil(rect.height + composerLiftPx + COMPOSER_EDGE_OFFSET_PX + 12);
         setComposerBottomGapPx((prev) => (prev === gap ? prev : gap));
       });
     };
@@ -1014,16 +1035,17 @@ export default function PickPage() {
                 }}
               >
                 {messages.length === 0 ? (
-                  <div className="mx-auto w-full max-w-3xl">
+                  <div className="mx-auto w-full max-w-4xl">
                     <PickerChatEmpty mode={conversationMode} />
                   </div>
                 ) : (
-                  <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+                  <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
                     {messages.map((m) => (
                       <PickerChatMessage
                         key={m.id}
                         message={m}
                         anchorId={`pick-msg-item-${m.id}`}
+                        onEditMessage={handleEditMessage}
                       />
                     ))}
                   </div>
@@ -1115,7 +1137,7 @@ export default function PickPage() {
         <section
           ref={composerBarRef}
           style={{
-            bottom: composerLiftPx ? `${composerLiftPx}px` : undefined,
+            bottom: `${composerLiftPx + COMPOSER_EDGE_OFFSET_PX}px`,
             left:
               composerDesktopBounds.left !== undefined ? `${composerDesktopBounds.left}px` : undefined,
             width:
@@ -1126,11 +1148,12 @@ export default function PickPage() {
           className="fixed inset-x-0 bottom-0 z-50 md:inset-x-auto"
           aria-label="消息输入区"
         >
-          <FieldGroup className="bg-background">
-            <Field>
-              <FieldLabel htmlFor="pick-input" className="sr-only">
-                消息输入
-              </FieldLabel>
+          <div className="mx-auto w-full max-w-4xl px-1 md:px-0">
+            <FieldGroup className="bg-background">
+              <Field>
+                <FieldLabel htmlFor="pick-input" className="sr-only">
+                  消息输入
+                </FieldLabel>
 
                 {streamingOptionsPending ? (
                   <div className="text-muted-foreground flex items-center gap-2 text-sm">
@@ -1233,7 +1256,7 @@ export default function PickPage() {
                     placeholder={pickerCopy.inputPlaceholder}
                     disabled={sendPending}
                     aria-invalid={sendError ? true : undefined}
-                    className="max-h-[min(40svh,18rem)] min-h-26 px-3 py-3 md:min-h-30"
+                    className="max-h-[min(40svh,18rem)] min-h-20 px-3 py-3 md:min-h-24"
                     maxLength={MAX_DRAFT_CHARS}
                     onCompositionStart={() => {
                       isImeComposingRef.current = true;
@@ -1323,8 +1346,9 @@ export default function PickPage() {
                     </Tooltip>
                   </InputGroupAddon>
                 </InputGroup>
-            </Field>
-          </FieldGroup>
+              </Field>
+            </FieldGroup>
+          </div>
         </section>
       </main>
 
@@ -1351,13 +1375,16 @@ export default function PickPage() {
       <Dialog
         open={Boolean(editingConversationId)}
         onOpenChange={(open) => {
-          if (!open) setEditingConversationId(null);
+          if (!open) {
+            setEditingConversationId(null);
+            setRenameDraft("");
+          }
         }}
       >
-        <DialogContent showCloseButton={false}>
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>编辑会话标题</DialogTitle>
-            <DialogDescription>修改后会在左侧会话列表实时更新。</DialogDescription>
+            <DialogDescription>修改后会在左侧会话列表实时更新，建议使用简短关键词。</DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <Field>
@@ -1368,14 +1395,23 @@ export default function PickPage() {
                 maxLength={40}
                 onChange={(e) => setRenameDraft(e.target.value)}
                 placeholder="输入会话标题"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  submitRenameConversation();
+                }}
               />
+              <p className="text-muted-foreground mt-1 text-xs tabular-nums">
+                {renameDraft.length}/40
+              </p>
             </Field>
           </FieldGroup>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setEditingConversationId(null)}>
               取消
             </Button>
-            <Button type="button" onClick={submitRenameConversation} disabled={!renameDraft.trim()}>
+            <Button type="button" onClick={submitRenameConversation} disabled={!renameDraftTrimmed}>
               保存
             </Button>
           </DialogFooter>
@@ -1391,7 +1427,11 @@ export default function PickPage() {
         <AlertDialogContent size="sm">
           <AlertDialogHeader>
             <AlertDialogTitle>删除会话</AlertDialogTitle>
-            <AlertDialogDescription>删除后无法恢复，确认继续吗？</AlertDialogDescription>
+            <AlertDialogDescription>
+              {deletingConversationItem
+                ? `将永久删除「${deletingConversationItem.title}」，删除后无法恢复。`
+                : "删除后无法恢复，确认继续吗？"}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>

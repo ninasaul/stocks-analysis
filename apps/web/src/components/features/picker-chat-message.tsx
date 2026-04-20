@@ -1,10 +1,14 @@
 "use client";
 
-import { CopyIcon } from "lucide-react";
+import { CopyIcon, PencilLineIcon } from "lucide-react";
+import { ThumbsDownIcon, ThumbsUpIcon } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import { toast } from "sonner";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { pickerCopy } from "@/lib/copy";
 import { cn } from "@/lib/utils";
 import type { PickerMessage } from "@/stores/use-picker-store";
@@ -34,7 +38,7 @@ const assistantMarkdownComponents: Components = {
       {children}
     </blockquote>
   ),
-  hr: () => <hr className="border-border my-3" />,
+  hr: () => <Separator className="my-3" />,
   a: ({ href, children }) => (
     <a
       href={href}
@@ -104,19 +108,33 @@ export function PickerChatEmpty({ mode }: { mode: "consult" | "pick" | null }) {
 export function PickerChatMessage({
   message,
   anchorId,
+  onEditMessage,
 }: {
   message: PickerMessage;
   anchorId?: string;
+  onEditMessage?: (message: PickerMessage) => void;
 }) {
   const isUser = message.role === "user";
   const labelId = `pick-msg-${message.id}-label`;
   const timeLabel = formatMessageTime(message.createdAt);
   const timeIso = formatMessageTimeIso(message.createdAt);
+  const canCopy = message.content.trim().length > 0;
+  const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
+
+  const handleFeedback = (next: "up" | "down") => {
+    setFeedback((prev) => {
+      const resolved = prev === next ? null : next;
+      if (resolved === "up") toast.success("已记录：有帮助");
+      if (resolved === "down") toast.success("已记录：还需改进");
+      if (resolved === null) toast.success("已取消反馈");
+      return resolved;
+    });
+  };
 
   return (
     <article
       id={anchorId}
-      className={cn("flex min-w-0 flex-col gap-1.5", isUser ? "items-end" : "items-start")}
+      className={cn("group/message flex min-w-0 flex-col gap-1.5", isUser ? "items-end" : "items-start")}
       aria-label={isUser ? "用户消息" : "助手消息"}
     >
       <div
@@ -137,37 +155,116 @@ export function PickerChatMessage({
         <time dateTime={timeIso} className="text-muted-foreground tabular-nums">
           {timeLabel}
         </time>
-        {!isUser ? (
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            className="h-6 px-1.5 text-muted-foreground opacity-70 transition-opacity hover:opacity-100"
-            onClick={() => void copyMessageBody(message.content)}
-            disabled={!message.content.trim()}
-          >
-            <CopyIcon data-icon="inline-start" />
-            复制
-          </Button>
-        ) : null}
       </div>
 
       <div
         className={cn(
-          "min-w-0 max-w-[min(100%,34rem)] rounded-2xl px-3.5 py-2.5 wrap-break-word",
+          "min-w-0 max-w-[min(100%,36rem)] wrap-break-word",
           isUser
-            ? "border border-primary/15 bg-primary/10 text-foreground rounded-br-md"
-            : "border border-border/50 bg-card text-foreground rounded-bl-md",
+            ? "rounded-2xl rounded-br-md border border-primary/15 bg-primary/10 px-3.5 py-2.5 text-foreground"
+            : "rounded-none border-0 bg-transparent p-0 text-foreground",
         )}
         aria-labelledby={labelId}
       >
-        {isUser ? (
-          <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
-        ) : (
-          <div className="min-w-0 text-sm">
-            <ReactMarkdown components={assistantMarkdownComponents}>{message.content}</ReactMarkdown>
-          </div>
+        <div className="flex min-w-0 flex-col gap-2">
+          {isUser ? (
+            <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
+          ) : (
+            <div className="min-w-0 text-sm">
+              <ReactMarkdown components={assistantMarkdownComponents}>{message.content}</ReactMarkdown>
+            </div>
+          )}
+        </div>
+      </div>
+      <div
+        className={cn(
+          "pointer-events-none -mt-1 flex gap-1 px-1 opacity-0 transition-opacity group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100",
+          isUser ? "self-end" : "self-start",
         )}
+      >
+        {isUser && onEditMessage ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => onEditMessage(message)}
+                  aria-label="编辑用户消息"
+                >
+                  <PencilLineIcon />
+                </Button>
+              }
+            />
+            <TooltipContent side="top" align="start">
+              编辑消息
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
+        {!isUser ? (
+          <>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant={feedback === "up" ? "secondary" : "ghost"}
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => handleFeedback("up")}
+                    aria-label="赞同回答"
+                  >
+                    <ThumbsUpIcon />
+                  </Button>
+                }
+              />
+              <TooltipContent side="top" align="start">
+                赞同回答
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant={feedback === "down" ? "secondary" : "ghost"}
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => handleFeedback("down")}
+                    aria-label="不赞同回答"
+                  >
+                    <ThumbsDownIcon />
+                  </Button>
+                }
+              />
+              <TooltipContent side="top" align="start">
+                不赞同回答
+              </TooltipContent>
+            </Tooltip>
+          </>
+        ) : null}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() => void copyMessageBody(message.content)}
+                disabled={!canCopy}
+                aria-label={isUser ? "复制用户消息" : "复制助手消息"}
+              >
+                <CopyIcon />
+              </Button>
+            }
+          />
+          <TooltipContent side="top" align="start">
+            复制消息
+          </TooltipContent>
+        </Tooltip>
       </div>
     </article>
   );
