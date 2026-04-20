@@ -128,3 +128,25 @@
     @apply font-sans;
   }
 }
+
+/* 单票报告打印：隐藏导航壳与参数表单，仅保留报告主体 */
+@media print {
+  [data-app-print-hide] {
+    display: none !important;
+  }
+  [data-slot="sidebar"] {
+    display: none !important;
+  }
+  [data-slot="sidebar-gap"] {
+    display: none !important;
+    width: 0 !important;
+  }
+  [data-slot="sidebar-inset"] {
+    margin: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+  .print\:analyze-hide {
+    display: none !important;
+  }
+}

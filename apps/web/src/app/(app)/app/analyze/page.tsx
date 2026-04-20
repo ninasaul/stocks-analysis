@@ -1,0 +1,1734 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  ChevronDownIcon,
+  CircleHelpIcon,
+  CopyIcon,
+  EyeIcon,
+  FolderDownIcon,
+  FileDownIcon,
+  FileTextIcon,
+  GlobeIcon,
+  SearchIcon,
+} from "lucide-react";
+import { toast } from "sonner";
+import type { AnalysisInput, PreferenceSnapshot, TimingReport } from "@/lib/contracts/domain";
+import { timingReportSchema } from "@/lib/contracts/domain";
+import {
+  ANALYZE_SYMBOL_MOCK_UNIVERSE,
+  formatAnalyzeBoardSymbol,
+  fuzzyAnalyzeSymbolScore,
+  parseAnalyzeSearchInput,
+  type AnalyzeSymbolSearchItem,
+} from "@/lib/analyze-symbol-search";
+import { analyzeCopy, subscriptionTierPublicCopy } from "@/lib/copy";
+import { useAnalysisStore } from "@/stores/use-analysis-store";
+import { useArchiveStore } from "@/stores/use-archive-store";
+import { useStoreHydrated } from "@/hooks/use-store-hydrated";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
+import { Spinner } from "@/components/ui/spinner";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+} from "@/components/ui/input-group";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { AnalyzeRunConfigDialog } from "@/components/features/analyze-run-config-dialog";
+import { AppPageLayout } from "@/components/features/app-page-layout";
+import { PageErrorState, PageLoadingState } from "@/components/features/page-state";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { PolarAngleAxis, PolarGrid, PolarRadiusAxis, Radar, RadarChart } from "recharts";
+
+const actionLabels: Record<string, string> = {
+  wait: "观望",
+  trial: "试仓",
+  add: "加仓",
+  reduce: "减仓",
+  exit: "离场",
+};
+
+const actionBadgeClassNames: Record<string, string> = {
+  wait:
+    "border-transparent bg-muted text-muted-foreground dark:bg-muted/70 dark:text-muted-foreground",
+  trial:
+    "border-transparent bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300",
+  add:
+    "border-transparent bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
+  reduce:
+    "border-transparent bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300",
+  exit:
+    "border-transparent bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300",
+};
+
+const riskTierLabels: Record<AnalysisInput["risk_tier"], string> = {
+  conservative: "保守",
+  balanced: "平衡",
+  aggressive: "进取",
+};
+
+const holdingLabels: Record<AnalysisInput["holding_horizon"], string> = {
+  intraday_to_days: "日内至数日",
+  w1_to_w4: "1～4 周",
+  m1_to_m3: "1～3 个月",
+  m3_plus: "3 个月以上",
+};
+
+const styleLabels: Record<PreferenceSnapshot["style"], string> = {
+  value: "价值",
+  growth: "成长",
+  momentum: "动量/趋势",
+  no_preference: "无明确风格偏好",
+};
+
+const marketLabels: Record<AnalysisInput["market"], string> = {
+  CN: "A 股",
+  HK: "港股",
+  US: "美股",
+};
+
+type SearchItem = AnalyzeSymbolSearchItem;
+
+type AnalysisListItem = {
+  id: string;
+  market: AnalysisInput["market"];
+  symbol: string;
+  status: "done" | "running";
+};
+
+type BasicQuote = {
+  price: number;
+  change: number;
+  changePct: number;
+  open: number;
+  high: number;
+  low: number;
+  volume: number;
+  turnover: number;
+  updatedAt: number;
+};
+
+type FactItem = {
+  label: string;
+  value: string;
+  tone?: "up" | "down" | "neutral";
+};
+
+type TargetPriceRow = {
+  horizon: string;
+  range: string;
+  target: string;
+  rationale: string;
+};
+
+const LOCAL_ANALYSIS_HISTORY_KEY = "zhputian-analysis-history-v1";
+const LOCAL_ANALYSIS_ACTIVE_ID_KEY = "zhputian-analysis-active-id-v1";
+const sentimentChartConfig = {
+  score: { label: "指数", color: "var(--chart-2)" },
+} as const;
+
+function preferenceSummary(p: PreferenceSnapshot) {
+  const m = p.market === "CN" ? "A 股" : p.market === "HK" ? "港股" : "美股";
+  const sec =
+    p.sector_mode === "specified" && p.sectors.length ? p.sectors.join("、") : "行业不限制";
+  return `${m}；${sec}；持有周期 ${holdingLabels[p.holding_horizon]}；风格 ${styleLabels[p.style]}；风险 ${riskTierLabels[p.risk_tier]}`;
+}
+
+function InfoTip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button type="button" variant="ghost" size="icon-xs" aria-label={label}>
+            <CircleHelpIcon />
+          </Button>
+        }
+      />
+      <TooltipContent side="bottom" align="start">
+        {children}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+type AnalysisHistoryRunningRow = {
+  id: string;
+  market: AnalysisInput["market"];
+  symbol: string;
+  name: string;
+};
+
+type AnalysisHistoryDoneRow = AnalysisHistoryRunningRow & {
+  report: TimingReport | null;
+};
+
+function AnalysisHistoryList({
+  running,
+  done,
+  activeAnalysisId,
+  onSelect,
+}: {
+  running: AnalysisHistoryRunningRow[];
+  done: AnalysisHistoryDoneRow[];
+  activeAnalysisId: string | null;
+  onSelect: (item: { id: string; market: AnalysisInput["market"]; symbol: string }) => void;
+}) {
+  return (
+    <>
+      {running.length ? (
+        <>
+          {running.map((item) => (
+            <Button
+              key={item.id}
+              type="button"
+              variant={activeAnalysisId === item.id ? "secondary" : "ghost"}
+              className="h-auto w-full justify-start py-2.5"
+              onClick={() => onSelect({ id: item.id, market: item.market, symbol: item.symbol })}
+            >
+              <div className="flex w-full items-start justify-between gap-2 text-left">
+                <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                  <span className="w-full truncate text-sm font-medium leading-tight">{item.name}</span>
+                  <span className="text-muted-foreground font-mono text-xs tabular-nums">
+                    {formatAnalyzeBoardSymbol(item.market, item.symbol)}
+                  </span>
+                  <span className="text-muted-foreground text-xs">正在生成报告，请稍候</span>
+                </div>
+                <Badge variant="secondary" className="shrink-0">
+                  分析中
+                </Badge>
+              </div>
+            </Button>
+          ))}
+          <Separator className="my-2" />
+        </>
+      ) : null}
+
+      {done.map((item) => {
+        const action = item.report ? actionLabels[item.report.action] ?? item.report.action : "已完成";
+        const actionTone = item.report
+          ? actionBadgeClassNames[item.report.action] ?? actionBadgeClassNames.wait
+          : actionBadgeClassNames.wait;
+        const score = item.report?.score_breakdown.total ?? null;
+        return (
+          <Button
+            key={item.id}
+            type="button"
+            variant={activeAnalysisId === item.id ? "secondary" : "ghost"}
+            className="h-auto w-full justify-start py-2.5"
+            onClick={() => onSelect({ id: item.id, market: item.market, symbol: item.symbol })}
+          >
+            <div className="flex w-full items-start justify-between gap-2 text-left">
+              <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                <span className="w-full truncate text-sm font-medium leading-tight">{item.name}</span>
+                <span className="text-muted-foreground font-mono text-xs tabular-nums">
+                  {formatAnalyzeBoardSymbol(item.market, item.symbol)}
+                </span>
+                <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                  <Badge variant="outline" className={actionTone}>
+                    {action}
+                  </Badge>
+                  {score !== null ? (
+                    <span className="text-muted-foreground text-xs tabular-nums">得分 {score}</span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </Button>
+        );
+      })}
+    </>
+  );
+}
+
+const parseSearchInput = parseAnalyzeSearchInput;
+
+function parseStockCodeParam(raw: string) {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const prefixed = trimmed.match(/^(CN|HK|US)\.(.+)$/i);
+  if (prefixed) {
+    return {
+      market: prefixed[1].toUpperCase() as AnalysisInput["market"],
+      symbol: prefixed[2].trim(),
+    };
+  }
+  return { market: null, symbol: trimmed };
+}
+
+const fuzzySearchScore = fuzzyAnalyzeSymbolScore;
+
+function renderHighlightedText(text: string, query: string) {
+  const q = query.trim();
+  if (!q) return text;
+  const lowerText = text.toLowerCase();
+  const lowerQuery = q.toLowerCase();
+  const index = lowerText.indexOf(lowerQuery);
+  if (index === -1) return text;
+  const end = index + q.length;
+  return (
+    <>
+      {text.slice(0, index)}
+      <span className="bg-muted text-foreground rounded-sm">{text.slice(index, end)}</span>
+      {text.slice(end)}
+    </>
+  );
+}
+
+function hashCode(input: string) {
+  let h = 0;
+  for (let i = 0; i < input.length; i++) h = (h * 31 + input.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function buildBaseQuote(market: AnalysisInput["market"], symbol: string): BasicQuote {
+  const key = `${market}.${symbol}`;
+  const seed = hashCode(key);
+  const anchor = market === "US" ? 120 : market === "HK" ? 260 : 85;
+  const price = Number((anchor + (seed % 3000) / 37).toFixed(2));
+  const drift = ((seed % 900) - 450) / 10000;
+  const changePct = Number((drift * 100).toFixed(2));
+  const change = Number((price * drift).toFixed(2));
+  const open = Number((price - change * 0.6).toFixed(2));
+  const high = Number((Math.max(price, open) * 1.008).toFixed(2));
+  const low = Number((Math.min(price, open) * 0.992).toFixed(2));
+  const volume = 8_000_000 + (seed % 40_000_000);
+  const turnover = Number((volume * price).toFixed(0));
+  return {
+    price,
+    change,
+    changePct,
+    open,
+    high,
+    low,
+    volume,
+    turnover,
+    updatedAt: Date.now(),
+  };
+}
+
+function tickQuote(prev: BasicQuote): BasicQuote {
+  const jitter = (Math.random() - 0.5) * 0.004;
+  const price = Number((prev.price * (1 + jitter)).toFixed(2));
+  const change = Number((prev.change + prev.price * jitter * 0.4).toFixed(2));
+  const changePct = Number(((change / (prev.price - change || 1)) * 100).toFixed(2));
+  const high = Number(Math.max(prev.high, price).toFixed(2));
+  const low = Number(Math.min(prev.low, price).toFixed(2));
+  const volume = prev.volume + Math.floor(60_000 + Math.random() * 140_000);
+  const turnover = Number((prev.turnover + price * 100_000).toFixed(0));
+  return {
+    ...prev,
+    price,
+    change,
+    changePct,
+    high,
+    low,
+    volume,
+    turnover,
+    updatedAt: Date.now(),
+  };
+}
+
+function formatAmount(value: number) {
+  if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(2)} 亿`;
+  if (value >= 10_000) return `${(value / 10_000).toFixed(2)} 万`;
+  return value.toLocaleString("zh-CN");
+}
+
+function extractNumbers(text: string) {
+  const matches = text.match(/-?\d+(?:\.\d+)?/g);
+  if (!matches) return [];
+  return matches.map((item) => Number(item)).filter((n) => Number.isFinite(n));
+}
+
+function getTechnicalSignal(score: number) {
+  if (score >= 48) return "强势延续";
+  if (score >= 38) return "偏强震荡";
+  if (score >= 28) return "中性拉锯";
+  if (score >= 18) return "弱势回落";
+  return "空头主导";
+}
+
+function getSentimentLabel(index: number) {
+  if (index >= 75) return "贪婪";
+  if (index >= 55) return "乐观";
+  if (index >= 45) return "中性";
+  if (index >= 25) return "谨慎";
+  return "恐惧";
+}
+
+function getCurrencyLabel(market: AnalysisInput["market"]) {
+  if (market === "HK") return "HK$";
+  if (market === "US") return "US$";
+  return "CNY";
+}
+
+function formatPrice(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return "--";
+  return value.toFixed(2);
+}
+
+function formatPriceRange(low: number | null, high: number | null) {
+  if (low === null || high === null || !Number.isFinite(low) || !Number.isFinite(high)) return "--";
+  const min = Math.min(low, high);
+  const max = Math.max(low, high);
+  return `${min.toFixed(2)} - ${max.toFixed(2)}`;
+}
+
+function buildBasicFacts(market: AnalysisInput["market"], symbol: string, quote: BasicQuote | null): FactItem[] {
+  if (market === "HK" && symbol === "00700") {
+    return [
+      { label: "昨收", value: "499.0" },
+      { label: "今开", value: "506.5" },
+      { label: "最高 / 最低", value: "516.0 / 504.0" },
+      { label: "成交量", value: "2036.42万股" },
+      { label: "成交额", value: "104.07亿" },
+      { label: "换手率", value: "0.22%" },
+      { label: "振幅", value: "2.40%" },
+      { label: "52周区间", value: "440.2 ~ 683.0" },
+      { label: "市盈率(TTM)", value: "18.89" },
+      { label: "市净率", value: "3.59" },
+      { label: "每股收益", value: "27.43" },
+      { label: "每股净资产", value: "144.29" },
+      { label: "总股本", value: "91.26亿" },
+      { label: "总市值", value: "4.73万亿" },
+    ];
+  }
+
+  const seed = hashCode(`${market}.${symbol}`);
+  const fallbackPe = (14 + (seed % 900) / 100).toFixed(2);
+  const fallbackPb = (1.2 + (seed % 260) / 100).toFixed(2);
+  const eps = (1.6 + (seed % 1200) / 100).toFixed(2);
+  const bps = (8 + (seed % 4000) / 100).toFixed(2);
+  const turnover = (0.08 + (seed % 150) / 100).toFixed(2);
+  const amp = (1.2 + (seed % 260) / 100).toFixed(2);
+  const wkLow = quote ? (quote.price * 0.78).toFixed(2) : (80 + (seed % 200)).toFixed(2);
+  const wkHigh = quote ? (quote.price * 1.22).toFixed(2) : (130 + (seed % 250)).toFixed(2);
+
+  return [
+    { label: "昨收", value: quote ? (quote.price - quote.change).toFixed(2) : "--" },
+    { label: "今开", value: quote ? quote.open.toFixed(2) : "--" },
+    { label: "最高 / 最低", value: quote ? `${quote.high.toFixed(2)} / ${quote.low.toFixed(2)}` : "--" },
+    { label: "成交量", value: quote ? formatAmount(quote.volume) : "--" },
+    { label: "成交额", value: quote ? formatAmount(quote.turnover) : "--" },
+    { label: "换手率", value: `${turnover}%` },
+    { label: "振幅", value: `${amp}%` },
+    { label: "52周区间", value: `${wkLow} ~ ${wkHigh}` },
+    { label: "市盈率(TTM)", value: fallbackPe },
+    { label: "市净率", value: fallbackPb },
+    { label: "每股收益", value: eps },
+    { label: "每股净资产", value: bps },
+  ];
+}
+
+function buildSentimentRadarData(index: number) {
+  const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
+  return [
+    { metric: "风险偏好", score: clamp(index + 6) },
+    { metric: "趋势乐观", score: clamp(index + 2) },
+    { metric: "波动承受", score: clamp(index - 4) },
+    { metric: "流动性信心", score: clamp(index + 3) },
+    { metric: "估值容忍", score: clamp(index - 1) },
+  ];
+}
+
+function buildMarkdownFromReport(r: TimingReport) {
+  const actionMap: Record<string, string> = {
+    wait: "观望",
+    trial: "试仓",
+    add: "加仓",
+    reduce: "减仓",
+    exit: "离场",
+  };
+  return [
+    `# 择时报告 ${r.market}.${r.symbol}`,
+    ``,
+    `## 结论`,
+    `- 五态：**${actionMap[r.action] ?? r.action}**`,
+    `- 置信度：${r.confidence}`,
+    `- 风险等级：${r.risk_level}`,
+    `- 闸门降级：${r.gate_downgraded ? "是" : "否"}${r.gate_reason ? ` — ${r.gate_reason}` : ""}`,
+    ``,
+    `## 评分分解（60/25/15）`,
+    `- 技术：${r.score_breakdown.technical}`,
+    `- 结构与风险：${r.score_breakdown.structure_risk}`,
+    `- 事件折扣：${r.score_breakdown.event_discount}`,
+    `- 综合：${r.score_breakdown.total}`,
+    ``,
+    `## 研究计划`,
+    `- 关注区间：${r.plan.focus_range}`,
+    `- 风险位：${r.plan.risk_level_price}`,
+    `- 观察目标位：${r.plan.target_price}`,
+    `- 风险敞口：${r.plan.risk_exposure_pct}`,
+    `- 失效条件：${r.plan.invalidation}`,
+    `- 有效期：${r.plan.valid_until}`,
+    ``,
+    `## 依据`,
+    r.evidence_positive.map((x) => `- ${x}`).join("\n"),
+    ``,
+    `### 负向与冲突`,
+    ...r.evidence_negative.map((x) => `- ${x}`),
+    ...(r.evidence_conflicts ?? []).map((x) => `- 冲突：${x}`),
+    ``,
+    `## 提醒`,
+    ...r.reminders.map((x) => `- ${x}`),
+    ``,
+    `_data_version: ${r.data_version}_`,
+  ].join("\n");
+}
+
+function escapeHtml(input: string) {
+  return input
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function buildHtmlFromReport(r: TimingReport) {
+  const title = `择时报告 ${r.market}.${r.symbol}`;
+  const items = (xs: string[]) => xs.map((x) => `<li>${escapeHtml(x)}</li>`).join("");
+  const conflicts = (r.evidence_conflicts ?? []).map((x) => `冲突：${x}`);
+
+  return `<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(title)}</title>
+    <style>
+      body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji";line-height:1.6;color:#0f172a;margin:0}
+      main{max-width:960px;margin:0 auto;padding:32px 20px}
+      h1{font-size:20px;margin:0 0 16px}
+      h2{font-size:16px;margin:22px 0 10px}
+      h3{font-size:14px;margin:14px 0 8px}
+      .meta{color:#64748b;font-size:12px;margin-top:6px}
+      .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+      .card{border:1px solid #e2e8f0;border-radius:12px;padding:12px}
+      ul{margin:8px 0 0;padding-left:18px}
+      code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>${escapeHtml(title)}</h1>
+      <div class="meta">data_version: ${escapeHtml(r.data_version)}</div>
+
+      <h2>结论</h2>
+      <div class="grid">
+        <div class="card"><div class="meta">建议操作</div><div>${escapeHtml(actionLabels[r.action] ?? r.action)}</div></div>
+        <div class="card"><div class="meta">综合得分</div><div>${escapeHtml(String(r.score_breakdown.total))}</div></div>
+        <div class="card"><div class="meta">置信度</div><div>${escapeHtml(String(r.confidence))}</div></div>
+        <div class="card"><div class="meta">风险等级</div><div>${escapeHtml(String(r.risk_level))}</div></div>
+      </div>
+
+      <h2>评分分解（60/25/15）</h2>
+      <ul>
+        <li>技术：${escapeHtml(String(r.score_breakdown.technical))}</li>
+        <li>结构与风险：${escapeHtml(String(r.score_breakdown.structure_risk))}</li>
+        <li>事件折扣：${escapeHtml(String(r.score_breakdown.event_discount))}</li>
+      </ul>
+
+      <h2>研究计划</h2>
+      <ul>
+        <li>关注区间：${escapeHtml(r.plan.focus_range)}</li>
+        <li>风险位：${escapeHtml(r.plan.risk_level_price)}</li>
+        <li>观察目标位：${escapeHtml(r.plan.target_price)}</li>
+        <li>风险敞口：${escapeHtml(r.plan.risk_exposure_pct)}</li>
+        <li>失效条件：${escapeHtml(r.plan.invalidation)}</li>
+        <li>有效期：${escapeHtml(r.plan.valid_until)}</li>
+      </ul>
+
+      <h2>依据</h2>
+      <h3>正向</h3>
+      <ul>${items(r.evidence_positive)}</ul>
+      <h3>负向与冲突</h3>
+      <ul>${items([...r.evidence_negative, ...conflicts])}</ul>
+
+      <h2>提醒</h2>
+      <ul>${items(r.reminders)}</ul>
+    </main>
+  </body>
+</html>`;
+}
+
+function AnalyzePageContent() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const archives = useArchiveStore((s) => s.archives);
+  const archiveHydrated = useStoreHydrated(useArchiveStore);
+  const pendingHandoff = useAnalysisStore((s) => s.pendingHandoff);
+  const setPendingHandoff = useAnalysisStore((s) => s.setPendingHandoff);
+  const report = useAnalysisStore((s) => s.report);
+  const loading = useAnalysisStore((s) => s.loading);
+  const generateReport = useAnalysisStore((s) => s.generateReport);
+  const buildMarkdown = useAnalysisStore((s) => s.buildMarkdown);
+  const currentInput = useAnalysisStore((s) => s.currentInput);
+  const error = useAnalysisStore((s) => s.error);
+
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [market, setMarket] = useState<AnalysisInput["market"]>("CN");
+  const [riskTier, setRiskTier] = useState<AnalysisInput["risk_tier"]>("balanced");
+  const [holdingHorizon, setHoldingHorizon] = useState<AnalysisInput["holding_horizon"]>("m1_to_m3");
+  const [quotaOpen, setQuotaOpen] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [linkedPreference, setLinkedPreference] = useState<PreferenceSnapshot | null>(null);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [activeAnalysisId, setActiveAnalysisId] = useState<string | null>(null);
+  const [localHistoryLoaded, setLocalHistoryLoaded] = useState(false);
+  const [localHistory, setLocalHistory] = useState<TimingReport[]>([]);
+  const [liveQuote, setLiveQuote] = useState<BasicQuote | null>(null);
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
+  const [actionReasonOpen, setActionReasonOpen] = useState(false);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const searchBoxRef = useRef<HTMLDivElement | null>(null);
+  const analyzeReportScrollRef = useRef<HTMLDivElement | null>(null);
+  const stockCodeParam = searchParams.get("stockCode");
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LOCAL_ANALYSIS_HISTORY_KEY);
+      if (!raw) {
+        setLocalHistoryLoaded(true);
+        return;
+      }
+      const parsed = JSON.parse(raw) as unknown[];
+      const valid = parsed
+        .map((item) => {
+          const result = timingReportSchema.safeParse(item);
+          return result.success ? result.data : null;
+        })
+        .filter((item): item is TimingReport => item !== null)
+        .slice(0, 100);
+      setLocalHistory(valid);
+    } catch {
+      setLocalHistory([]);
+    } finally {
+      setLocalHistoryLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!localHistoryLoaded || !report) return;
+    setLocalHistory((prev) => {
+      const next = [report, ...prev.filter((x) => x.id !== report.id)].slice(0, 100);
+      localStorage.setItem(LOCAL_ANALYSIS_HISTORY_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, [localHistoryLoaded, report]);
+
+  const recentKeys = useMemo(() => {
+    const keys: string[] = [];
+    if (currentInput?.symbol) keys.push(`${currentInput.market}.${currentInput.symbol}`);
+    if (report?.symbol) keys.push(`${report.market}.${report.symbol}`);
+    for (const a of archives) {
+      const k = `${a.market}.${a.symbol}`;
+      if (!keys.includes(k)) keys.push(k);
+      if (keys.length >= 16) break;
+    }
+    return keys;
+  }, [archives, currentInput, report]);
+
+  const searchItems = useMemo(() => {
+    const byKey = new Map<string, SearchItem>();
+    for (const m of ANALYZE_SYMBOL_MOCK_UNIVERSE) byKey.set(m.key, m);
+    if (archiveHydrated) {
+      for (const k of recentKeys) {
+        if (byKey.has(k)) continue;
+        const [mk, sym] = k.split(".") as [AnalysisInput["market"], string];
+        if (mk && sym) byKey.set(k, { key: k, market: mk, symbol: sym, name: "最近分析" });
+      }
+    }
+    const list = Array.from(byKey.values());
+    list.sort((a, b) => {
+      const ia = recentKeys.indexOf(a.key);
+      const ib = recentKeys.indexOf(b.key);
+      if (ia === -1 && ib === -1) return a.key.localeCompare(b.key);
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+    return list;
+  }, [archiveHydrated, recentKeys]);
+
+  const filteredSearchItems = useMemo(() => {
+    const query = searchKeyword.trim().toLowerCase();
+    if (!query) {
+      return searchItems.slice(0, 10);
+    }
+    return searchItems
+      .map((item, index) => ({
+        item,
+        recentRank: index,
+        score: fuzzySearchScore(item, query),
+      }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.recentRank - b.recentRank;
+      })
+      .slice(0, 12)
+      .map((entry) => entry.item);
+  }, [searchItems, searchKeyword]);
+
+  const searchItemNameByKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of searchItems) {
+      map.set(item.key, item.name);
+    }
+    return map;
+  }, [searchItems]);
+
+  const analysisEntries = useMemo(() => {
+    const list: TimingReport[] = [];
+    if (report) list.push(report);
+    for (const item of localHistory) {
+      if (!list.some((x) => x.id === item.id)) list.push(item);
+    }
+    for (const a of archives) {
+      if (!list.some((x) => x.id === a.id)) list.push(a);
+    }
+    return list;
+  }, [archives, localHistory, report]);
+
+  const analysisListItems = useMemo(() => {
+    const list: AnalysisListItem[] = analysisEntries.map((item) => ({
+      id: item.id,
+      market: item.market,
+      symbol: item.symbol,
+      status: "done",
+    }));
+    if (loading) {
+      const parsed = parseSearchInput(searchKeyword, market);
+      if (parsed?.symbol) {
+        const key = `${parsed.market}.${parsed.symbol}`;
+        const exists = list.some((x) => `${x.market}.${x.symbol}` === key);
+        if (!exists) {
+          list.unshift({
+            id: `running-${key}`,
+            market: parsed.market,
+            symbol: parsed.symbol,
+            status: "running",
+          });
+        }
+      }
+    }
+    return list;
+  }, [analysisEntries, loading, market, searchKeyword]);
+
+  const analysisListDisplay = useMemo(() => {
+    const byKey = new Map<string, TimingReport>();
+    for (const entry of analysisEntries) {
+      const key = `${entry.market}.${entry.symbol}`;
+      const existing = byKey.get(key);
+      if (!existing || entry.created_at > existing.created_at) byKey.set(key, entry);
+    }
+    const display = analysisListItems.map((item) => {
+      const key = `${item.market}.${item.symbol}`;
+      const report = byKey.get(key) ?? null;
+      const name = searchItemNameByKey.get(key) ?? "最近分析";
+      return { ...item, key, report, name };
+    });
+    const running = display.filter((x) => x.status === "running");
+    const done = display.filter((x) => x.status === "done");
+    done.sort((a, b) => (b.report?.created_at ?? 0) - (a.report?.created_at ?? 0));
+    return { running, done };
+  }, [analysisEntries, analysisListItems, searchItemNameByKey]);
+
+  const stockCodeKey = useMemo(() => {
+    if (!stockCodeParam) return null;
+    const parsed = parseStockCodeParam(stockCodeParam);
+    if (!parsed?.symbol) return null;
+    if (parsed.market) return `${parsed.market}.${parsed.symbol}`;
+    const matched = analysisListItems.find(
+      (item) => item.symbol.toLowerCase() === parsed.symbol.toLowerCase(),
+    );
+    return matched ? `${matched.market}.${matched.symbol}` : null;
+  }, [analysisListItems, stockCodeParam]);
+
+  const updateStockCodeParam = useCallback(
+    (code: string) => {
+      const next = new URLSearchParams(searchParams.toString());
+      next.set("stockCode", code);
+      const query = next.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
+
+  const focusReportPanel = useCallback(() => {
+    requestAnimationFrame(() => {
+      analyzeReportScrollRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, []);
+
+  const selectAnalysisFromHistory = useCallback(
+    (item: { id: string; market: AnalysisInput["market"]; symbol: string }) => {
+      setActiveAnalysisId(item.id);
+      setMarket(item.market);
+      updateStockCodeParam(`${item.market}.${item.symbol}`);
+      focusReportPanel();
+    },
+    [focusReportPanel, updateStockCodeParam],
+  );
+
+  useEffect(() => {
+    if (!localHistoryLoaded) return;
+    if (!analysisListItems.length) {
+      setActiveAnalysisId(null);
+      return;
+    }
+    setActiveAnalysisId((prev) => {
+      if (stockCodeKey) {
+        const matched = analysisListItems.find((item) => `${item.market}.${item.symbol}` === stockCodeKey);
+        if (matched) return matched.id;
+      }
+      if (prev && analysisListItems.some((x) => x.id === prev)) return prev;
+      const saved = localStorage.getItem(LOCAL_ANALYSIS_ACTIVE_ID_KEY);
+      if (saved && analysisListItems.some((x) => x.id === saved)) return saved;
+      return analysisListItems[0].id;
+    });
+  }, [analysisListItems, localHistoryLoaded, stockCodeKey]);
+
+  useEffect(() => {
+    if (!localHistoryLoaded) return;
+    if (activeAnalysisId) localStorage.setItem(LOCAL_ANALYSIS_ACTIVE_ID_KEY, activeAnalysisId);
+    else localStorage.removeItem(LOCAL_ANALYSIS_ACTIVE_ID_KEY);
+  }, [activeAnalysisId, localHistoryLoaded]);
+
+  const activeReport = useMemo(
+    () => analysisEntries.find((x) => x.id === activeAnalysisId) ?? report ?? null,
+    [analysisEntries, activeAnalysisId, report],
+  );
+
+  const activeIsLatest = !!(activeReport && report && activeReport.id === report.id);
+  const activeSymbolName = useMemo(() => {
+    if (!activeReport) return "未命名标的";
+    return searchItemNameByKey.get(`${activeReport.market}.${activeReport.symbol}`) ?? "未命名标的";
+  }, [activeReport, searchItemNameByKey]);
+  const activeRealtimeFacts = useMemo(() => {
+    if (!activeReport) return [];
+    const changeTone = liveQuote ? (liveQuote.change > 0 ? "up" : liveQuote.change < 0 ? "down" : "neutral") : "neutral";
+    const baseFacts: FactItem[] = [
+      { label: "最新价", value: liveQuote ? liveQuote.price.toFixed(2) : "--", tone: changeTone },
+      {
+        label: "涨跌幅",
+        value: liveQuote ? `${liveQuote.changePct >= 0 ? "+" : ""}${liveQuote.changePct.toFixed(2)}%` : "--",
+        tone: changeTone,
+      },
+      {
+        label: "涨跌额",
+        value: liveQuote ? `${liveQuote.change >= 0 ? "+" : ""}${liveQuote.change.toFixed(2)}` : "--",
+        tone: changeTone,
+      },
+    ];
+    return [...baseFacts, ...buildBasicFacts(activeReport.market, activeReport.symbol, liveQuote)];
+  }, [activeReport, liveQuote]);
+
+  const strategyLevels = useMemo(() => {
+    if (!activeReport) return null;
+    const focusNums = extractNumbers(activeReport.plan.focus_range);
+    const stopNums = extractNumbers(activeReport.plan.risk_level_price);
+    const targetNums = extractNumbers(activeReport.plan.target_price);
+
+    const idealBuy = focusNums.length ? focusNums[0] : null;
+    const rangeHigh = focusNums.length > 1 ? focusNums[1] : null;
+    const secondaryBuy =
+      idealBuy !== null
+        ? Number(
+            (idealBuy - Math.max(0.05, ((rangeHigh ?? idealBuy) - idealBuy + 0.6) * 0.12)).toFixed(2),
+          )
+        : null;
+    const stopLoss = stopNums.length ? stopNums[0] : null;
+    const takeProfit = targetNums.length ? targetNums[0] : null;
+
+    return { idealBuy, secondaryBuy, stopLoss, takeProfit };
+  }, [activeReport]);
+
+  const targetPriceRows = useMemo<TargetPriceRow[]>(() => {
+    if (!activeReport) return [];
+
+    const focusNums = extractNumbers(activeReport.plan.focus_range);
+    const targetNums = extractNumbers(activeReport.plan.target_price);
+    const stopNums = extractNumbers(activeReport.plan.risk_level_price);
+    const anchor = liveQuote?.price ?? strategyLevels?.idealBuy ?? focusNums[0] ?? null;
+    const shortTarget = strategyLevels?.idealBuy ?? focusNums[0] ?? anchor;
+    const midTarget = strategyLevels?.secondaryBuy ?? (anchor !== null ? anchor * 0.96 : null);
+    const longTarget = targetNums[0] ?? strategyLevels?.takeProfit ?? (anchor !== null ? anchor * 1.08 : null);
+    const longLow = stopNums[0] ?? strategyLevels?.stopLoss ?? (anchor !== null ? anchor * 0.9 : null);
+
+    return [
+      {
+        horizon: "短期（1个月）",
+        range: formatPriceRange(shortTarget, longTarget !== null ? longTarget * 0.96 : null),
+        target: formatPrice(shortTarget),
+        rationale: `优先围绕关注区间（${activeReport.plan.focus_range}）观察支撑确认。`,
+      },
+      {
+        horizon: "中期（3个月）",
+        range: formatPriceRange(midTarget, longTarget),
+        target: formatPrice(midTarget),
+        rationale: `若价格稳定在风险位（${activeReport.plan.risk_level_price}）上方，目标中枢上移。`,
+      },
+      {
+        horizon: "长期（6个月）",
+        range: formatPriceRange(longLow, longTarget !== null ? longTarget * 1.06 : null),
+        target: formatPrice(longTarget),
+        rationale: `以观察目标位（${activeReport.plan.target_price}）为主，失效条件遵循${activeReport.plan.invalidation}。`,
+      },
+    ];
+  }, [activeReport, liveQuote, strategyLevels]);
+
+  const analyzeTocItems = useMemo(() => {
+    if (!activeReport) return [] as { id: string; label: string }[];
+    const items: { id: string; label: string }[] = [{ id: "analyze-executive-summary", label: "摘要" }];
+    if (strategyLevels) items.push({ id: "analyze-strategy", label: "策略点位" });
+    if (targetPriceRows.length) items.push({ id: "analyze-target-prices", label: "目标价" });
+    if (liveQuote) items.push({ id: "analyze-quote", label: "行情" });
+    items.push(
+      { id: "analyze-score-plan", label: "评分与计划" },
+      { id: "analyze-evidence", label: "依据" },
+      { id: "analyze-reflection", label: "反思" },
+    );
+    return items;
+  }, [activeReport, liveQuote, strategyLevels, targetPriceRows.length]);
+
+  const targetPriceCurrency = activeReport ? getCurrencyLabel(activeReport.market) : "HK$";
+
+  useEffect(() => {
+    if (!activeReport) {
+      setLiveQuote(null);
+      return;
+    }
+    const base = buildBaseQuote(activeReport.market, activeReport.symbol);
+    setLiveQuote(base);
+    const timer = window.setInterval(() => {
+      setLiveQuote((prev) => (prev ? tickQuote(prev) : base));
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [activeReport]);
+
+  useEffect(() => {
+    setActionReasonOpen(false);
+    setEvidenceOpen(false);
+  }, [activeReport?.id]);
+
+  useEffect(() => {
+    if (!pendingHandoff) return;
+    const h = pendingHandoff;
+    queueMicrotask(() => {
+      setSearchKeyword(`${h.market}.${h.symbol}`);
+      setMarket(h.market);
+      setRiskTier(h.preference_snapshot.risk_tier);
+      setHoldingHorizon(h.preference_snapshot.holding_horizon);
+      setLinkedPreference(h.preference_snapshot);
+      setPendingHandoff(null);
+      toast.message(analyzeCopy.handoffToast);
+    });
+  }, [pendingHandoff, setPendingHandoff]);
+
+  useEffect(() => {
+    if (searchKeyword.trim() || recentKeys.length === 0) return;
+    const first = recentKeys[0];
+    const [mk, sym] = first.split(".") as [AnalysisInput["market"], string];
+    if (mk && sym) {
+      setSearchKeyword(first);
+      setMarket(mk);
+    }
+  }, [recentKeys, searchKeyword]);
+
+  useEffect(() => {
+    if (!searchFocused) return;
+    setActiveSearchIndex((prev) => {
+      if (!filteredSearchItems.length) return 0;
+      return Math.min(prev, filteredSearchItems.length - 1);
+    });
+  }, [filteredSearchItems.length, searchFocused]);
+
+  useEffect(() => {
+    if (!searchFocused) return;
+    setActiveSearchIndex(0);
+  }, [searchKeyword, searchFocused]);
+
+  const applySearchItem = (item: SearchItem) => {
+    setMarket(item.market);
+    setSearchKeyword(`${item.market}.${item.symbol}`);
+    setSearchFocused(false);
+  };
+
+  const executeAnalysis = async (input: AnalysisInput, displayKeyword: string) => {
+    setMarket(input.market);
+    setSearchKeyword(displayKeyword);
+    updateStockCodeParam(`${input.market}.${input.symbol}`);
+    setRiskTier(input.risk_tier);
+    setHoldingHorizon(input.holding_horizon);
+    setLinkedPreference(input.preference_snapshot ?? null);
+    const ok = await generateReport(input);
+    if (ok) toast.success("报告已更新");
+    else if (useAnalysisStore.getState().error === "quota") setQuotaOpen(true);
+  };
+
+  const downloadMd = () => {
+    if (!activeReport) return;
+    const md = activeIsLatest ? buildMarkdown() : buildMarkdownFromReport(activeReport);
+    if (!md) return;
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `择时报告-${activeReport.market}.${activeReport.symbol}-${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.message(analyzeCopy.exportMdToast);
+  };
+
+  const downloadHtml = () => {
+    if (!activeReport) return;
+    const html = buildHtmlFromReport(activeReport);
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `择时报告-${activeReport.market}.${activeReport.symbol}-${new Date().toISOString().slice(0, 10)}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.message("HTML 报告已导出");
+  };
+
+  const printPdf = () => {
+    window.print();
+  };
+
+  const openWebReport = () => {
+    if (!activeReport) return;
+    const next = new URLSearchParams(searchParams.toString());
+    next.set("stockCode", `${activeReport.market}.${activeReport.symbol}`);
+    const query = next.toString();
+    const href = query ? `${pathname}?${query}` : pathname;
+    window.open(href, "_blank", "noopener,noreferrer");
+  };
+
+  const copyText = async (value: string, label: string) => {
+    const text = value.trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label}已复制`);
+      return;
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "true");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        toast.success(`${label}已复制`);
+      } catch {
+        toast.error("复制失败，请手动复制");
+      } finally {
+        document.body.removeChild(ta);
+      }
+    }
+  };
+
+  const statusLiveMessage = loading
+    ? "报告生成中，请稍候。"
+    : error === "unknown"
+      ? "报告生成失败，请调整参数后重试。"
+      : activeReport
+        ? `报告已更新，当前标的是 ${activeReport.market}.${activeReport.symbol}。`
+        : "请先填写参数并生成报告。";
+
+  return (
+    <AppPageLayout
+      title="股票预测"
+      hideHeader
+      contentClassName="gap-4"
+    >
+      <p className="sr-only" aria-live="polite">
+        {statusLiveMessage}
+      </p>
+
+      <div className="flex flex-col gap-3 print:hidden sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <div
+            ref={searchBoxRef}
+            className="relative min-w-0 w-full sm:max-w-md lg:max-w-lg"
+            onBlur={(event) => {
+              const next = event.relatedTarget;
+              if (next instanceof Node && searchBoxRef.current?.contains(next)) return;
+              setSearchFocused(false);
+            }}
+          >
+            <InputGroup>
+              <InputGroupAddon align="inline-start">
+                <InputGroupText>
+                  <SearchIcon aria-hidden="true" />
+                  <span className="sr-only">搜索股票</span>
+                </InputGroupText>
+              </InputGroupAddon>
+              <InputGroupInput
+                value={searchKeyword}
+                onFocus={() => setSearchFocused(true)}
+                onChange={(event) => {
+                  setSearchKeyword(event.target.value);
+                  if (!searchFocused) setSearchFocused(true);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    if (!searchFocused) setSearchFocused(true);
+                    setActiveSearchIndex((prev) =>
+                      filteredSearchItems.length ? Math.min(prev + 1, filteredSearchItems.length - 1) : 0,
+                    );
+                    return;
+                  }
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    if (!searchFocused) setSearchFocused(true);
+                    setActiveSearchIndex((prev) => (filteredSearchItems.length ? Math.max(prev - 1, 0) : 0));
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    setSearchFocused(false);
+                    return;
+                  }
+                  if (event.key === "Enter") {
+                    if (searchFocused && filteredSearchItems.length > 0) {
+                      event.preventDefault();
+                      const picked = filteredSearchItems[activeSearchIndex] ?? filteredSearchItems[0];
+                      if (picked) {
+                        applySearchItem(picked);
+                        return;
+                      }
+                    }
+                    setConfigOpen(true);
+                  }
+                }}
+                placeholder="代码或简称，例如 茅台、AAPL"
+                autoComplete="off"
+              />
+            </InputGroup>
+            {searchFocused ? (
+              <div className="absolute top-full z-40 mt-1 w-full rounded-lg border bg-popover p-1 shadow-md">
+                {filteredSearchItems.length ? (
+                  filteredSearchItems.map((item, index) => (
+                    <Button
+                      key={item.key}
+                      type="button"
+                      variant={activeSearchIndex === index ? "secondary" : "ghost"}
+                      className="h-auto w-full justify-start py-2"
+                      onMouseEnter={() => setActiveSearchIndex(index)}
+                      onClick={() => applySearchItem(item)}
+                    >
+                      <div className="flex w-full items-start justify-between gap-2 text-left">
+                        <div className="flex min-w-0 flex-col items-start">
+                          <span>
+                            {item.market}.{renderHighlightedText(item.symbol, searchKeyword)}
+                          </span>
+                          <span className="text-muted-foreground text-xs">
+                            {renderHighlightedText(item.name, searchKeyword)}
+                          </span>
+                        </div>
+                        <Badge variant="outline">{marketLabels[item.market]}</Badge>
+                      </div>
+                    </Button>
+                  ))
+                ) : (
+                  <p className="text-muted-foreground px-2 py-1.5 text-sm">无匹配标的</p>
+                )}
+              </div>
+            ) : null}
+          </div>
+          <Button type="button" disabled={loading} onClick={() => setConfigOpen(true)}>
+            {loading ? (
+              <>
+                <Spinner />
+                分析中
+              </>
+            ) : (
+              "分析"
+            )}
+          </Button>
+          <InfoTip label="搜索格式说明">
+            <span className="block">支持代码或简称搜索；使用 CN.600519 可指定市场。</span>
+          </InfoTip>
+        </div>
+        <Button type="button" variant="outline" className="shrink-0" render={<Link href="/app/pick" />}>
+          选股
+        </Button>
+      </div>
+      {linkedPreference ? (
+        <div className="flex flex-wrap items-center gap-2 print:hidden">
+          <Badge variant="secondary">已关联偏好</Badge>
+          <InfoTip label="关联偏好详情">
+            <span className="block">{preferenceSummary(linkedPreference)}</span>
+          </InfoTip>
+          <Button type="button" variant="link" onClick={() => setLinkedPreference(null)}>
+            清除
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <section className="rounded-lg border p-2 print:hidden">
+          {analysisListItems.length ? (
+            <ScrollArea className="max-h-[min(65vh,36rem)]">
+              <div className="flex flex-col gap-2 pr-2">
+                <AnalysisHistoryList
+                  running={analysisListDisplay.running}
+                  done={analysisListDisplay.done}
+                  activeAnalysisId={activeAnalysisId}
+                  onSelect={(item) => selectAnalysisFromHistory(item)}
+                />
+              </div>
+            </ScrollArea>
+          ) : (
+            <p className="text-muted-foreground px-2 py-1.5 text-sm">暂无记录</p>
+          )}
+        </section>
+
+        <div id="analyze-print-root" className="min-w-0 scroll-smooth flex flex-col gap-4 print:gap-3">
+        {loading && !report ? (
+          <PageLoadingState
+            className="print:analyze-hide"
+            title="正在生成择时报告"
+            description="正在计算评分与结论。"
+          />
+        ) : null}
+
+        {error === "unknown" ? (
+          <PageErrorState
+            className="print:analyze-hide"
+            title="报告生成失败"
+            description="请检查代码与市场后点「重新生成」。"
+            actions={
+              <Button type="button" variant="secondary" onClick={() => setConfigOpen(true)} disabled={loading}>
+                重新生成
+              </Button>
+            }
+          />
+        ) : null}
+
+        {activeReport ? (
+          <>
+            <div
+              ref={analyzeReportScrollRef}
+              id="analyze-report-root"
+              className="flex min-w-0 flex-col gap-6 print:break-inside-avoid"
+            >
+              <header className="sticky top-4 z-20 border-b bg-background/95 py-3 backdrop-blur supports-backdrop-filter:bg-background/80 print:static print:border-0">
+                <div className="flex w-full flex-col gap-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="min-w-0 text-xl font-semibold">
+                      {activeSymbolName}({formatAnalyzeBoardSymbol(activeReport.market, activeReport.symbol)})
+                    </p>
+                    <div className="flex shrink-0 items-center gap-2 print:hidden">
+                      <Button type="button" variant="outline" onClick={openWebReport}>
+                        <EyeIcon data-icon="inline-start" />
+                        查看报告
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button type="button" variant="outline" aria-label="导出报告">
+                              <FolderDownIcon data-icon="inline-start" />
+                              导出报告
+                            </Button>
+                          }
+                        />
+                        <DropdownMenuContent align="end" side="bottom" className="min-w-56">
+                          <DropdownMenuGroup>
+                            <DropdownMenuLabel>导出</DropdownMenuLabel>
+                            <DropdownMenuItem onClick={downloadMd}>
+                              <FileTextIcon data-icon="inline-start" />
+                              导出 Markdown
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={printPdf}>
+                              <FileDownIcon data-icon="inline-start" />
+                              导出 PDF
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={downloadHtml}>
+                              <GlobeIcon data-icon="inline-start" />
+                              导出 HTML
+                            </DropdownMenuItem>
+                          </DropdownMenuGroup>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+                  <nav aria-label="报告目录" className="print:hidden">
+                    <div className="flex gap-1 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                      {analyzeTocItems.map((toc) => (
+                        <button
+                          key={toc.id}
+                          type="button"
+                          className="text-muted-foreground hover:text-foreground shrink-0 rounded-md px-2 py-1 text-xs transition-colors hover:bg-muted"
+                          onClick={() => {
+                            document.getElementById(toc.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                          }}
+                        >
+                          {toc.label}
+                        </button>
+                      ))}
+                    </div>
+                  </nav>
+                </div>
+              </header>
+
+              <div className="flex w-full flex-col gap-6">
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <section
+                    id="analyze-executive-summary"
+                    className="scroll-mt-28 col-span-full rounded-md border bg-muted/20 p-3"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" className={actionBadgeClassNames[activeReport.action] ?? actionBadgeClassNames.wait}>
+                        当前建议：{actionLabels[activeReport.action] ?? activeReport.action}
+                      </Badge>
+                      <Badge variant="outline">风险等级：{activeReport.risk_level}</Badge>
+                      <Badge variant="outline">仓位建议：{activeReport.plan.risk_exposure_pct}</Badge>
+                      <Badge variant="outline">失效条件：见执行计划</Badge>
+                      <Badge variant="outline">有效期：{activeReport.plan.valid_until}</Badge>
+                    </div>
+                  </section>
+                  <section className="scroll-mt-28 rounded-md border p-3">
+                    <p className="text-muted-foreground text-xs">结论说明</p>
+                    <Collapsible open={actionReasonOpen} onOpenChange={setActionReasonOpen}>
+                      <p className="text-muted-foreground mt-1 line-clamp-2 text-xs leading-5">
+                        {activeReport.action_reason}
+                      </p>
+                      <CollapsibleTrigger className="text-muted-foreground hover:text-foreground mt-1 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline">
+                        {actionReasonOpen ? "收起说明" : "展开说明"}
+                        <ChevronDownIcon
+                          className={`size-3 transition-transform ${actionReasonOpen ? "rotate-180" : ""}`}
+                        />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="text-muted-foreground mt-1 text-xs leading-5">
+                        {activeReport.action_reason}
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </section>
+                  <section className="scroll-mt-28 rounded-md border p-3">
+                    <p className="text-muted-foreground text-xs">综合得分</p>
+                    <p className="mt-1 text-base font-semibold tabular-nums">{activeReport.score_breakdown.total}</p>
+                    <p className="text-muted-foreground mt-1 text-xs">置信度：{activeReport.confidence}</p>
+                  </section>
+                  <section className="scroll-mt-28 rounded-md border p-3">
+                    <p className="text-muted-foreground text-xs">技术信号</p>
+                    <p className="mt-1 text-base font-semibold">
+                      {getTechnicalSignal(activeReport.score_breakdown.technical)}
+                    </p>
+                    <p className="text-muted-foreground mt-1 text-xs tabular-nums">
+                      技术分：{activeReport.score_breakdown.technical}/60
+                    </p>
+                  </section>
+                </div>
+
+                {strategyLevels ? (
+                  <section id="analyze-strategy" className="scroll-mt-28 flex flex-col gap-3 rounded-md border p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <h2 className="text-sm font-medium">策略点位</h2>
+                      <Badge variant="outline">执行参考</Badge>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="py-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-muted-foreground text-xs">理想买入点</p>
+                          {strategyLevels.idealBuy !== null ? (
+                            <Button
+                              type="button"
+                              size="icon-xs"
+                              variant="ghost"
+                              aria-label="复制理想买入点"
+                              onClick={() => {
+                                if (strategyLevels.idealBuy === null) return;
+                                void copyText(strategyLevels.idealBuy.toFixed(2), "理想买入点");
+                              }}
+                            >
+                              <CopyIcon />
+                            </Button>
+                          ) : null}
+                        </div>
+                        <p className="text-base font-semibold">
+                          {strategyLevels.idealBuy !== null ? `${strategyLevels.idealBuy.toFixed(2)} 元` : "见关注区间"}
+                        </p>
+                        <p className="text-muted-foreground text-xs">回踩支撑区优先布局</p>
+                      </div>
+                      <div className="py-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-muted-foreground text-xs">次优买入点</p>
+                          {strategyLevels.secondaryBuy !== null ? (
+                            <Button
+                              type="button"
+                              size="icon-xs"
+                              variant="ghost"
+                              aria-label="复制次优买入点"
+                              onClick={() => {
+                                if (strategyLevels.secondaryBuy === null) return;
+                                void copyText(strategyLevels.secondaryBuy.toFixed(2), "次优买入点");
+                              }}
+                            >
+                              <CopyIcon />
+                            </Button>
+                          ) : null}
+                        </div>
+                        <p className="text-base font-semibold">
+                          {strategyLevels.secondaryBuy !== null
+                            ? `${strategyLevels.secondaryBuy.toFixed(2)} 元`
+                            : "见关注区间"}
+                        </p>
+                        <p className="text-muted-foreground text-xs">二次回落时分批介入</p>
+                      </div>
+                      <div className="py-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-muted-foreground text-xs">止损位</p>
+                          {strategyLevels.stopLoss !== null ? (
+                            <Button
+                              type="button"
+                              size="icon-xs"
+                              variant="ghost"
+                              aria-label="复制止损位"
+                              onClick={() => {
+                                if (strategyLevels.stopLoss === null) return;
+                                void copyText(strategyLevels.stopLoss.toFixed(2), "止损位");
+                              }}
+                            >
+                              <CopyIcon />
+                            </Button>
+                          ) : null}
+                        </div>
+                        <p className="text-base font-semibold">
+                          {strategyLevels.stopLoss !== null ? `${strategyLevels.stopLoss.toFixed(2)} 元` : "见风险位"}
+                        </p>
+                        <p className="text-muted-foreground text-xs">跌破关键位严格执行</p>
+                      </div>
+                      <div className="py-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-muted-foreground text-xs">目标位</p>
+                          {strategyLevels.takeProfit !== null ? (
+                            <Button
+                              type="button"
+                              size="icon-xs"
+                              variant="ghost"
+                              aria-label="复制目标位"
+                              onClick={() => {
+                                if (strategyLevels.takeProfit === null) return;
+                                void copyText(strategyLevels.takeProfit.toFixed(2), "目标位");
+                              }}
+                            >
+                              <CopyIcon />
+                            </Button>
+                          ) : null}
+                        </div>
+                        <p className="text-base font-semibold">
+                          {strategyLevels.takeProfit !== null
+                            ? `${strategyLevels.takeProfit.toFixed(2)} 元`
+                            : "见观察目标位"}
+                        </p>
+                        <p className="text-muted-foreground text-xs">分批止盈并跟踪抬升</p>
+                      </div>
+                    </div>
+                  </section>
+                ) : null}
+
+                {targetPriceRows.length ? (
+                  <section id="analyze-target-prices" className="scroll-mt-28 flex flex-col gap-3 rounded-md border p-3">
+                    <h2 className="text-sm font-medium">目标价格分析</h2>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>时间范围</TableHead>
+                          <TableHead>目标价格区间（{targetPriceCurrency}）</TableHead>
+                          <TableHead>具体价格目标</TableHead>
+                          <TableHead className="whitespace-normal">逻辑</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {targetPriceRows.map((item) => (
+                          <TableRow key={item.horizon}>
+                            <TableCell>{item.horizon}</TableCell>
+                            <TableCell>{item.range}</TableCell>
+                            <TableCell>{item.target}</TableCell>
+                            <TableCell className="whitespace-normal text-sm">{item.rationale}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </section>
+                ) : null}
+
+                {liveQuote ? (
+                  <div id="analyze-quote" className="scroll-mt-28 grid gap-3 lg:grid-cols-[3fr_2fr]">
+                    <section className="flex flex-col gap-3 rounded-md border p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <h2 className="text-sm font-medium">实时基础行情（模拟）</h2>
+                        <Badge variant="outline">
+                          更新于 {new Date(liveQuote.updatedAt).toLocaleTimeString("zh-CN", { hour12: false })}
+                        </Badge>
+                      </div>
+                      <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2 xl:grid-cols-3">
+                        {activeRealtimeFacts.map((fact) => (
+                          <div key={fact.label} className="flex items-baseline gap-0 py-0.5">
+                            <p className="text-muted-foreground text-xs">{fact.label}：</p>
+                            <p
+                              className={`text-sm font-medium ${
+                                fact.tone === "up"
+                                  ? "text-red-600"
+                                  : fact.tone === "down"
+                                    ? "text-emerald-600"
+                                    : "text-foreground"
+                              }`}
+                            >
+                              {fact.value}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section className="rounded-md border p-3">
+                      <p className="text-muted-foreground text-xs">市场情绪</p>
+                      <p className="text-sm">恐惧贪婪指数</p>
+                      <div className="mt-2 flex items-end justify-between">
+                        <p className="text-2xl font-semibold">51</p>
+                        <Badge variant="secondary">{getSentimentLabel(51)}</Badge>
+                      </div>
+                      <ChartContainer config={sentimentChartConfig} className="mt-2 h-[160px] w-full">
+                        <RadarChart data={buildSentimentRadarData(51)} accessibilityLayer>
+                          <PolarGrid />
+                          <PolarAngleAxis dataKey="metric" />
+                          <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
+                          <ChartTooltip content={<ChartTooltipContent />} />
+                          <Radar dataKey="score" fill="var(--color-score)" fillOpacity={0.25} stroke="var(--color-score)" />
+                        </RadarChart>
+                      </ChartContainer>
+                    </section>
+                  </div>
+                ) : null}
+
+                <div id="analyze-score-plan" className="scroll-mt-28 grid gap-3 xl:grid-cols-2">
+                  <section className="flex flex-col gap-3 rounded-md border p-3">
+                    <div className="flex flex-row items-center gap-2">
+                      <h2 className="text-sm font-medium">评分拆解</h2>
+                      <InfoTip label="评分权重">
+                        <span className="block">技术 60%，结构与风险 25%，事件折扣 15%。</span>
+                      </InfoTip>
+                    </div>
+                    <div className="flex flex-col gap-1 text-sm">
+                      <span>技术 {activeReport.score_breakdown.technical}</span>
+                      <Progress value={(activeReport.score_breakdown.technical / 60) * 100} />
+                    </div>
+                    <div className="flex flex-col gap-1 text-sm">
+                      <span>结构与风险 {activeReport.score_breakdown.structure_risk}</span>
+                      <Progress value={(activeReport.score_breakdown.structure_risk / 25) * 100} />
+                    </div>
+                    <div className="flex flex-col gap-1 text-sm">
+                      <span>事件折扣 {activeReport.score_breakdown.event_discount}</span>
+                      <Progress value={(activeReport.score_breakdown.event_discount / 15) * 100} />
+                    </div>
+                    <p className="text-sm font-medium">综合 {activeReport.score_breakdown.total}</p>
+                  </section>
+
+                  <section className="flex flex-col gap-2 rounded-md border p-3">
+                    <h2 className="text-sm font-medium">执行计划</h2>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="rounded-md border px-3 py-2">
+                        <p className="text-muted-foreground text-xs">关注区间</p>
+                        <p className="text-sm">{activeReport.plan.focus_range}</p>
+                      </div>
+                      <div className="rounded-md border px-3 py-2">
+                        <p className="text-muted-foreground text-xs">风险位</p>
+                        <p className="text-sm">{activeReport.plan.risk_level_price}</p>
+                      </div>
+                      <div className="rounded-md border px-3 py-2">
+                        <p className="text-muted-foreground text-xs">观察目标位</p>
+                        <p className="text-sm">{activeReport.plan.target_price}</p>
+                      </div>
+                      <div className="rounded-md border px-3 py-2">
+                        <p className="text-muted-foreground text-xs">风险敞口</p>
+                        <p className="text-sm">{activeReport.plan.risk_exposure_pct}</p>
+                      </div>
+                      <div className="rounded-md border px-3 py-2">
+                        <p className="text-muted-foreground text-xs">失效条件</p>
+                        <p className="text-sm">{activeReport.plan.invalidation}</p>
+                      </div>
+                      <div className="rounded-md border px-3 py-2">
+                        <p className="text-muted-foreground text-xs">有效期</p>
+                        <p className="text-sm">{activeReport.plan.valid_until}</p>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+
+                <section id="analyze-evidence" className="scroll-mt-28 flex flex-col gap-3 rounded-md border p-3 text-sm">
+                  <div className="flex flex-row items-center gap-2">
+                    <h2 className="text-sm font-medium">依据与提醒</h2>
+                    <InfoTip label="提醒字段说明">
+                      <span className="block">{analyzeCopy.remindersCardDesc}</span>
+                    </InfoTip>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <Badge variant="outline">正向 {activeReport.evidence_positive.length}</Badge>
+                    <Badge variant="outline">负向 {activeReport.evidence_negative.length}</Badge>
+                    <Badge variant="outline">冲突 {activeReport.evidence_conflicts?.length ?? 0}</Badge>
+                    <Badge variant="outline">提醒 {activeReport.reminders.length}</Badge>
+                  </div>
+                  <Collapsible open={evidenceOpen} onOpenChange={setEvidenceOpen}>
+                    <div className="text-muted-foreground text-xs">
+                      {!evidenceOpen ? "默认收起详细证据，展开后可查看完整依据与执行提醒。" : "已展开完整依据与提醒。"}
+                    </div>
+                    <CollapsibleTrigger className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline">
+                      {evidenceOpen ? "收起详细依据" : "展开详细依据"}
+                      <ChevronDownIcon className={`size-3 transition-transform ${evidenceOpen ? "rotate-180" : ""}`} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-2 space-y-3">
+                      <div className="grid gap-3 xl:grid-cols-3">
+                        <div className="flex flex-col gap-1">
+                          <p className="font-medium">正向</p>
+                          <ul className="text-muted-foreground list-inside list-disc">
+                            {activeReport.evidence_positive.map((x) => (
+                              <li key={x}>{x}</li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <p className="font-medium">负向</p>
+                          <ul className="text-muted-foreground list-inside list-disc">
+                            {activeReport.evidence_negative.map((x) => (
+                              <li key={x}>{x}</li>
+                            ))}
+                          </ul>
+                        </div>
+                        {activeReport.evidence_conflicts?.length ? (
+                          <div className="flex flex-col gap-1">
+                            <p className="font-medium">冲突</p>
+                            <ul className="text-muted-foreground list-inside list-disc">
+                              {activeReport.evidence_conflicts.map((x) => (
+                                <li key={x}>{x}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-1">
+                            <p className="font-medium">冲突</p>
+                            <p className="text-muted-foreground">当前无显著冲突信号。</p>
+                          </div>
+                        )}
+                      </div>
+                      <Separator />
+                      <div className="flex flex-col gap-1">
+                        <p className="font-medium">执行提醒</p>
+                        <ul className="text-muted-foreground list-inside list-disc">
+                          {activeReport.reminders.map((x) => (
+                            <li key={x}>{x}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                </section>
+
+                <section id="analyze-reflection" className="scroll-mt-28 flex flex-col gap-3 rounded-md border p-3">
+                  <h2 className="text-sm font-medium">历史反思与改进</h2>
+                  <div className="text-muted-foreground flex flex-col gap-3 text-sm leading-6">
+                    <p>
+                      过去在类似行情中，市场容易对短期价格波动反应过度，忽略了中期结构性风险。当前这次评估中，优先关注
+                      <span className="font-semibold text-foreground"> 结构性风险、盈利质量、竞争格局 </span>
+                      等核心因素，而不是只依赖单一技术指标。
+                    </p>
+                    <p>
+                      本次不会因为多空信号并存而简单给出“持有”判断，而是围绕
+                      <span className="font-semibold text-foreground"> 最有解释力的负向线索 </span>
+                      设定执行边界，结合风险位与失效条件动态调整仓位决策。
+                    </p>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </>
+        ) : null}
+        </div>
+      </div>
+
+      <AnalyzeRunConfigDialog
+        open={configOpen}
+        onOpenChange={setConfigOpen}
+        loading={loading}
+        symbolSearchItems={searchItems}
+        searchKeyword={searchKeyword}
+        market={market}
+        riskTier={riskTier}
+        holdingHorizon={holdingHorizon}
+        linkedPreference={linkedPreference}
+        onConfirm={async ({ input, displayKeyword }) => {
+          setConfigOpen(false);
+          await executeAnalysis(input, displayKeyword);
+        }}
+      />
+
+      <AlertDialog open={quotaOpen} onOpenChange={setQuotaOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>今日额度已用完</AlertDialogTitle>
+            <AlertDialogDescription>{analyzeCopy.quotaDialogBody}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
+            <AlertDialogCancel>关闭</AlertDialogCancel>
+            <Button type="button" onClick={() => router.push("/login")}>
+              去登录
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => router.push("/subscription")}>
+              {subscriptionTierPublicCopy.ctaViewPlansShort}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </AppPageLayout>
+  );
+}
+
+export default function AnalyzePage() {
+  return (
+    <Suspense fallback={<PageLoadingState title="页面加载中" description="正在恢复查询参数与分析上下文。" />}>
+      <AnalyzePageContent />
+    </Suspense>
+  );
+}
