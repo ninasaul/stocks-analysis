@@ -175,6 +175,12 @@ const START_ACTIONS: SuggestedAction[] = [
   { action_id: "intent_pick", label: "帮我选股", kind: "primary" },
 ];
 
+const conversationModeLabels: Record<"consult" | "pick" | "unset", string> = {
+  consult: "随便问问",
+  pick: "帮我选股",
+  unset: "选择模式",
+};
+
 function createConversationItem(args: {
   id: string;
   title: string;
@@ -1266,7 +1272,7 @@ export default function PickPage() {
                         aria-label="对话模式"
                         disabled={sendPending || streamingOptionsPending}
                       >
-                        <SelectValue placeholder="对话模式" />
+                        <SelectValue>{conversationModeLabels[conversationMode ?? "unset"]}</SelectValue>
                       </SelectTrigger>
                       <SelectContent side="top" align="start">
                         <SelectGroup>
