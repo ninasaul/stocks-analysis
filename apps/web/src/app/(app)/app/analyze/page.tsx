@@ -2,15 +2,16 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  ChevronDownIcon,
   CircleHelpIcon,
+  CopyIcon,
   EyeIcon,
   FolderDownIcon,
   FileDownIcon,
   FileTextIcon,
   GlobeIcon,
-  MoreHorizontalIcon,
   SearchIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -18,11 +19,12 @@ import type { AnalysisInput, PreferenceSnapshot, TimingReport } from "@/lib/cont
 import { timingReportSchema } from "@/lib/contracts/domain";
 import {
   ANALYZE_SYMBOL_MOCK_UNIVERSE,
+  formatAnalyzeBoardSymbol,
   fuzzyAnalyzeSymbolScore,
   parseAnalyzeSearchInput,
   type AnalyzeSymbolSearchItem,
 } from "@/lib/analyze-symbol-search";
-import { analyzeCopy } from "@/lib/copy";
+import { analyzeCopy, subscriptionTierPublicCopy } from "@/lib/copy";
 import { useAnalysisStore } from "@/stores/use-analysis-store";
 import { useArchiveStore } from "@/stores/use-archive-store";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
@@ -60,6 +62,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Table,
   TableBody,
@@ -181,6 +184,95 @@ function InfoTip({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+type AnalysisHistoryRunningRow = {
+  id: string;
+  market: AnalysisInput["market"];
+  symbol: string;
+  name: string;
+};
+
+type AnalysisHistoryDoneRow = AnalysisHistoryRunningRow & {
+  report: TimingReport | null;
+};
+
+function AnalysisHistoryList({
+  running,
+  done,
+  activeAnalysisId,
+  onSelect,
+}: {
+  running: AnalysisHistoryRunningRow[];
+  done: AnalysisHistoryDoneRow[];
+  activeAnalysisId: string | null;
+  onSelect: (item: { id: string; market: AnalysisInput["market"]; symbol: string }) => void;
+}) {
+  return (
+    <>
+      {running.length ? (
+        <>
+          {running.map((item) => (
+            <Button
+              key={item.id}
+              type="button"
+              variant={activeAnalysisId === item.id ? "secondary" : "ghost"}
+              className="h-auto w-full justify-start py-2.5"
+              onClick={() => onSelect({ id: item.id, market: item.market, symbol: item.symbol })}
+            >
+              <div className="flex w-full items-start justify-between gap-2 text-left">
+                <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                  <span className="w-full truncate text-sm font-medium leading-tight">{item.name}</span>
+                  <span className="text-muted-foreground font-mono text-xs tabular-nums">
+                    {formatAnalyzeBoardSymbol(item.market, item.symbol)}
+                  </span>
+                  <span className="text-muted-foreground text-xs">正在生成报告，请稍候</span>
+                </div>
+                <Badge variant="secondary" className="shrink-0">
+                  分析中
+                </Badge>
+              </div>
+            </Button>
+          ))}
+          <Separator className="my-2" />
+        </>
+      ) : null}
+
+      {done.map((item) => {
+        const action = item.report ? actionLabels[item.report.action] ?? item.report.action : "已完成";
+        const actionTone = item.report
+          ? actionBadgeClassNames[item.report.action] ?? actionBadgeClassNames.wait
+          : actionBadgeClassNames.wait;
+        const score = item.report?.score_breakdown.total ?? null;
+        return (
+          <Button
+            key={item.id}
+            type="button"
+            variant={activeAnalysisId === item.id ? "secondary" : "ghost"}
+            className="h-auto w-full justify-start py-2.5"
+            onClick={() => onSelect({ id: item.id, market: item.market, symbol: item.symbol })}
+          >
+            <div className="flex w-full items-start justify-between gap-2 text-left">
+              <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                <span className="w-full truncate text-sm font-medium leading-tight">{item.name}</span>
+                <span className="text-muted-foreground font-mono text-xs tabular-nums">
+                  {formatAnalyzeBoardSymbol(item.market, item.symbol)}
+                </span>
+                <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                  <Badge variant="outline" className={actionTone}>
+                    {action}
+                  </Badge>
+                  {score !== null ? (
+                    <span className="text-muted-foreground text-xs tabular-nums">得分 {score}</span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </Button>
+        );
+      })}
+    </>
+  );
+}
+
 const parseSearchInput = parseAnalyzeSearchInput;
 
 function parseStockCodeParam(raw: string) {
@@ -194,10 +286,6 @@ function parseStockCodeParam(raw: string) {
     };
   }
   return { market: null, symbol: trimmed };
-}
-
-function searchItemLabel(item: SearchItem) {
-  return `${item.market}.${item.symbol} ${item.name}`;
 }
 
 const fuzzySearchScore = fuzzyAnalyzeSymbolScore;
@@ -299,13 +387,6 @@ function getSentimentLabel(index: number) {
   if (index >= 45) return "中性";
   if (index >= 25) return "谨慎";
   return "恐惧";
-}
-
-function getExchangeLabel(market: AnalysisInput["market"], symbol: string) {
-  if (market === "HK") return "港交所";
-  if (market === "US") return "纳斯达克";
-  if (symbol.startsWith("6") || symbol.startsWith("688")) return "上交所";
-  return "深交所";
 }
 
 function getCurrencyLabel(market: AnalysisInput["market"]) {
@@ -532,7 +613,10 @@ function AnalyzePageContent() {
   const [localHistory, setLocalHistory] = useState<TimingReport[]>([]);
   const [liveQuote, setLiveQuote] = useState<BasicQuote | null>(null);
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
+  const [actionReasonOpen, setActionReasonOpen] = useState(false);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
+  const analyzeReportScrollRef = useRef<HTMLDivElement | null>(null);
   const stockCodeParam = searchParams.get("stockCode");
 
   useEffect(() => {
@@ -696,12 +780,31 @@ function AnalyzePageContent() {
     return matched ? `${matched.market}.${matched.symbol}` : null;
   }, [analysisListItems, stockCodeParam]);
 
-  const updateStockCodeParam = (code: string) => {
-    const next = new URLSearchParams(searchParams.toString());
-    next.set("stockCode", code);
-    const query = next.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-  };
+  const updateStockCodeParam = useCallback(
+    (code: string) => {
+      const next = new URLSearchParams(searchParams.toString());
+      next.set("stockCode", code);
+      const query = next.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
+
+  const focusReportPanel = useCallback(() => {
+    requestAnimationFrame(() => {
+      analyzeReportScrollRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, []);
+
+  const selectAnalysisFromHistory = useCallback(
+    (item: { id: string; market: AnalysisInput["market"]; symbol: string }) => {
+      setActiveAnalysisId(item.id);
+      setMarket(item.market);
+      updateStockCodeParam(`${item.market}.${item.symbol}`);
+      focusReportPanel();
+    },
+    [focusReportPanel, updateStockCodeParam],
+  );
 
   useEffect(() => {
     if (!localHistoryLoaded) return;
@@ -810,6 +913,20 @@ function AnalyzePageContent() {
     ];
   }, [activeReport, liveQuote, strategyLevels]);
 
+  const analyzeTocItems = useMemo(() => {
+    if (!activeReport) return [] as { id: string; label: string }[];
+    const items: { id: string; label: string }[] = [{ id: "analyze-executive-summary", label: "摘要" }];
+    if (strategyLevels) items.push({ id: "analyze-strategy", label: "策略点位" });
+    if (targetPriceRows.length) items.push({ id: "analyze-target-prices", label: "目标价" });
+    if (liveQuote) items.push({ id: "analyze-quote", label: "行情" });
+    items.push(
+      { id: "analyze-score-plan", label: "评分与计划" },
+      { id: "analyze-evidence", label: "依据" },
+      { id: "analyze-reflection", label: "反思" },
+    );
+    return items;
+  }, [activeReport, liveQuote, strategyLevels, targetPriceRows.length]);
+
   const targetPriceCurrency = activeReport ? getCurrencyLabel(activeReport.market) : "HK$";
 
   useEffect(() => {
@@ -824,6 +941,11 @@ function AnalyzePageContent() {
     }, 3000);
     return () => window.clearInterval(timer);
   }, [activeReport]);
+
+  useEffect(() => {
+    setActionReasonOpen(false);
+    setEvidenceOpen(false);
+  }, [activeReport?.id]);
 
   useEffect(() => {
     if (!pendingHandoff) return;
@@ -920,6 +1042,32 @@ function AnalyzePageContent() {
     window.open(href, "_blank", "noopener,noreferrer");
   };
 
+  const copyText = async (value: string, label: string) => {
+    const text = value.trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label}已复制`);
+      return;
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "true");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        toast.success(`${label}已复制`);
+      } catch {
+        toast.error("复制失败，请手动复制");
+      } finally {
+        document.body.removeChild(ta);
+      }
+    }
+  };
+
   const statusLiveMessage = loading
     ? "报告生成中，请稍候。"
     : error === "unknown"
@@ -938,11 +1086,11 @@ function AnalyzePageContent() {
         {statusLiveMessage}
       </p>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 print:hidden">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-col gap-3 print:hidden sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <div
             ref={searchBoxRef}
-            className="relative w-80 max-w-full"
+            className="relative min-w-0 w-full sm:max-w-md lg:max-w-lg"
             onBlur={(event) => {
               const next = event.relatedTarget;
               if (next instanceof Node && searchBoxRef.current?.contains(next)) return;
@@ -1043,7 +1191,7 @@ function AnalyzePageContent() {
             <span className="block">支持代码或简称搜索；使用 CN.600519 可指定市场。</span>
           </InfoTip>
         </div>
-        <Button type="button" variant="outline" render={<Link href="/app/pick" />}>
+        <Button type="button" variant="outline" className="shrink-0" render={<Link href="/app/pick" />}>
           选股
         </Button>
       </div>
@@ -1060,81 +1208,16 @@ function AnalyzePageContent() {
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <section className="rounded-lg border p-2 print:hidden lg:sticky lg:top-4 lg:self-start">
+        <section className="rounded-lg border p-2 print:hidden">
           {analysisListItems.length ? (
             <ScrollArea className="max-h-[min(65vh,36rem)]">
               <div className="flex flex-col gap-2 pr-2">
-                {analysisListDisplay.running.length ? (
-                  <>
-                    {analysisListDisplay.running.map((item) => (
-                      <Button
-                        key={item.id}
-                        type="button"
-                        variant={activeAnalysisId === item.id ? "secondary" : "ghost"}
-                        className="h-auto w-full justify-start py-2.5"
-                        onClick={() => {
-                          setActiveAnalysisId(item.id);
-                          setMarket(item.market);
-                          updateStockCodeParam(`${item.market}.${item.symbol}`);
-                        }}
-                      >
-                        <div className="flex w-full items-start justify-between gap-2 text-left">
-                          <div className="flex min-w-0 flex-col items-start">
-                            <div className="flex min-w-0 items-center gap-2">
-                              <span className="truncate">{item.name}</span>
-                              <span className="text-muted-foreground shrink-0 text-xs">
-                                {item.market}:{item.symbol}
-                              </span>
-                            </div>
-                            <span className="text-muted-foreground text-xs">正在生成报告，请稍候</span>
-                          </div>
-                          <Badge variant="secondary">分析中</Badge>
-                        </div>
-                      </Button>
-                    ))}
-                    <Separator className="my-2" />
-                  </>
-                ) : null}
-
-                {analysisListDisplay.done.map((item) => {
-                  const action = item.report ? actionLabels[item.report.action] ?? item.report.action : "已完成";
-                  const actionTone = item.report
-                    ? actionBadgeClassNames[item.report.action] ?? actionBadgeClassNames.wait
-                    : actionBadgeClassNames.wait;
-                  const score = item.report?.score_breakdown.total ?? null;
-                  return (
-                    <Button
-                      key={item.id}
-                      type="button"
-                      variant={activeAnalysisId === item.id ? "secondary" : "ghost"}
-                      className="h-auto w-full justify-start py-2.5"
-                      onClick={() => {
-                        setActiveAnalysisId(item.id);
-                        setMarket(item.market);
-                        updateStockCodeParam(`${item.market}.${item.symbol}`);
-                      }}
-                    >
-                      <div className="flex w-full items-start justify-between gap-2 text-left">
-                        <div className="flex min-w-0 flex-col items-start">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="truncate">{item.name}</span>
-                            <span className="text-muted-foreground shrink-0 text-xs">
-                              {item.market}:{item.symbol}
-                            </span>
-                          </div>
-                          <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                            <Badge variant="outline" className={actionTone}>
-                              {action}
-                            </Badge>
-                            {score !== null ? (
-                              <span className="text-muted-foreground text-xs">得分 {score}</span>
-                            ) : null}
-                          </div>
-                        </div>
-                      </div>
-                    </Button>
-                  );
-                })}
+                <AnalysisHistoryList
+                  running={analysisListDisplay.running}
+                  done={analysisListDisplay.done}
+                  activeAnalysisId={activeAnalysisId}
+                  onSelect={(item) => selectAnalysisFromHistory(item)}
+                />
               </div>
             </ScrollArea>
           ) : (
@@ -1142,7 +1225,7 @@ function AnalyzePageContent() {
           )}
         </section>
 
-        <div id="analyze-print-root" className="min-w-0 flex flex-col gap-4 print:gap-3">
+        <div id="analyze-print-root" className="min-w-0 scroll-smooth flex flex-col gap-4 print:gap-3">
         {loading && !report ? (
           <PageLoadingState
             className="print:analyze-hide"
@@ -1166,15 +1249,18 @@ function AnalyzePageContent() {
 
         {activeReport ? (
           <>
-            <section className="rounded-lg border p-4">
-              <div className="flex flex-col gap-6">
-                <section className="flex flex-col gap-2">
-                  <p className="text-muted-foreground text-xs">股票基本信息</p>
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xl font-semibold">
-                      {activeSymbolName}({activeReport.market}:{activeReport.symbol})
+            <div
+              ref={analyzeReportScrollRef}
+              id="analyze-report-root"
+              className="flex min-w-0 flex-col gap-6 print:break-inside-avoid"
+            >
+              <header className="sticky top-4 z-20 border-b bg-background/95 py-3 backdrop-blur supports-backdrop-filter:bg-background/80 print:static print:border-0">
+                <div className="flex w-full flex-col gap-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="min-w-0 text-xl font-semibold">
+                      {activeSymbolName}({formatAnalyzeBoardSymbol(activeReport.market, activeReport.symbol)})
                     </p>
-                    <div className="flex items-center gap-2 print:hidden">
+                    <div className="flex shrink-0 items-center gap-2 print:hidden">
                       <Button type="button" variant="outline" onClick={openWebReport}>
                         <EyeIcon data-icon="inline-start" />
                         查看报告
@@ -1208,51 +1294,122 @@ function AnalyzePageContent() {
                       </DropdownMenu>
                     </div>
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">交易所：{getExchangeLabel(activeReport.market, activeReport.symbol)}</Badge>
-                    <Badge variant="outline">市场：{marketLabels[activeReport.market]}</Badge>
-                  </div>
-                </section>
+                  <nav aria-label="报告目录" className="print:hidden">
+                    <div className="flex gap-1 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                      {analyzeTocItems.map((toc) => (
+                        <button
+                          key={toc.id}
+                          type="button"
+                          className="text-muted-foreground hover:text-foreground shrink-0 rounded-md px-2 py-1 text-xs transition-colors hover:bg-muted"
+                          onClick={() => {
+                            document.getElementById(toc.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                          }}
+                        >
+                          {toc.label}
+                        </button>
+                      ))}
+                    </div>
+                  </nav>
+                </div>
+              </header>
 
+              <div className="flex w-full flex-col gap-6">
                 <div className="grid gap-2 sm:grid-cols-3">
-                  <section className="rounded-md border p-3">
-                    <p className="text-muted-foreground text-xs">建议操作</p>
-                    <p className="mt-1 text-base font-semibold">{actionLabels[activeReport.action] ?? activeReport.action}</p>
-                    <p className="text-muted-foreground mt-1 text-xs">风险等级：{activeReport.risk_level}</p>
-                    <p className="text-muted-foreground mt-1 text-xs">{activeReport.action_reason}</p>
+                  <section
+                    id="analyze-executive-summary"
+                    className="scroll-mt-28 col-span-full rounded-md border bg-muted/20 p-3"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" className={actionBadgeClassNames[activeReport.action] ?? actionBadgeClassNames.wait}>
+                        当前建议：{actionLabels[activeReport.action] ?? activeReport.action}
+                      </Badge>
+                      <Badge variant="outline">风险等级：{activeReport.risk_level}</Badge>
+                      <Badge variant="outline">仓位建议：{activeReport.plan.risk_exposure_pct}</Badge>
+                      <Badge variant="outline">失效条件：见执行计划</Badge>
+                      <Badge variant="outline">有效期：{activeReport.plan.valid_until}</Badge>
+                    </div>
                   </section>
-                  <section className="rounded-md border p-3">
+                  <section className="scroll-mt-28 rounded-md border p-3">
+                    <p className="text-muted-foreground text-xs">结论说明</p>
+                    <Collapsible open={actionReasonOpen} onOpenChange={setActionReasonOpen}>
+                      <p className="text-muted-foreground mt-1 line-clamp-2 text-xs leading-5">
+                        {activeReport.action_reason}
+                      </p>
+                      <CollapsibleTrigger className="text-muted-foreground hover:text-foreground mt-1 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline">
+                        {actionReasonOpen ? "收起说明" : "展开说明"}
+                        <ChevronDownIcon
+                          className={`size-3 transition-transform ${actionReasonOpen ? "rotate-180" : ""}`}
+                        />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="text-muted-foreground mt-1 text-xs leading-5">
+                        {activeReport.action_reason}
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </section>
+                  <section className="scroll-mt-28 rounded-md border p-3">
                     <p className="text-muted-foreground text-xs">综合得分</p>
-                    <p className="mt-1 text-base font-semibold">{activeReport.score_breakdown.total}</p>
+                    <p className="mt-1 text-base font-semibold tabular-nums">{activeReport.score_breakdown.total}</p>
                     <p className="text-muted-foreground mt-1 text-xs">置信度：{activeReport.confidence}</p>
                   </section>
-                  <section className="rounded-md border p-3">
+                  <section className="scroll-mt-28 rounded-md border p-3">
                     <p className="text-muted-foreground text-xs">技术信号</p>
                     <p className="mt-1 text-base font-semibold">
                       {getTechnicalSignal(activeReport.score_breakdown.technical)}
                     </p>
-                    <p className="text-muted-foreground mt-1 text-xs">
+                    <p className="text-muted-foreground mt-1 text-xs tabular-nums">
                       技术分：{activeReport.score_breakdown.technical}/60
                     </p>
                   </section>
                 </div>
 
                 {strategyLevels ? (
-                  <section className="flex flex-col gap-3 rounded-md border p-3">
+                  <section id="analyze-strategy" className="scroll-mt-28 flex flex-col gap-3 rounded-md border p-3">
                     <div className="flex items-center justify-between gap-2">
                       <h2 className="text-sm font-medium">策略点位</h2>
                       <Badge variant="outline">执行参考</Badge>
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                       <div className="py-1">
-                        <p className="text-muted-foreground text-xs">理想买入点</p>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-muted-foreground text-xs">理想买入点</p>
+                          {strategyLevels.idealBuy !== null ? (
+                            <Button
+                              type="button"
+                              size="icon-xs"
+                              variant="ghost"
+                              aria-label="复制理想买入点"
+                              onClick={() => {
+                                if (strategyLevels.idealBuy === null) return;
+                                void copyText(strategyLevels.idealBuy.toFixed(2), "理想买入点");
+                              }}
+                            >
+                              <CopyIcon />
+                            </Button>
+                          ) : null}
+                        </div>
                         <p className="text-base font-semibold">
                           {strategyLevels.idealBuy !== null ? `${strategyLevels.idealBuy.toFixed(2)} 元` : "见关注区间"}
                         </p>
                         <p className="text-muted-foreground text-xs">回踩支撑区优先布局</p>
                       </div>
                       <div className="py-1">
-                        <p className="text-muted-foreground text-xs">次优买入点</p>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-muted-foreground text-xs">次优买入点</p>
+                          {strategyLevels.secondaryBuy !== null ? (
+                            <Button
+                              type="button"
+                              size="icon-xs"
+                              variant="ghost"
+                              aria-label="复制次优买入点"
+                              onClick={() => {
+                                if (strategyLevels.secondaryBuy === null) return;
+                                void copyText(strategyLevels.secondaryBuy.toFixed(2), "次优买入点");
+                              }}
+                            >
+                              <CopyIcon />
+                            </Button>
+                          ) : null}
+                        </div>
                         <p className="text-base font-semibold">
                           {strategyLevels.secondaryBuy !== null
                             ? `${strategyLevels.secondaryBuy.toFixed(2)} 元`
@@ -1261,14 +1418,46 @@ function AnalyzePageContent() {
                         <p className="text-muted-foreground text-xs">二次回落时分批介入</p>
                       </div>
                       <div className="py-1">
-                        <p className="text-muted-foreground text-xs">止损位</p>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-muted-foreground text-xs">止损位</p>
+                          {strategyLevels.stopLoss !== null ? (
+                            <Button
+                              type="button"
+                              size="icon-xs"
+                              variant="ghost"
+                              aria-label="复制止损位"
+                              onClick={() => {
+                                if (strategyLevels.stopLoss === null) return;
+                                void copyText(strategyLevels.stopLoss.toFixed(2), "止损位");
+                              }}
+                            >
+                              <CopyIcon />
+                            </Button>
+                          ) : null}
+                        </div>
                         <p className="text-base font-semibold">
                           {strategyLevels.stopLoss !== null ? `${strategyLevels.stopLoss.toFixed(2)} 元` : "见风险位"}
                         </p>
                         <p className="text-muted-foreground text-xs">跌破关键位严格执行</p>
                       </div>
                       <div className="py-1">
-                        <p className="text-muted-foreground text-xs">目标位</p>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-muted-foreground text-xs">目标位</p>
+                          {strategyLevels.takeProfit !== null ? (
+                            <Button
+                              type="button"
+                              size="icon-xs"
+                              variant="ghost"
+                              aria-label="复制目标位"
+                              onClick={() => {
+                                if (strategyLevels.takeProfit === null) return;
+                                void copyText(strategyLevels.takeProfit.toFixed(2), "目标位");
+                              }}
+                            >
+                              <CopyIcon />
+                            </Button>
+                          ) : null}
+                        </div>
                         <p className="text-base font-semibold">
                           {strategyLevels.takeProfit !== null
                             ? `${strategyLevels.takeProfit.toFixed(2)} 元`
@@ -1281,7 +1470,7 @@ function AnalyzePageContent() {
                 ) : null}
 
                 {targetPriceRows.length ? (
-                  <section className="flex flex-col gap-3 rounded-md border p-3">
+                  <section id="analyze-target-prices" className="scroll-mt-28 flex flex-col gap-3 rounded-md border p-3">
                     <h2 className="text-sm font-medium">目标价格分析</h2>
                     <Table>
                       <TableHeader>
@@ -1307,7 +1496,7 @@ function AnalyzePageContent() {
                 ) : null}
 
                 {liveQuote ? (
-                  <div className="grid gap-3 lg:grid-cols-[3fr_2fr]">
+                  <div id="analyze-quote" className="scroll-mt-28 grid gap-3 lg:grid-cols-[3fr_2fr]">
                     <section className="flex flex-col gap-3 rounded-md border p-3">
                       <div className="flex items-center justify-between gap-2">
                         <h2 className="text-sm font-medium">实时基础行情（模拟）</h2>
@@ -1355,7 +1544,7 @@ function AnalyzePageContent() {
                   </div>
                 ) : null}
 
-                <div className="grid gap-3 xl:grid-cols-2">
+                <div id="analyze-score-plan" className="scroll-mt-28 grid gap-3 xl:grid-cols-2">
                   <section className="flex flex-col gap-3 rounded-md border p-3">
                     <div className="flex flex-row items-center gap-2">
                       <h2 className="text-sm font-medium">评分拆解</h2>
@@ -1409,58 +1598,75 @@ function AnalyzePageContent() {
                   </section>
                 </div>
 
-                <section className="flex flex-col gap-3 rounded-md border p-3 text-sm">
+                <section id="analyze-evidence" className="scroll-mt-28 flex flex-col gap-3 rounded-md border p-3 text-sm">
                   <div className="flex flex-row items-center gap-2">
                     <h2 className="text-sm font-medium">依据与提醒</h2>
                     <InfoTip label="提醒字段说明">
                       <span className="block">{analyzeCopy.remindersCardDesc}</span>
                     </InfoTip>
                   </div>
-                  <div className="grid gap-3 xl:grid-cols-3">
-                    <div className="flex flex-col gap-1">
-                      <p className="font-medium">正向</p>
-                      <ul className="text-muted-foreground list-inside list-disc">
-                        {activeReport.evidence_positive.map((x) => (
-                          <li key={x}>{x}</li>
-                        ))}
-                      </ul>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <Badge variant="outline">正向 {activeReport.evidence_positive.length}</Badge>
+                    <Badge variant="outline">负向 {activeReport.evidence_negative.length}</Badge>
+                    <Badge variant="outline">冲突 {activeReport.evidence_conflicts?.length ?? 0}</Badge>
+                    <Badge variant="outline">提醒 {activeReport.reminders.length}</Badge>
+                  </div>
+                  <Collapsible open={evidenceOpen} onOpenChange={setEvidenceOpen}>
+                    <div className="text-muted-foreground text-xs">
+                      {!evidenceOpen ? "默认收起详细证据，展开后可查看完整依据与执行提醒。" : "已展开完整依据与提醒。"}
                     </div>
-                    <div className="flex flex-col gap-1">
-                      <p className="font-medium">负向</p>
-                      <ul className="text-muted-foreground list-inside list-disc">
-                        {activeReport.evidence_negative.map((x) => (
-                          <li key={x}>{x}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    {activeReport.evidence_conflicts?.length ? (
+                    <CollapsibleTrigger className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline">
+                      {evidenceOpen ? "收起详细依据" : "展开详细依据"}
+                      <ChevronDownIcon className={`size-3 transition-transform ${evidenceOpen ? "rotate-180" : ""}`} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-2 space-y-3">
+                      <div className="grid gap-3 xl:grid-cols-3">
+                        <div className="flex flex-col gap-1">
+                          <p className="font-medium">正向</p>
+                          <ul className="text-muted-foreground list-inside list-disc">
+                            {activeReport.evidence_positive.map((x) => (
+                              <li key={x}>{x}</li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <p className="font-medium">负向</p>
+                          <ul className="text-muted-foreground list-inside list-disc">
+                            {activeReport.evidence_negative.map((x) => (
+                              <li key={x}>{x}</li>
+                            ))}
+                          </ul>
+                        </div>
+                        {activeReport.evidence_conflicts?.length ? (
+                          <div className="flex flex-col gap-1">
+                            <p className="font-medium">冲突</p>
+                            <ul className="text-muted-foreground list-inside list-disc">
+                              {activeReport.evidence_conflicts.map((x) => (
+                                <li key={x}>{x}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-1">
+                            <p className="font-medium">冲突</p>
+                            <p className="text-muted-foreground">当前无显著冲突信号。</p>
+                          </div>
+                        )}
+                      </div>
+                      <Separator />
                       <div className="flex flex-col gap-1">
-                        <p className="font-medium">冲突</p>
+                        <p className="font-medium">执行提醒</p>
                         <ul className="text-muted-foreground list-inside list-disc">
-                          {activeReport.evidence_conflicts.map((x) => (
+                          {activeReport.reminders.map((x) => (
                             <li key={x}>{x}</li>
                           ))}
                         </ul>
                       </div>
-                    ) : (
-                      <div className="flex flex-col gap-1">
-                        <p className="font-medium">冲突</p>
-                        <p className="text-muted-foreground">当前无显著冲突信号。</p>
-                      </div>
-                    )}
-                  </div>
-                  <Separator />
-                  <div className="flex flex-col gap-1">
-                    <p className="font-medium">执行提醒</p>
-                    <ul className="text-muted-foreground list-inside list-disc">
-                      {activeReport.reminders.map((x) => (
-                        <li key={x}>{x}</li>
-                      ))}
-                    </ul>
-                  </div>
+                    </CollapsibleContent>
+                  </Collapsible>
                 </section>
 
-                <section className="flex flex-col gap-3 rounded-md border p-3">
+                <section id="analyze-reflection" className="scroll-mt-28 flex flex-col gap-3 rounded-md border p-3">
                   <h2 className="text-sm font-medium">历史反思与改进</h2>
                   <div className="text-muted-foreground flex flex-col gap-3 text-sm leading-6">
                     <p>
@@ -1476,7 +1682,7 @@ function AnalyzePageContent() {
                   </div>
                 </section>
               </div>
-            </section>
+            </div>
           </>
         ) : null}
         </div>
@@ -1510,7 +1716,7 @@ function AnalyzePageContent() {
               去登录
             </Button>
             <Button type="button" variant="secondary" onClick={() => router.push("/subscription")}>
-              了解订阅
+              {subscriptionTierPublicCopy.ctaViewPlansShort}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

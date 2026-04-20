@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
-import { welcomeCopy } from "@/lib/copy";
+import { subscriptionTierPublicCopy, welcomeCopy } from "@/lib/copy";
 
 export const metadata: Metadata = {
   title: "产品介绍 | 智谱投研",
@@ -38,10 +38,10 @@ const modules = [
     cta: "查看历史",
   },
   {
-    title: "账号与订阅",
-    desc: "手机号、验证码与微信等登录方式；套餐对比、支付流程与用量展示，并与分析能力联动。",
+    title: "订阅与套餐",
+    desc: `手机号、验证码与微信等登录方式；${subscriptionTierPublicCopy.freeTierName}与${subscriptionTierPublicCopy.proTierName}的日配额、价格说明、支付开通与订单记录见订阅页，并与股票预测、选股对话的日限额一致。`,
     href: "/subscription",
-    cta: "查看订阅",
+    cta: subscriptionTierPublicCopy.ctaViewPlans,
   },
 ] as const;
 

@@ -13,7 +13,7 @@ import {
   Trash2Icon,
   SearchIcon,
 } from "lucide-react";
-import { pickerCopy } from "@/lib/copy";
+import { pickerCopy, subscriptionTierPublicCopy } from "@/lib/copy";
 import { usePickerStore, type PickerMessage } from "@/stores/use-picker-store";
 import { useAnalysisStore } from "@/stores/use-analysis-store";
 import type {
@@ -529,9 +529,8 @@ export default function PickPage() {
   const [renameDraft, setRenameDraft] = useState("");
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
+  const pickPanelRestoredRef = useRef(false);
   const [pickPanelOpen, setPickPanelOpen] = useState(true);
-  const [pickPanelHydrated, setPickPanelHydrated] = useState(false);
-  const [tooltipsReady, setTooltipsReady] = useState(false);
   const draft = draftBySession[sessionId] ?? "";
 
   const setDraftForSession = useCallback(
@@ -863,28 +862,26 @@ export default function PickPage() {
   }, [conversationListItems, deletingConversationId, resetConversation, sessionId]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const closed = window.localStorage.getItem(PICKER_OPTIONS_PANEL_KEY) === "0";
-      setPickPanelOpen(!closed);
-    } catch {
-      // Ignore storage read failure.
-    }
-    setPickPanelHydrated(true);
+    queueMicrotask(() => {
+      if (typeof window === "undefined") return;
+      try {
+        const closed = window.localStorage.getItem(PICKER_OPTIONS_PANEL_KEY) === "0";
+        setPickPanelOpen(!closed);
+      } catch {
+        // Ignore storage read failure.
+      }
+      pickPanelRestoredRef.current = true;
+    });
   }, []);
 
   useEffect(() => {
-    setTooltipsReady(true);
-  }, []);
-
-  useEffect(() => {
-    if (!pickPanelHydrated || typeof window === "undefined") return;
+    if (!pickPanelRestoredRef.current || typeof window === "undefined") return;
     try {
       window.localStorage.setItem(PICKER_OPTIONS_PANEL_KEY, pickPanelOpen ? "1" : "0");
     } catch {
       // Ignore storage write failure.
     }
-  }, [pickPanelOpen, pickPanelHydrated]);
+  }, [pickPanelOpen]);
 
   const resizeDraftTextarea = useCallback(() => {
     const el = draftTextareaRef.current;
@@ -1011,9 +1008,11 @@ export default function PickPage() {
                 }}
               >
                 {messages.length === 0 ? (
-                  <PickerChatEmpty mode={conversationMode} />
+                  <div className="mx-auto w-full max-w-3xl">
+                    <PickerChatEmpty mode={conversationMode} />
+                  </div>
                 ) : (
-                  <div className="flex flex-col gap-4">
+                  <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
                     {messages.map((m) => (
                       <PickerChatMessage
                         key={m.id}
@@ -1280,55 +1279,42 @@ export default function PickPage() {
                       </SelectContent>
                     </Select>
 
-                    {tooltipsReady ? (
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <InputGroupButton
-                              type="button"
-                              size="icon-sm"
-                              variant="default"
-                              disabled={sendPending || !draft.trim()}
-                              onClick={() => void handleSend()}
-                              aria-label={sendPending ? "发送中" : "发送消息"}
-                            >
-                              {sendPending ? <Spinner /> : <ArrowUpIcon />}
-                            </InputGroupButton>
-                          }
-                        />
-                        <TooltipContent side="top" align="end">
-                          <div className="flex flex-col gap-1.5 text-xs">
-                            <span className="flex flex-wrap items-center gap-1.5">
-                              <KbdGroup>
-                                <Kbd>Enter</Kbd>
-                              </KbdGroup>
-                              <span>发送</span>
-                            </span>
-                            <span className="flex flex-wrap items-center gap-1.5">
-                              <KbdGroup>
-                                <Kbd>Shift</Kbd>
-                                <span aria-hidden className="px-0.5 text-xs opacity-80">
-                                  +
-                                </span>
-                                <Kbd>Enter</Kbd>
-                              </KbdGroup>
-                              <span>换行</span>
-                            </span>
-                          </div>
-                        </TooltipContent>
-                      </Tooltip>
-                    ) : (
-                      <InputGroupButton
-                        type="button"
-                        size="icon-sm"
-                        variant="default"
-                        disabled={sendPending || !draft.trim()}
-                        onClick={() => void handleSend()}
-                        aria-label={sendPending ? "发送中" : "发送消息"}
-                      >
-                        {sendPending ? <Spinner /> : <ArrowUpIcon />}
-                      </InputGroupButton>
-                    )}
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <InputGroupButton
+                            type="button"
+                            size="icon-sm"
+                            variant="default"
+                            disabled={sendPending || !draft.trim()}
+                            onClick={() => void handleSend()}
+                            aria-label={sendPending ? "发送中" : "发送消息"}
+                          >
+                            {sendPending ? <Spinner /> : <ArrowUpIcon />}
+                          </InputGroupButton>
+                        }
+                      />
+                      <TooltipContent side="top" align="end">
+                        <div className="flex flex-col gap-1.5 text-xs">
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            <KbdGroup>
+                              <Kbd>Enter</Kbd>
+                            </KbdGroup>
+                            <span>发送</span>
+                          </span>
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            <KbdGroup>
+                              <Kbd>Shift</Kbd>
+                              <span aria-hidden className="px-0.5 text-xs opacity-80">
+                                +
+                              </span>
+                              <Kbd>Enter</Kbd>
+                            </KbdGroup>
+                            <span>换行</span>
+                          </span>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
                   </InputGroupAddon>
                 </InputGroup>
             </Field>
@@ -1350,7 +1336,7 @@ export default function PickPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>关闭</AlertDialogCancel>
             <Button type="button" render={<Link href="/subscription" />}>
-              了解订阅
+              {subscriptionTierPublicCopy.ctaViewPlansShort}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

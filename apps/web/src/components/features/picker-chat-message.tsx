@@ -11,8 +11,12 @@ import type { PickerMessage } from "@/stores/use-picker-store";
 
 const assistantMarkdownComponents: Components = {
   p: ({ children }) => <p className="mb-2 text-sm leading-relaxed last:mb-0">{children}</p>,
-  ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-4 text-sm">{children}</ul>,
-  ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-4 text-sm">{children}</ol>,
+  ul: ({ children }) => (
+    <ul className="my-2 flex list-disc flex-col gap-1 pl-4 text-sm">{children}</ul>
+  ),
+  ol: ({ children }) => (
+    <ol className="my-2 flex list-decimal flex-col gap-1 pl-4 text-sm">{children}</ol>
+  ),
   li: ({ children }) => <li className="leading-relaxed">{children}</li>,
   strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
   em: ({ children }) => <em className="italic">{children}</em>,
@@ -86,12 +90,12 @@ export function PickerChatEmpty({ mode }: { mode: "consult" | "pick" | null }) {
         : pickerCopy.chatEmptyModeUnset;
 
   return (
-    <div className="text-muted-foreground flex flex-col gap-3 rounded-xl border border-dashed bg-muted/20 px-4 py-8">
+    <div className="text-muted-foreground flex flex-col gap-4 rounded-xl border border-dashed border-border/60 bg-muted/15 px-4 py-7">
       <p className="text-foreground text-sm leading-relaxed">{pickerCopy.chatIntro}</p>
-      <div className="border-border border-t pt-3">
+      <div className="border-border flex flex-col gap-2 border-t pt-4">
         <p className="text-foreground text-sm font-medium">{pickerCopy.chatEmptyTitle}</p>
-        <p className="mt-2 text-sm leading-relaxed">{pickerCopy.chatEmptyBody}</p>
-        <p className="mt-2 text-sm leading-relaxed">{modeLine}</p>
+        <p className="text-sm leading-relaxed">{pickerCopy.chatEmptyBody}</p>
+        <p className="text-sm leading-relaxed">{modeLine}</p>
       </div>
     </div>
   );
@@ -112,18 +116,21 @@ export function PickerChatMessage({
   return (
     <article
       id={anchorId}
-      className={cn("flex min-w-0 flex-col gap-1", isUser ? "items-end" : "items-start")}
+      className={cn("flex min-w-0 flex-col gap-1.5", isUser ? "items-end" : "items-start")}
       aria-label={isUser ? "用户消息" : "助手消息"}
     >
       <div
         className={cn(
-          "flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 text-xs",
+          "flex max-w-full flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs",
           isUser ? "flex-row-reverse justify-end" : "flex-row",
         )}
       >
         <span
           id={labelId}
-          className={cn(isUser ? "font-medium text-foreground" : "text-muted-foreground")}
+          className={cn(
+            "select-none",
+            isUser ? "font-medium text-foreground" : "font-medium text-muted-foreground",
+          )}
         >
           {isUser ? "我" : "助手"}
         </span>
@@ -135,7 +142,7 @@ export function PickerChatMessage({
             type="button"
             size="xs"
             variant="ghost"
-            className="h-6 px-1.5"
+            className="h-6 px-1.5 text-muted-foreground opacity-70 transition-opacity hover:opacity-100"
             onClick={() => void copyMessageBody(message.content)}
             disabled={!message.content.trim()}
           >
@@ -147,8 +154,10 @@ export function PickerChatMessage({
 
       <div
         className={cn(
-          "min-w-0 max-w-[min(100%,36rem)] rounded-2xl px-3 py-2 wrap-break-word",
-          isUser ? "bg-primary/12 text-foreground" : "bg-muted/45 text-foreground",
+          "min-w-0 max-w-[min(100%,34rem)] rounded-2xl px-3.5 py-2.5 wrap-break-word",
+          isUser
+            ? "border border-primary/15 bg-primary/10 text-foreground rounded-br-md"
+            : "border border-border/50 bg-card text-foreground rounded-bl-md",
         )}
         aria-labelledby={labelId}
       >

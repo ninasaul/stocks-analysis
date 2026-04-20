@@ -2,13 +2,29 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import {
+  PLAN_DAILY_LIMITS,
+  type BillingCycle,
+  type PlanId,
+  resolveDailyAnalysisLimit,
+  resolveDailyPickerLimit,
+} from "@/lib/subscription-limits";
 
-export type PlanId = "free" | "pro";
+export { GUEST_QUOTA } from "@/lib/subscription-limits";
+export type { BillingCycle, PlanId } from "@/lib/subscription-limits";
 
 export type PlanDef = {
   id: PlanId;
   name: string;
+  tagline: string;
   priceLabel: string;
+  /** 月付收据与模拟支付展示（不含「/月」）。 */
+  settlementAmountLabel: string;
+  /** 年付收据与模拟支付展示。 */
+  annualSettlementAmountLabel?: string;
+  priceNote?: string;
+  annualPriceLabel?: string;
+  annualEquivMonthlyLabel?: string;
   features: string[];
   dailyAnalysisLimit: number;
   pickerSessionDaily: number;
@@ -25,27 +41,38 @@ export type SubscriptionOrder = {
 const PLANS: PlanDef[] = [
   {
     id: "free",
-    name: "免费档",
+    name: "免费版",
+    tagline: "登录后启用完整免费配额与研究存档",
     priceLabel: "¥0",
+    settlementAmountLabel: "¥0",
     features: [
-      "游客每日股票预测 1 次",
-      "登录后建议存档与历史列表",
-      "选股对话按日配额（与订阅档位一致）",
+      "每日股票预测 5 次（自然日重置）",
+      "每日选股会话 5 次",
+      "建议历史写入与个人列表（登录态）",
+      "Markdown 导出与打印存档（与功能页一致）",
     ],
-    dailyAnalysisLimit: 1,
-    pickerSessionDaily: 2,
+    dailyAnalysisLimit: PLAN_DAILY_LIMITS.free.dailyAnalysis,
+    pickerSessionDaily: PLAN_DAILY_LIMITS.free.dailyPickerSessions,
   },
   {
     id: "pro",
-    name: "专业档",
-    priceLabel: "¥68/月",
+    name: "专业版",
+    tagline: "更高日配额，适合持续跟踪与复盘",
+    priceLabel: "¥49/月",
+    settlementAmountLabel: "¥49",
+    annualSettlementAmountLabel: "¥468",
+    annualPriceLabel: "¥468/年",
+    annualEquivMonthlyLabel: "约合 ¥39/月",
+    priceNote:
+      "月付为连续包月；年付按年续费。演示支付可按所选周期模拟；正式环境以支付渠道与订单为准。",
     features: [
-      "每日股票预测更高上限（以套餐配置为准）",
-      "Markdown 导出与打印生成 PDF",
-      "选股对话更高日配额与优先体验",
+      "每日股票预测 80 次（自然日重置）",
+      "每日选股会话 30 次",
+      "包含免费版全部能力",
+      "用量与到期规则以支付回调与后台对账为最终依据",
     ],
-    dailyAnalysisLimit: 999,
-    pickerSessionDaily: 50,
+    dailyAnalysisLimit: PLAN_DAILY_LIMITS.pro.dailyAnalysis,
+    pickerSessionDaily: PLAN_DAILY_LIMITS.pro.dailyPickerSessions,
   },
 ];
 
@@ -56,6 +83,8 @@ function todayKey() {
 type SubscriptionState = {
   plans: PlanDef[];
   currentPlanId: PlanId;
+  /** 当前专业版订阅的计费周期（免费版时保留上次选择或默认月付）。 */
+  billingCycle: BillingCycle;
   periodEnd: string | null;
   autoRenew: boolean;
   orders: SubscriptionOrder[];
@@ -63,10 +92,9 @@ type SubscriptionState = {
   pickerSessionsByDay: Record<string, number>;
   paymentStatus: "idle" | "pending" | "success" | "failed" | "cancelled";
   setPaymentStatus: (s: SubscriptionState["paymentStatus"]) => void;
-  simulateSubscribeSuccess: () => void;
+  simulateSubscribeSuccess: (cycle: BillingCycle) => void;
   appendOrder: (o: SubscriptionOrder) => void;
   resetToFree: () => void;
-  /** Returns false if blocked */
   tryConsumeAnalysis: (isGuest: boolean) => boolean;
   tryConsumePickerSession: (isGuest: boolean) => boolean;
   getDailyAnalysisRemaining: (isGuest: boolean) => number;
@@ -79,6 +107,7 @@ export const useSubscriptionStore = create<SubscriptionState>()(
     (set, get) => ({
       plans: PLANS,
       currentPlanId: "free",
+      billingCycle: "month",
       periodEnd: null,
       autoRenew: false,
       orders: [],
@@ -86,18 +115,26 @@ export const useSubscriptionStore = create<SubscriptionState>()(
       pickerSessionsByDay: {},
       paymentStatus: "idle",
       setPaymentStatus: (paymentStatus) => set({ paymentStatus }),
-      simulateSubscribeSuccess: () => {
+      simulateSubscribeSuccess: (cycle) => {
+        const pro = PLANS.find((p) => p.id === "pro")!;
         const end = new Date();
-        end.setMonth(end.getMonth() + 1);
+        if (cycle === "month") {
+          end.setMonth(end.getMonth() + 1);
+        } else {
+          end.setFullYear(end.getFullYear() + 1);
+        }
+        const amountLabel =
+          cycle === "month" ? pro.settlementAmountLabel : (pro.annualSettlementAmountLabel ?? "¥468");
         const order: SubscriptionOrder = {
           id: `ord-${Date.now()}`,
           placedAt: new Date().toISOString(),
-          planName: "专业档",
-          amountLabel: "¥68",
+          planName: pro.name,
+          amountLabel,
           status: "paid",
         };
         set((s) => ({
           currentPlanId: "pro",
+          billingCycle: cycle,
           periodEnd: end.toISOString().slice(0, 10),
           autoRenew: true,
           paymentStatus: "success",
@@ -109,17 +146,19 @@ export const useSubscriptionStore = create<SubscriptionState>()(
           orders: [o, ...s.orders].slice(0, 20),
         })),
       resetToFree: () =>
-        set({ currentPlanId: "free", periodEnd: null, autoRenew: false, paymentStatus: "idle" }),
+        set({
+          currentPlanId: "free",
+          billingCycle: "month",
+          periodEnd: null,
+          autoRenew: false,
+          paymentStatus: "idle",
+        }),
       getPlan: (id) => PLANS.find((p) => p.id === id) ?? PLANS[0],
       getDailyAnalysisRemaining: (isGuest) => {
         const { currentPlanId, analysisCountByDay } = get();
         const key = todayKey();
         const used = analysisCountByDay[key] ?? 0;
-        const limit = isGuest
-          ? 1
-          : currentPlanId === "pro"
-            ? 999
-            : 5;
+        const limit = resolveDailyAnalysisLimit(isGuest, currentPlanId);
         return Math.max(0, limit - used);
       },
       tryConsumeAnalysis: (isGuest) => {
@@ -138,7 +177,7 @@ export const useSubscriptionStore = create<SubscriptionState>()(
         const key = todayKey();
         const { pickerSessionsByDay, currentPlanId } = get();
         const used = pickerSessionsByDay[key] ?? 0;
-        const limit = isGuest ? 2 : currentPlanId === "pro" ? 50 : 5;
+        const limit = resolveDailyPickerLimit(isGuest, currentPlanId);
         if (used >= limit) return false;
         set((s) => ({
           pickerSessionsByDay: {
@@ -152,7 +191,7 @@ export const useSubscriptionStore = create<SubscriptionState>()(
         const key = todayKey();
         const { pickerSessionsByDay, currentPlanId } = get();
         const used = pickerSessionsByDay[key] ?? 0;
-        const limit = isGuest ? 2 : currentPlanId === "pro" ? 50 : 5;
+        const limit = resolveDailyPickerLimit(isGuest, currentPlanId);
         return Math.max(0, limit - used);
       },
     }),
@@ -160,6 +199,7 @@ export const useSubscriptionStore = create<SubscriptionState>()(
       name: "zhputian-subscription",
       partialize: (s) => ({
         currentPlanId: s.currentPlanId,
+        billingCycle: s.billingCycle,
         periodEnd: s.periodEnd,
         autoRenew: s.autoRenew,
         orders: s.orders,

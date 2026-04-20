@@ -23,6 +23,18 @@ export const ANALYZE_SYMBOL_MOCK_UNIVERSE: AnalyzeSymbolSearchItem[] = [
   { key: "US.TSLA", market: "US", symbol: "TSLA", name: "Tesla" },
 ];
 
+/**
+ * 界面展示用「上市板块:代码」。数据层 `market` 仍为 CN/HK/US；A 股按代码前缀映射 SH/SZ/BJ。
+ */
+export function formatAnalyzeBoardSymbol(market: AnalysisInput["market"], symbol: string): string {
+  const sym = symbol.trim();
+  if (market === "HK") return `HK:${sym}`;
+  if (market === "US") return `US:${sym}`;
+  if (/^(43|82|83|87|88|92)/.test(sym)) return `BJ:${sym}`;
+  if (/^[69]/.test(sym)) return `SH:${sym}`;
+  return `SZ:${sym}`;
+}
+
 export function parseAnalyzeSearchInput(raw: string, fallbackMarket: AnalysisInput["market"]) {
   const trimmed = raw.trim();
   if (!trimmed) return null;

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
+import { subscriptionTierPublicCopy } from "@/lib/copy";
 import { Button } from "@/components/ui/button";
 import { ThemeSwitcher } from "@/components/features/theme-switcher";
 
@@ -31,19 +32,45 @@ export function MarketingHeader() {
           <span className="text-sm font-semibold tracking-tight md:text-base">智谱投研</span>
         </Link>
 
-        <nav className="flex items-center gap-1" aria-label="营销站点导航与操作">
-          <Button variant="ghost" size="sm" className="hidden md:inline-flex" render={<Link href="/welcome" />}>
-            产品介绍
+        <nav className="flex flex-wrap items-center justify-end gap-0.5 sm:gap-1" aria-label="页面章节与操作">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="hidden text-muted-foreground md:inline-flex"
+            render={<Link href="/#landing-features" scroll />}
+          >
+            功能
           </Button>
-          <Button variant="ghost" size="sm" className="hidden md:inline-flex" render={<Link href="/app/analyze" />}>
-            工作台
+          <Button
+            variant="ghost"
+            size="sm"
+            className="hidden text-muted-foreground md:inline-flex"
+            render={<Link href="/#landing-how" scroll />}
+          >
+            使用方式
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="hidden text-muted-foreground md:inline-flex"
+            render={<Link href="/#landing-pricing" scroll />}
+          >
+            {subscriptionTierPublicCopy.ctaViewPlansShort}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="hidden text-muted-foreground lg:inline-flex"
+            render={<Link href="/#landing-faq" scroll />}
+          >
+            常见问题
           </Button>
           <ThemeSwitcher />
           <Button variant="ghost" size="sm" render={<Link href="/login" />}>
             登录
           </Button>
-          <Button size="sm" variant="secondary" className="hidden sm:inline-flex" render={<Link href="/subscription" />}>
-            订阅
+          <Button size="sm" className="hidden sm:inline-flex" render={<Link href="/app/analyze" />}>
+            进入工作台
           </Button>
         </nav>
       </div>

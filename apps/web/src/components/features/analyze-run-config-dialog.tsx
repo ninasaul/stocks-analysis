@@ -372,21 +372,23 @@ export function AnalyzeRunConfigDialog({
 
   useEffect(() => {
     if (!open) return;
-    setSearchDraft(searchKeyword.trim());
-    setFallbackMarket(market);
-    setDepth(inferDepth(riskTier, holdingHorizon));
-    const themes = linkedPreference?.themes ?? [];
-    setAnalysts(parseAnalystsFromThemes(themes));
-    setQuickModel(parseModelFromThemes(themes, "model_quick", MODEL_OPTIONS[0]));
-    setDeepModel(parseModelFromThemes(themes, "model_deep", MODEL_OPTIONS[1]));
-    const hasFeatureTag = themes.some((t) => t.startsWith("feature:"));
-    setSentiment(hasFeatureTag ? parseFeature(themes, "sentiment") : true);
-    setRiskAssessment(hasFeatureTag ? parseFeature(themes, "risk_assessment") : true);
-    setLanguage(parseLangFromThemes(themes));
-    setAnalysisDate(formatDateInput(new Date()));
-    setPreviewNonce(0);
-    setSearchFocused(false);
-    setActiveSearchIndex(0);
+    queueMicrotask(() => {
+      setSearchDraft(searchKeyword.trim());
+      setFallbackMarket(market);
+      setDepth(inferDepth(riskTier, holdingHorizon));
+      const themes = linkedPreference?.themes ?? [];
+      setAnalysts(parseAnalystsFromThemes(themes));
+      setQuickModel(parseModelFromThemes(themes, "model_quick", MODEL_OPTIONS[0]));
+      setDeepModel(parseModelFromThemes(themes, "model_deep", MODEL_OPTIONS[1]));
+      const hasFeatureTag = themes.some((t) => t.startsWith("feature:"));
+      setSentiment(hasFeatureTag ? parseFeature(themes, "sentiment") : true);
+      setRiskAssessment(hasFeatureTag ? parseFeature(themes, "risk_assessment") : true);
+      setLanguage(parseLangFromThemes(themes));
+      setAnalysisDate(formatDateInput(new Date()));
+      setPreviewNonce(0);
+      setSearchFocused(false);
+      setActiveSearchIndex(0);
+    });
   }, [open, searchKeyword, market, riskTier, holdingHorizon, linkedPreference]);
 
   useEffect(() => {
@@ -417,18 +419,10 @@ export function AnalyzeRunConfigDialog({
       .map((entry) => entry.item);
   }, [symbolSearchItems, searchDraft]);
 
-  useEffect(() => {
-    if (!searchFocused) return;
-    setActiveSearchIndex((prev) => {
-      if (!filteredSearchItems.length) return 0;
-      return Math.min(prev, filteredSearchItems.length - 1);
-    });
-  }, [filteredSearchItems.length, searchFocused]);
-
-  useEffect(() => {
-    if (!searchFocused) return;
-    setActiveSearchIndex(0);
-  }, [searchDraft, searchFocused]);
+  const effectiveSearchIndex = useMemo(() => {
+    if (!filteredSearchItems.length) return 0;
+    return Math.min(Math.max(0, activeSearchIndex), filteredSearchItems.length - 1);
+  }, [activeSearchIndex, filteredSearchItems.length]);
 
   const resolvedMarket = useMemo(() => {
     const p = parseAnalyzeSearchInput(searchDraft.trim(), fallbackMarket);
@@ -437,11 +431,13 @@ export function AnalyzeRunConfigDialog({
 
   useEffect(() => {
     if (resolvedMarket !== "CN") return;
-    setAnalysts((prev) => {
-      if (!prev.has("social")) return prev;
-      const next = new Set(prev);
-      next.delete("social");
-      return next;
+    queueMicrotask(() => {
+      setAnalysts((prev) => {
+        if (!prev.has("social")) return prev;
+        const next = new Set(prev);
+        next.delete("social");
+        return next;
+      });
     });
   }, [resolvedMarket]);
 
@@ -453,6 +449,7 @@ export function AnalyzeRunConfigDialog({
 
   const analystAddonEach = 0.15;
   const costPreview = useMemo(() => {
+    void previewNonce;
     const depthCost = DEPTH_BASE_COST[depth];
     const selected = [...analysts];
     const addon = selected.length * analystAddonEach;
@@ -631,6 +628,7 @@ export function AnalyzeRunConfigDialog({
                           onFocus={() => setSearchFocused(true)}
                           onChange={(e) => {
                             setSearchDraft(e.target.value);
+                            setActiveSearchIndex(0);
                             if (!searchFocused) setSearchFocused(true);
                           }}
                           onKeyDown={(e) => {
@@ -660,7 +658,7 @@ export function AnalyzeRunConfigDialog({
                               if (searchFocused && filteredSearchItems.length > 0) {
                                 e.preventDefault();
                                 const picked =
-                                  filteredSearchItems[activeSearchIndex] ?? filteredSearchItems[0];
+                                  filteredSearchItems[effectiveSearchIndex] ?? filteredSearchItems[0];
                                 if (picked) applySearchItem(picked);
                               }
                             }
@@ -685,8 +683,8 @@ export function AnalyzeRunConfigDialog({
                                 key={item.key}
                                 type="button"
                                 role="option"
-                                aria-selected={activeSearchIndex === index}
-                                variant={activeSearchIndex === index ? "secondary" : "ghost"}
+                                aria-selected={effectiveSearchIndex === index}
+                                variant={effectiveSearchIndex === index ? "secondary" : "ghost"}
                                 className="h-auto w-full justify-start py-2"
                                 onMouseEnter={() => setActiveSearchIndex(index)}
                                 onClick={() => applySearchItem(item)}

@@ -7,6 +7,24 @@ export const compliance = {
     "本产品为证券研究信息与技术工具，不构成证券投资咨询或资产管理服务。",
 } as const;
 
+/** 落地页、订阅页、欢迎页与 App 内引导共用（与 `use-subscription-store` 套餐名一致）。 */
+export const subscriptionTierPublicCopy = {
+  freeTierName: "免费版",
+  proTierName: "专业版",
+  subscriptionPageTitle: "订阅与会员",
+  plansSectionTitle: "套餐与价格",
+  /** 与 `/subscription` 对齐的长按钮/链接 */
+  ctaViewPlans: "查看订阅与价格",
+  /** 页眉、对话框等窄位入口 */
+  ctaViewPlansShort: "订阅与价格",
+  /** 订阅页专业版卡片角标，与落地页定价区一致 */
+  proRecommendedBadge: "推荐",
+  /** 订阅页支付卡片标题 */
+  checkoutProCardTitle: "开通专业版",
+  /** 已付费态提示 */
+  alreadyProAlertTitle: "已订阅专业版",
+} as const;
+
 export const analyzeCopy = {
   pageSubtitle:
     "综合评分权重与五态结论见下方卡片。今日剩余可生成次数见页眉或此处配额提示。",
@@ -14,7 +32,7 @@ export const analyzeCopy = {
   handoffToast: "已应用选股会话中的标的与偏好。",
   remindersCardDesc: "关键价位、事件窗口与失效触发摘要。",
   quotaDialogBody:
-    "当前账号或访客身份下的今日股票预测次数已用尽。登录后可按订阅档位获得更高额度；也可前往订阅页了解专业档权益。",
+    "当前账号或访客身份下的今日股票预测次数已用尽。登录后可按免费版或专业版获得更高日配额；也可前往订阅页查看套餐与价格。",
   exportMdToast: "已开始下载 Markdown 文件。",
   exportPdfHint: "打印 / 生成 PDF",
   exportPdfNote: "通过浏览器打印可将本页保存为 PDF，导出字段与页面展示一致。",
@@ -33,7 +51,7 @@ export const pickerCopy = {
   sensitiveRiskAlert:
     "当前风险档为「进取」，波动与回撤可能更大；请结合自身承受能力审慎参考。",
   quotaDialogBody:
-    "今日选股会话次数已达上限。可登录后按订阅档位提升额度，或次日再试。",
+    "今日选股会话次数已达上限。可登录后按免费版或专业版获得更高日配额，或次日再试；也可前往订阅页查看套餐与价格。",
   inputPlaceholder: "补充说明或偏好（可选）",
   optionsLoading: "正在整理可选项…",
   chatIntro:
@@ -68,16 +86,17 @@ export const historyCopy = {
 } as const;
 
 export const subscriptionCopy = {
-  pageSubtitle: "套餐权益与用量以页面展示为准；支付结果以服务端确认回调为最终依据。",
-  currentCardDesc: "当前订阅档位、周期与今日剩余用量。",
-  resetFree: "恢复为免费档",
+  pageSubtitle: "套餐权益与用量以本页为准；支付结果以服务端确认回调与对账为最终依据。",
+  currentCardDesc: "当前套餐名称、计费周期与今日剩余用量（与落地页及欢迎页所述免费版、专业版一致）。",
+  resetFree: "恢复为免费版",
   tableDailyAnalysis: "每日股票预测次数",
   tablePickerSessions: "每日选股会话次数",
-  payCta: "使用微信支付开通专业档",
+  guestColumnLabel: "访客（未登录）",
+  payCta: "使用微信支付开通专业版",
   payFailSim: "模拟支付失败",
   payCancelSim: "模拟取消支付",
   alertNote:
-    "到期未续费将自动降级至免费档；用量超限时在功能页会提示升级或续费，与订阅策略一致。",
+    "到期未续费将自动降级至免费版；用量超限时在功能页会提示升级或续费，与订阅策略一致。",
   paySuccessDesc: "订阅状态已更新。可返回工作台继续使用。",
   payRetryDesc: "请稍后重试，或联系客服处理订单异常。",
   orderSectionTitle: "订单记录",
@@ -112,77 +131,152 @@ export const accountCopy = {
 } as const;
 
 export const landingCopy = {
-  brandLine: "智谱投研",
-  heroTitle: "让单票择时判断更可执行",
+  heroEyebrow: "智谱投研 · 结构化证券研究工具",
+  heroTitleLine1: "单票择时研究",
+  heroTitleLine2: "标准化交付与复核",
   heroLead:
-    "在统一评分框架下融合技术、结构与事件信号，输出五态结论与结构化研究计划。",
+    "以统一评分框架整合技术、结构与事件信号，稳定输出五态结论与可执行研究计划。",
   heroSupport:
-    "报告覆盖关注区间、风险位、观察目标位与失效条件，便于按同一口径复盘。",
+    "报告覆盖关注区间、风险位、观察目标位与失效条件，便于团队按同一口径复核与留痕。",
   heroBoundary:
-    "仅供研究参考，不构成投资建议，不提供交易执行能力。",
-  heroCtaPrimary: "开始股票预测",
-  heroCtaSecondary: "进入选股对话",
-  heroCtaLogin: "登录 / 注册",
-  heroCtaSubscription: "了解订阅",
-  highlightsHeading: "重点展示",
-  highlights: [
-    { label: "技术信号", value: "趋势、动量、量价结构" },
-    { label: "综合得分", value: "多维信号统一评分" },
-    { label: "建议操作", value: "五态结论与风险边界" },
+    "仅提供研究信息与分析工具，不构成投资建议，不提供任何交易执行能力。",
+  heroCtaPrimary: "进入工作台",
+  heroCtaSecondary: "查看使用方式",
+  heroCtaLogin: "登录或注册",
+  heroLoginHint: "登录后可在工作台使用股票预测与选股对话，并统一查看订阅与用量状态。",
+  heroStats: [
+    { value: "5", label: "五态结论口径" },
+    { value: "多维", label: "统一评分框架" },
+    { value: "固定字段", label: "研究计划结构" },
   ] as const,
-  pillarsHeading: "核心能力",
-  pillars: [
-    "单票结构化报告：五态结论、置信度与风险等级，关键价位与事件窗口摘要，支持 Markdown 与打印存档。",
-    "对话式选股：在固定偏好维度上收敛约束，给出候选与可复述依据，并可衔接到单票择时。",
-    "登录后写入建议历史与复盘统计；用量与订阅档位以账户与套餐页为准。",
-  ] as const,
-  pathsHeading: "快速入口",
-  paths: [
+  heroTrustHeading: "面向研究闭环的统一交付字段",
+  heroTrustPills: ["五态结论口径", "风险位与失效条件", "结构化留痕与导出"] as const,
+  featuresHeading: "研究工作流与交付标准",
+  featuresSectionLead:
+    "围绕“分析、筛选、复盘”三类任务构建统一工作流，确保输入、结论与回看使用同一字段口径。",
+  features: [
     {
-      title: "单票择时",
-      desc: "输入标的与周期，快速得到结构化结论与风险边界。",
-      cta: "去股票预测",
-      href: "/app/analyze",
+      scope: "工作流 A",
+      title: "单票分析与执行参考",
+      description:
+        "针对单只标的输出动作倾向、置信度、风险等级与关键价位，并同步给出失效条件与结论有效期。",
+      deliverable: "五态结论、关注区间、风险位、目标位、失效条件",
+      useCase: "用于盘中决策前复核、盘后归因与短周期跟踪。",
     },
     {
-      title: "对话选股",
-      desc: "通过问答收敛偏好，生成候选并衔接到股票预测。",
-      cta: "去选股对话",
-      href: "/app/pick",
+      scope: "工作流 B",
+      title: "偏好收敛与候选生成",
+      description:
+        "通过对话逐步确认风险偏好、持有周期与主题约束，生成可解释的候选清单并保留筛选依据。",
+      deliverable: "偏好快照、候选列表、入选理由与淘汰说明",
+      useCase: "用于建立待研究标的池，并一键衔接至单票分析。",
     },
     {
-      title: "订阅会员",
-      desc: "查看套餐权益、当前状态与支付开通流程。",
-      cta: "去订阅页",
-      href: "/subscription",
+      scope: "工作流 C",
+      title: "历史存档与复盘追踪",
+      description:
+        "登录后自动写入建议记录并汇总复盘指标，支持按时间回看同口径字段下的历史判断与执行结果。",
+      deliverable: "建议存档、复盘统计、同口径历史回看视图",
+      useCase: "用于策略迭代评估、团队复盘与流程审计留痕。",
+    },
+    {
+      scope: "工作流 D",
+      title: "权益配额与使用治理",
+      description:
+        "在统一订阅规则下管理分析与选股日配额，并在超限、到期、降级等场景给出一致提示与升级路径。",
+      deliverable: "档位口径、日配额提示、超限与到期处理规则",
+      useCase: "用于保障高频使用下的资源可控、权限透明与体验一致。",
     },
   ] as const,
-  pricingHeading: "订阅与价格",
+  howItWorksHeading: "标准使用路径",
+  howItWorksLead:
+    "按统一路径推进研究任务，减少跨模块切换与口径偏差。",
+  howItWorksSteps: [
+    {
+      title: "明确任务并补齐输入",
+      description: "选择分析或选股模块，补齐市场、周期与风险等关键输入。",
+    },
+    {
+      title: "读取结论并完成复核",
+      description: "围绕结论、关键位、失效条件与候选依据进行执行前复核。",
+    },
+    {
+      title: "沉淀记录并持续跟踪",
+      description: "写入历史并定期复盘，根据需要扩展订阅配额与使用容量。",
+    },
+  ] as const,
+  pricingHeading: subscriptionTierPublicCopy.plansSectionTitle,
   pricingDesc:
-    "至少提供免费档与专业档。价格与权益以订阅页实时展示与订单对账结果为准。",
-  pricingCta: "查看完整套餐",
-  ctaSecondaryOutline: "产品介绍",
+    "免费版在登录后生效，覆盖日常研究与存档；专业版在每日股票预测与选股会话上提供更高额度。完整权益字段、访客规则与支付入口与订阅页一致。",
+  pricingBillingOptions: [
+    {
+      name: "免费使用",
+      price: "¥0",
+      note: "登录后即生效",
+      description: "覆盖基础研究流程，适合先体验再升级。",
+      features: ["每日股票预测 5 次", "每日选股会话 5 次", "支持历史写入与查看"],
+      cta: "查看免费版详情",
+    },
+    {
+      name: "月付",
+      price: "¥49/月",
+      note: "按月续费",
+      description: "适合持续跟踪阶段，按月管理预算。",
+      features: ["每日股票预测 80 次", "每日选股会话 30 次", "包含全部免费版能力"],
+      cta: "选择月付",
+    },
+    {
+      name: "季付",
+      price: "¥147/季",
+      note: "按季续费",
+      description: "适合季度节奏复盘，减少频繁续费操作。",
+      features: ["每日股票预测 80 次", "每日选股会话 30 次", "包含全部免费版能力"],
+      cta: "选择季付",
+    },
+    {
+      name: "年付",
+      price: "¥468/年",
+      note: "约合 ¥39/月",
+      description: "适合全年稳定使用，长期成本更优。",
+      features: ["每日股票预测 80 次", "每日选股会话 30 次", "包含全部免费版能力"],
+      cta: "选择年付",
+    },
+  ] as const,
+  pricingFootnote:
+    "价格与扣款结果以支付渠道回调及后台对账为准；自然日用量与各档完整说明以订阅页为准。",
+  pricingCta: subscriptionTierPublicCopy.ctaViewPlans,
+  pricingPlanCtaFree: "在订阅页查看免费版",
+  pricingPlanCtaPro: "在订阅页开通专业版",
+  pricingBadgePro: subscriptionTierPublicCopy.proRecommendedBadge,
   faqHeading: "常见问题",
   faqItems: [
     {
-      q: "这个产品会直接给交易指令或自动下单吗？",
-      a: "不会。本产品只提供研究信息与结构化分析结果，不提供下单、委托或交易执行能力。",
+      q: "智谱投研是否提供交易指令或自动下单？",
+      a: "不提供。智谱投研仅提供研究信息与结构化分析工具，不提供下单、委托或任何交易执行能力。",
     },
     {
-      q: "报告中的五态结论代表什么？",
-      a: "五态结论用于表达当前研究判断的动作倾向，包括观望、试仓、加仓、减仓、离场，并会配套风险位与失效条件。",
+      q: "五态结论如何用于实际研究决策？",
+      a: "五态结论用于表达当前研究动作倾向（观望、试仓、加仓、减仓、离场），并与风险位、目标位、失效条件配套使用，便于执行前复核与事后复盘。",
     },
     {
-      q: "为什么要看失效条件？",
-      a: "失效条件用于定义何时终止原判断，避免在市场环境变化后继续沿用过时结论，是研究计划可执行与可复盘的关键字段。",
+      q: "为什么失效条件是必看字段？",
+      a: "失效条件定义了原判断失去适用性的边界。触发后应停止沿用原方案并重新评估，避免在市场结构变化后继续执行过期结论。",
     },
     {
-      q: "订阅怎么收费？",
-      a: "套餐与价格以订阅页实时展示为准。当前版本至少包含免费档与专业档，专业档用于提供更高用量与会员权益。",
+      q: "订阅如何计费？",
+      a: "当前提供免费使用、月付、季付、年付四档。各档价格、配额与权益说明以订阅页公示为准；专业版在每日股票预测与选股会话次数上高于免费使用档。",
     },
     {
-      q: "游客可以使用哪些能力？",
-      a: "游客可在最低权益范围内体验核心流程；登录后可获得更完整的历史存档与权益体系。具体配额以页面公示与系统提示为准。",
+      q: "月付、季付、年付在权益上有区别吗？",
+      a: "三种周期的功能边界与日配额口径一致，差异在计费周期与结算金额。订阅生效状态、扣款结果与周期到期时间以订单与对账结果为准。",
+    },
+    {
+      q: "未登录与登录后有什么区别？",
+      a: "未登录可在访客配额内体验核心流程；登录后进入免费使用档，获得更完整的历史写入与权益体系。当前身份与剩余配额会在页面实时提示。",
+    },
+    {
+      q: "到期或超限后会发生什么？",
+      a: "订阅到期未续费时将按规则回落至免费使用档；当日配额超限时，页面会给出明确提示并提供升级或续费入口。",
     },
   ] as const,
   previewMeta: "报告结构示意 · 不含标的与实时行情",
@@ -210,7 +304,7 @@ export const legalCopy = {
   privacyIntro:
     "本政策说明智谱投研如何收集、使用、存储与保护您的个人信息。正文可由法务定稿后替换，版本号与更新日期以页首为准。",
   termsAccountBody:
-    "您须对账号凭证保密。订阅档位、权益边界与到期降级规则以套餐页及系统配置为准；支付成功以支付渠道回调及后台对账确认为准。",
+    "您须对账号凭证保密。免费版与专业版的权益边界、用量规则与到期降级以订阅页及系统配置为准；支付成功以支付渠道回调及后台对账确认为准。",
   thirdPartyNote:
     "涉及微信授权、支付等第三方处理时，将在本政策中列明处理类型与目的；具体以实际对接的第三方清单为准。",
 } as const;

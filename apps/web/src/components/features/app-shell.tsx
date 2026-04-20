@@ -9,6 +9,7 @@ import { ZhputianAppSidebar } from "@/components/features/zhputian-app-sidebar";
 import { ComplianceBanner } from "@/components/features/compliance-banner";
 import { AppBreadcrumb } from "@/components/features/app-breadcrumb";
 import { ThemeSwitcher } from "@/components/features/theme-switcher";
+import { subscriptionTierPublicCopy } from "@/lib/copy";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useSubscriptionStore } from "@/stores/use-subscription-store";
 
@@ -45,7 +46,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </Button>
               )}
               <Button size="sm" variant="secondary" render={<Link href="/subscription" />}>
-                订阅
+                {subscriptionTierPublicCopy.ctaViewPlansShort}
               </Button>
             </div>
           </div>

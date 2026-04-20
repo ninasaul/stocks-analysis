@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { subscriptionTierPublicCopy } from "@/lib/copy";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 
@@ -20,6 +21,10 @@ export function ComplianceFooter() {
           <Separator orientation="vertical" className="hidden h-4 md:inline-flex" />
           <Button variant="link" size="sm" className="h-auto px-1 text-xs" render={<Link href="/welcome" />}>
             产品介绍
+          </Button>
+          <Separator orientation="vertical" className="hidden h-4 md:inline-flex" />
+          <Button variant="link" size="sm" className="h-auto px-1 text-xs" render={<Link href="/subscription" />}>
+            {subscriptionTierPublicCopy.ctaViewPlansShort}
           </Button>
         </div>
       </div>

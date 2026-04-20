@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { LandingHero } from "@/components/features/landing-hero";
+import { getZhputianLandingJsonLd } from "@/lib/seo/zhputian-jsonld";
 
 export const metadata: Metadata = {
   title: "智谱投研｜单票择时研究辅助",
@@ -8,5 +10,16 @@ export const metadata: Metadata = {
 };
 
 export default function MarketingHomePage() {
-  return <LandingHero />;
+  const ld = getZhputianLandingJsonLd();
+  return (
+    <>
+      <Script
+        id="jsonld-zhputian-landing"
+        type="application/ld+json"
+        strategy="afterInteractive"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(ld) }}
+      />
+      <LandingHero />
+    </>
+  );
 }
