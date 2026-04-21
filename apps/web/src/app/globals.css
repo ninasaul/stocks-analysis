@@ -129,6 +129,44 @@
   }
 }
 
+@keyframes landing-fade-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@layer utilities {
+  .landing-hero-in {
+    animation: landing-fade-up 0.65s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .landing-hero-in-delay-1 {
+    animation-delay: 0.1s;
+  }
+  .landing-hero-in-delay-2 {
+    animation-delay: 0.2s;
+  }
+  .landing-hero-in-delay-3 {
+    animation-delay: 0.3s;
+  }
+  .landing-hero-in-delay-4 {
+    animation-delay: 0.15s;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .landing-hero-in,
+    .landing-hero-in-delay-1,
+    .landing-hero-in-delay-2,
+    .landing-hero-in-delay-3,
+    .landing-hero-in-delay-4 {
+      animation: none !important;
+    }
+  }
+}
+
 /* 单票报告打印：隐藏导航壳与参数表单，仅保留报告主体 */
 @media print {
   [data-app-print-hide] {
