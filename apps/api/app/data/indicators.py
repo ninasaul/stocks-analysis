@@ -1,0 +1,430 @@
+"""技术指标计算模块 - 10 维度技术打分体系"""
+import numpy as np
+from typing import Optional, Dict, List
+from ..core.logging import logger
+
+
+class TimingScorer:
+    """10 维度择时打分器"""
+
+    def __init__(self, history: List[Dict], ticker: str = None, market: str = None):
+        """
+        history: 日线数据列表，每项包含
+        {date, open, high, low, close, volume, amount}
+        至少需要 120 个交易日
+        """
+        self.h = history
+        self.closes = np.array([d["close"] for d in history])
+        self.volumes = np.array([d["volume"] for d in history])
+        self.highs = np.array([d["high"] for d in history])
+        self.lows = np.array([d["low"] for d in history])
+        self.opens = np.array([d["open"] for d in history])
+        self.ticker = ticker
+        self.market = market
+
+    def score_all(self) -> Dict:
+        """计算全部 9 个维度的得分"""
+        logger.info(f"开始计算股票 {self.ticker} 的技术指标")
+        try:
+            scores = {
+                # 价格维度
+                "ma_alignment": self._ma_alignment(),
+                # 创新高比例
+                "new_high_low_ratio": self._new_high_low_ratio(),
+                # 股价与10日线的关系
+                "price_vs_ma10": self._price_vs_ma10(), 
+                # 量能维度
+                "volume_price_sync": self._volume_price_sync(),
+                # 换手率波动
+                "turnover_volatility": self._turnover_volatility(),
+                # 动量维度
+                "macd_strength": self._macd_strength(),
+                # 波动维度
+                "bollinger_position": self._bollinger_position(),
+                # 平均振幅变化
+                "atr_change": self._atr_change(),
+                # 资金维度
+                "main_flow": self._main_flow(),
+            }
+
+            # 综合得分 = 各维度加权平均
+            weights = {
+                "ma_alignment": 0.2,           # 均线排列
+                "bollinger_position": 0.2,     # 布林带位置
+                "price_vs_ma10": 0.2,          # 股价与10日线的关系
+                "new_high_low_ratio": 0.1,     # 创新高比例
+                "atr_change": 0.07,            # ATR 变化
+                "volume_price_sync": 0.07,      # 量价配合度
+                "macd_strength": 0.07,          # MACD 强度
+                "turnover_volatility": 0.07,    # 换手率波动
+                "main_flow": 0.02,              # 主力资金流向
+            }
+
+            composite = sum(
+                scores[k] * weights[k] for k in weights
+            )
+
+            scores["composite"] = round(composite, 4)
+            scores["signal"] = self._composite_to_signal(composite)
+            
+            # 只有当信号不是 HOLD 时才添加买卖区间建议
+            if scores["signal"] != "HOLD":
+                scores["price_range"] = self._calculate_price_range(scores["signal"])
+
+            logger.info(f"技术指标计算完成，信号: {scores['signal']}, 综合得分: {scores['composite']}")
+            return scores
+        except Exception as e:
+            logger.error(f"计算技术指标失败: {e}")
+            return {"error": f"计算技术指标失败: {e}", "composite": 0.0, "signal": "HOLD"}
+    
+    def _calculate_price_range(self, signal: str) -> Dict:
+        """
+        计算买卖价格区间
+        
+        Args:
+            signal: 交易信号（BUY 或 SELL）
+            
+        Returns:
+            包含当前价格和相应买卖区间的字典
+        """
+        current_price = self.closes[-1]
+        
+        # 基于布林带计算价格区间
+        period = 20
+        if len(self.closes) >= period:
+            ma = np.mean(self.closes[-period:])
+            std = np.std(self.closes[-period:])
+            upper = ma + 2 * std
+            lower = ma - 2 * std
+            middle = ma
+        else:
+            # 如果数据不足，使用简单的百分比区间
+            upper = current_price * 1.05
+            middle = current_price
+            lower = current_price * 0.95
+        
+        # 基于 RSI 计算超买超卖区间
+        rsi = self._rsi_position()
+        
+        # 计算价格区间
+        price_range = {
+            "current_price": round(current_price, 2)
+        }
+        
+        # 根据信号添加相应的区间
+        if signal == "BUY":
+            # 买入区间上下限值统一上浮 2%
+            buy_low = round(lower * 1.02, 2)
+            buy_high = round(middle * 1.02, 2)
+            buy_range = {
+                "low": buy_low,
+                "high": buy_high,
+                "suggestion": "Buy in batches within this range"
+            }
+            # 根据 RSI 调整建议
+            if rsi > 0.7:  # 超卖，建议买入
+                buy_range["suggestion"] = "RSI oversold, buy actively within this range"
+            price_range["buy_range"] = buy_range
+        elif signal == "SELL":
+            # 卖出区间上下限值统一下浮 2%
+            sell_low = round(middle * 0.98, 2)
+            sell_high = round(upper * 0.98, 2)
+            sell_range = {
+                "low": sell_low,
+                "high": sell_high,
+                "suggestion": "Sell in batches within this range"
+            }
+            # 根据 RSI 调整建议
+            if rsi < -0.7:  # 超买，建议卖出
+                sell_range["suggestion"] = "RSI overbought, sell actively within this range"
+            price_range["sell_range"] = sell_range
+        
+        return price_range
+
+    # ========== 价格维度 ==========
+
+    def _ma_alignment(self) -> float:
+        """
+        指标 1：均线排列度
+
+        计算短期均线（MA5/10/20/30/60）的排列情况
+        多头排列 → 1，空头排列 → -1
+        """
+        ma5 = self._ma(5)
+        ma10 = self._ma(10)
+        ma20 = self._ma(20)
+        ma30 = self._ma(30)
+        ma60 = self._ma(60)
+
+        pairs = [(ma5, ma10), (ma10, ma20), (ma20, ma30), (ma30, ma60)]
+        bull_count = sum(1 for a, b in pairs if a > b)
+        bear_count = sum(1 for a, b in pairs if a < b)
+
+        return (bull_count - bear_count) / 4.0
+
+    def _price_vs_ma10(self) -> float:
+        """
+        指标 2：股价与 10 日线的关系
+
+        股价在 10 日线上 → 看多
+        股价在 10 日线下 → 看空
+        """
+        current_price = self.closes[-1]
+        ma10 = self._ma(10)
+        
+        # 计算股价与 10 日线的偏离百分比
+        if ma10 == 0:
+            return 0.0
+        
+        deviation = (current_price - ma10) / ma10
+        
+        # 归一化到 [-1, 1] 范围
+        # 使用 tanh 函数进行平滑归一化
+        normalized_deviation = np.tanh(deviation * 10)  # 乘以 10 是为了让变化更明显
+        
+        return float(normalized_deviation)
+
+    def _new_high_low_ratio(self, window: int = 20) -> float:
+        """
+        指标 2：N 日创新高天数占比
+
+        近 20 日中收盘价创近 60 日新高的天数占比
+        占比高 → 趋势强 → 看多
+        """
+        if len(self.closes) < 60:
+            return 0.0
+
+        recent = self.closes[-window:]
+        count = 0
+        for i in range(len(recent)):
+            idx = len(self.closes) - window + i
+            past_60 = self.closes[max(0, idx - 60):idx]
+            if len(past_60) > 0 and recent[i] >= max(past_60):
+                count += 1
+
+        ratio = count / window
+        return (ratio - 0.5) * 2  # 归一化到 [-1, 1]
+
+    # ========== 量能维度 ==========
+
+    def _volume_price_sync(self, window: int = 10) -> float:
+        """
+        指标 3：量价配合度
+
+        价涨量增 = 健康上涨 → 看多
+        价涨量缩 = 背离 → 看空
+        用近 N 日价格变化和成交量变化的相关系数衡量
+        """
+        if len(self.closes) < window + 1:
+            return 0.0
+
+        price_changes = np.diff(self.closes[-window - 1:])
+        vol_changes = np.diff(self.volumes[-window - 1:])
+
+        if np.std(price_changes) == 0 or np.std(vol_changes) == 0:
+            return 0.0
+
+        corr = np.corrcoef(price_changes, vol_changes)[0, 1]
+        return float(np.clip(corr, -1, 1))
+
+    def _turnover_volatility(self, window: int = 60) -> float:
+        """
+        指标 4：换手率波动
+
+        换手率波动急剧放大 → 情绪极端 → 反转信号
+        换手率稳定 → 趋势延续
+        """
+        if len(self.volumes) < window:
+            return 0.0
+
+        recent_vol = self.volumes[-20:]
+        long_vol = self.volumes[-window:]
+
+        recent_std = np.std(recent_vol) / (np.mean(recent_vol) + 1e-8)
+        long_std = np.std(long_vol) / (np.mean(long_vol) + 1e-8)
+
+        ratio = recent_std / (long_std + 1e-8)
+
+        # 波动率急剧放大 → 信号值偏向极端
+        if ratio > 2.0:
+            return -0.5  # 过度波动，谨慎
+        elif ratio < 0.5:
+            return 0.3   # 低波动，可能蓄势
+        else:
+            return 0.0
+
+    # ========== 动量维度 ==========
+
+    def _macd_strength(self) -> float:
+        """
+        指标 5：MACD 信号强度
+
+        MACD 柱状图（MACD - Signal）的方向和幅度
+        金叉且柱状图放大 → 强看多
+        死叉且柱状图放大 → 强看空
+        """
+        if len(self.closes) < 35:
+            return 0.0
+
+        ema12 = self._ema(12)
+        ema26 = self._ema(26)
+        dif = ema12 - ema26
+        dea = self._ema_from_array(
+            np.array([dif]), 9
+        ) if isinstance(dif, (int, float)) else 0
+
+        # 简化：用 DIF 的符号和幅度
+        price = self.closes[-1]
+        normalized = dif / (price + 1e-8) * 100
+
+        return float(np.clip(normalized / 3.0, -1, 1))
+
+    def _rsi_position(self, period: int = 14) -> float:
+        """
+        指标 6：RSI 位置
+
+        RSI > 70 → 超买 → 看空信号
+        RSI < 30 → 超卖 → 看多信号
+        RSI 在 40-60 → 中性
+        """
+        if len(self.closes) < period + 1:
+            return 0.0
+
+        deltas = np.diff(self.closes[-(period + 1):])
+        gains = np.where(deltas > 0, deltas, 0)
+        losses = np.where(deltas < 0, -deltas, 0)
+
+        avg_gain = np.mean(gains)
+        avg_loss = np.mean(losses)
+
+        if avg_loss == 0:
+            rsi = 100
+        else:
+            rs = avg_gain / avg_loss
+            rsi = 100 - (100 / (1 + rs))
+
+        # RSI → [-1, 1]：50 为中心，30 和 70 为极值
+        return float(np.clip((50 - rsi) / 30, -1, 1))
+
+    # ========== 波动维度 ==========
+
+    def _bollinger_position(self, period: int = 20) -> float:
+        """
+        指标 7：布林带位置
+
+        价格在上轨附近 → 超买 → -0.5~-1
+        价格在下轨附近 → 超卖 → +0.5~+1
+        价格在中轨附近 → 中性 → 0
+        """
+        if len(self.closes) < period:
+            return 0.0
+
+        ma = np.mean(self.closes[-period:])
+        std = np.std(self.closes[-period:])
+        upper = ma + 2 * std
+        lower = ma - 2 * std
+
+        if std == 0:
+            return 0.0
+
+        price = self.closes[-1]
+        position = (price - ma) / (2 * std)
+
+        # 反转逻辑：靠近上轨看空，靠近下轨看多
+        return float(np.clip(-position, -1, 1))
+
+    def _atr_change(self, period: int = 14) -> float:
+        """
+        指标 8：ATR 波动率变化
+
+        ATR 放大 → 波动加剧 → 趋势可能变化
+        ATR 缩小 → 波动收敛 → 可能蓄势突破
+        """
+        if len(self.closes) < period + 20:
+            return 0.0
+
+        tr_list = []
+        for i in range(-period - 20, 0):
+            tr = max(
+                self.highs[i] - self.lows[i],
+                abs(self.highs[i] - self.closes[i - 1]),
+                abs(self.lows[i] - self.closes[i - 1])
+            )
+            tr_list.append(tr)
+
+        recent_atr = np.mean(tr_list[-period:])
+        prev_atr = np.mean(tr_list[:period])
+
+        if prev_atr == 0:
+            return 0.0
+
+        change = (recent_atr - prev_atr) / prev_atr
+
+        # ATR 大幅增加 → 波动放大 → 不确定性高
+        return float(np.clip(-change * 2, -1, 1))
+
+    def _main_flow(self) -> float:
+        """
+        指标 9：主力资金流向
+
+        使用 AkShare 获取主力资金最近 5 日净流入/流出金额
+        归一化到 [-1, 1] 范围
+        """
+        if not self.ticker:
+            return 0.0
+
+        try:
+            import akshare as ak
+            # 获取主力资金数据，使用正确的参数名
+            df = ak.stock_individual_fund_flow(stock=self.ticker, market=self.market)
+            if not df.empty:
+                if '主力净流入-净额' in df.columns:
+                    # 计算最近 5 天的主力净流入总和
+                    # 注意：数据按日期升序排列，最新的在最后
+                    net_flow_5days = df['主力净流入-净额'].tail(5).sum()
+                    # 归一化到 [-1, 1]，使用 tanh 函数进行平滑归一化
+                    # 以 1 亿为阈值，这样得分会更加平滑，不会轻易达到满分值
+                    normalized_flow = np.tanh(net_flow_5days / 100000000)
+                    return float(normalized_flow)
+                else:
+                    # 如果找不到合适的列，返回 0
+                    logger.warning(f"未找到主力净流入列，列名: {list(df.columns)}")
+                    return 0.0
+        except Exception as e:
+            logger.error(f"获取主力资金数据失败: {e}")
+        return 0.0
+
+    # ========== 辅助方法 ==========
+
+    def _ma(self, period: int) -> float:
+        if len(self.closes) < period:
+            return float(np.mean(self.closes))  # 使用当前所有数据计算
+        return float(np.mean(self.closes[-period:]))
+
+    def _ema(self, period: int) -> float:
+        if len(self.closes) < period:
+            return self.closes[-1]
+        multiplier = 2 / (period + 1)
+        ema = self.closes[-(period + 20)]  # 从更早开始计算
+        for price in self.closes[-(period + 19):]:
+            ema = (price - ema) * multiplier + ema
+        return float(ema)
+
+    def _ema_from_array(self, arr: np.ndarray, period: int) -> float:
+        if len(arr) < 2:
+            return float(arr[-1]) if len(arr) > 0 else 0.0
+        multiplier = 2 / (period + 1)
+        ema = float(arr[0])
+        for val in arr[1:]:
+            ema = (float(val) - ema) * multiplier + ema
+        return ema
+
+    @staticmethod
+    def _composite_to_signal(score: float) -> str:
+        """综合得分转为交易信号"""
+        if score >= 0.2:
+            return "BUY"
+        elif score <= -0.2:
+            return "SELL"
+        else:
+            return "HOLD"
