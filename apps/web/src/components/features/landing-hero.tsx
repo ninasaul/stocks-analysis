@@ -25,6 +25,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { FallingPattern } from "@/components/features/falling-pattern";
 
 const featureIcons = [FileTextIcon, MessagesSquareIcon, HistoryIcon, SparklesIcon] as const;
 
@@ -81,8 +82,8 @@ function LandingReportPreview() {
       <h2 id="landing-report-preview-heading" className="sr-only">
         {landingCopy.previewTitle}
       </h2>
-      <div className="border-border/45 bg-card/95 overflow-hidden rounded-xl border text-left shadow-sm">
-        <div className="border-border/35 bg-muted/50 border-b px-3 py-2">
+      <div className="border-border/45 bg-card/80 overflow-hidden rounded-xl border text-left shadow-sm backdrop-blur-md supports-backdrop-filter:bg-card/58">
+        <div className="border-border/35 border-b bg-muted/45 px-3 py-2 backdrop-blur-sm supports-backdrop-filter:bg-muted/32">
           <div className="flex items-center gap-2">
             <span className="bg-red-500/80 inline-flex size-2 rounded-full" aria-hidden />
             <span className="bg-amber-500/80 inline-flex size-2 rounded-full" aria-hidden />
@@ -420,9 +421,16 @@ export function LandingHero() {
     <div className="bg-background">
       <section
         aria-labelledby="landing-hero-title"
-        className="relative border-b border-border/35 bg-linear-to-b from-muted/35 via-background to-background pb-14 pt-10 md:pb-20 md:pt-14"
+        className="relative isolate flex min-h-[72vh] flex-col overflow-hidden border-b border-border/35 md:min-h-[78vh]"
       >
-        <div className="mx-auto grid w-full max-w-6xl items-center gap-10 px-4 md:px-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-10">
+        <div className="pointer-events-none absolute inset-0 z-0 min-h-full" aria-hidden>
+          <FallingPattern className="h-full min-h-full p-0" blurIntensity="0.9em" duration={160} />
+        </div>
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-1 h-28 bg-linear-to-t from-background to-transparent md:h-36"
+          aria-hidden
+        />
+        <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center gap-10 px-4 py-16 md:px-6 md:py-24 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-center lg:gap-10">
           <div className="flex max-w-xl flex-col items-center text-center lg:items-start lg:text-left">
             <h1
               id="landing-hero-title"
