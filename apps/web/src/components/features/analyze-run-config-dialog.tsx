@@ -15,6 +15,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { AnalysisInput, PreferenceSnapshot } from "@/lib/contracts/domain";
+import { ANALYZE_MODEL_OPTIONS, coerceAnalyzeModel } from "@/lib/analyze-preferences-schema";
+import { useAnalyzePreferencesStore } from "@/stores/use-analyze-preferences-store";
+import { useStoreHydrated } from "@/hooks/use-store-hydrated";
 import {
   fuzzyAnalyzeSymbolScore,
   parseAnalyzeSearchInput,
@@ -60,12 +63,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-const MODEL_OPTIONS = [
-  "Qwen3.5-Flash",
-  "Qwen3.5-Plus",
-  "Qwen3.5-Max",
-  "Qwen3.5-Coder",
-] as const;
+const MODEL_OPTIONS = ANALYZE_MODEL_OPTIONS;
 
 type AnalysisDepth = 1 | 2 | 3 | 4 | 5;
 type AnalystRole = "market" | "fundamental" | "news" | "social";
@@ -343,7 +341,8 @@ type AnalyzeRunConfigDialogProps = {
   riskTier: AnalysisInput["risk_tier"];
   holdingHorizon: AnalysisInput["holding_horizon"];
   linkedPreference: PreferenceSnapshot | null;
-  onConfirm: (payload: AnalyzeRunConfigConfirm) => void | Promise<void>;
+  /** 返回是否已成功生成报告；为 true 时才会把当次配置写入「设置」中的分析偏好。 */
+  onConfirm: (payload: AnalyzeRunConfigConfirm) => boolean | Promise<boolean>;
 };
 
 export function AnalyzeRunConfigDialog({
@@ -375,27 +374,47 @@ export function AnalyzeRunConfigDialog({
   const [language, setLanguage] = useState<LanguagePref>("zh");
   const [analysisDate, setAnalysisDate] = useState(() => formatDateInput(new Date()));
   const [previewNonce, setPreviewNonce] = useState(0);
+  const prefsHydrated = useStoreHydrated(useAnalyzePreferencesStore);
 
   useEffect(() => {
     if (!open) return;
     queueMicrotask(() => {
       setSearchDraft(searchKeyword.trim());
       setFallbackMarket(market);
-      setDepth(inferDepth(riskTier, holdingHorizon));
       const themes = linkedPreference?.themes ?? [];
-      setAnalysts(parseAnalystsFromThemes(themes));
-      setQuickModel(parseModelFromThemes(themes, "model_quick", MODEL_OPTIONS[0]));
-      setDeepModel(parseModelFromThemes(themes, "model_deep", MODEL_OPTIONS[1]));
-      const hasFeatureTag = themes.some((t) => t.startsWith("feature:"));
-      setSentiment(hasFeatureTag ? parseFeature(themes, "sentiment") : true);
-      setRiskAssessment(hasFeatureTag ? parseFeature(themes, "risk_assessment") : true);
-      setLanguage(parseLangFromThemes(themes));
+      if (linkedPreference) {
+        setDepth(inferDepth(riskTier, holdingHorizon));
+        setAnalysts(parseAnalystsFromThemes(themes));
+        setQuickModel(parseModelFromThemes(themes, "model_quick", MODEL_OPTIONS[0]));
+        setDeepModel(parseModelFromThemes(themes, "model_deep", MODEL_OPTIONS[1]));
+        const hasFeatureTag = themes.some((t) => t.startsWith("feature:"));
+        setSentiment(hasFeatureTag ? parseFeature(themes, "sentiment") : true);
+        setRiskAssessment(hasFeatureTag ? parseFeature(themes, "risk_assessment") : true);
+        setLanguage(parseLangFromThemes(themes));
+      } else if (prefsHydrated) {
+        const p = useAnalyzePreferencesStore.getState();
+        setDepth(p.depth);
+        setAnalysts(new Set(p.analystRoles));
+        setQuickModel(p.quickModel);
+        setDeepModel(p.deepModel);
+        setSentiment(p.sentiment);
+        setRiskAssessment(p.riskAssessment);
+        setLanguage(p.language);
+      } else {
+        setDepth(inferDepth(riskTier, holdingHorizon));
+        setAnalysts(parseAnalystsFromThemes([]));
+        setQuickModel(parseModelFromThemes([], "model_quick", MODEL_OPTIONS[0]));
+        setDeepModel(parseModelFromThemes([], "model_deep", MODEL_OPTIONS[1]));
+        setSentiment(true);
+        setRiskAssessment(true);
+        setLanguage(parseLangFromThemes([]));
+      }
       setAnalysisDate(formatDateInput(new Date()));
       setPreviewNonce(0);
       setSearchFocused(false);
       setActiveSearchIndex(0);
     });
-  }, [open, searchKeyword, market, riskTier, holdingHorizon, linkedPreference]);
+  }, [open, searchKeyword, market, riskTier, holdingHorizon, linkedPreference, prefsHydrated]);
 
   useEffect(() => {
     if (!open) return;
@@ -558,7 +577,18 @@ export function AnalyzeRunConfigDialog({
       preference_snapshot,
     };
     const displayKeyword = `${parsed.market}.${parsed.symbol}`;
-    await onConfirm({ input, displayKeyword });
+    const ok = await onConfirm({ input, displayKeyword });
+    if (ok) {
+      useAnalyzePreferencesStore.getState().syncFromDialog({
+        depth,
+        analystRoles: [...analysts],
+        quickModel: coerceAnalyzeModel(quickModel, MODEL_OPTIONS[0]),
+        deepModel: coerceAnalyzeModel(deepModel, MODEL_OPTIONS[1]),
+        sentiment,
+        riskAssessment,
+        language,
+      });
+    }
   };
 
   const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {

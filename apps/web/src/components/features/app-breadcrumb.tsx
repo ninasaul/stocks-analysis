@@ -17,6 +17,7 @@ const labels: Record<string, string> = {
   watchlist: "自选",
   history: "历史与复盘",
   account: "账号",
+  settings: "设置",
 };
 
 export function AppBreadcrumb() {
@@ -34,6 +35,14 @@ export function AppBreadcrumb() {
     crumbs.push({ href: "/app", label: "工作台" });
     crumbs.push({ href: "/app/history", label: "历史与复盘" });
     crumbs.push({ href: pathname, label: "存档详情", current: true });
+  } else if (segments[1] === "settings" && segments[2] === "analysis") {
+    crumbs.push({ href: "/app", label: "工作台" });
+    crumbs.push({ href: "/app/settings", label: "设置" });
+    crumbs.push({ href: pathname, label: "分析设置", current: true });
+  } else if (segments[1] === "settings" && segments[2] === "notifications") {
+    crumbs.push({ href: "/app", label: "工作台" });
+    crumbs.push({ href: "/app/settings", label: "设置" });
+    crumbs.push({ href: pathname, label: "通知设置", current: true });
   } else {
     crumbs.push({ href: "/app", label: "工作台" });
     const seg = segments[1] ?? "";
