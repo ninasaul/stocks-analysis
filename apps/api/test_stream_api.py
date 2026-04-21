@@ -13,35 +13,58 @@
 import requests
 import time
 import json
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+
+TEST_USER = {
+    "username": "tester",
+    "password": "Test123456"
+}
+
+def get_access_token():
+    """获取访问令牌"""
+    url = f"{BASE_URL}/api/auth/login"
+    response = requests.post(url, data=TEST_USER)
+    if response.status_code == 200:
+        return response.json()["access_token"]
+    else:
+        raise Exception(f"登录失败: {response.text}")
 
 
 def test_stream_api(message, session_id):
     """
     测试流式对话接口
-    
+
     Args:
         message: 用户消息
         session_id: 会话ID
     """
-    url = "http://localhost:8000/api/dialogue/stream"
+    access_token = get_access_token()
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    url = f"{BASE_URL}/api/dialogue/stream"
     params = {
         "message": message,
         "session_id": session_id
     }
-    
+
     print(f"\n测试流式对话接口...")
     print(f"请求URL: {url}")
     print(f"消息: {message}")
     print(f"会话ID: {session_id}")
     print("=" * 80)
-    
+
     try:
         # 发送请求并处理流式响应
-        with requests.post(url, params=params, stream=True) as response:
+        with requests.post(url, params=params, headers=headers, stream=True) as response:
             if response.status_code == 200:
                 print("连接成功，开始接收流式响应...")
                 print("-" * 80)
-                
+
                 # 处理SSE流
                 full_response = ""
                 for line in response.iter_lines():
@@ -57,14 +80,14 @@ def test_stream_api(message, session_id):
                             full_response += chunk
                             print(f"收到数据: {chunk}")
                             print("-" * 80)
-                
+
                 print("\n完整响应:")
                 print(full_response)
                 print("=" * 80)
             else:
                 print(f"请求失败，状态码: {response.status_code}")
                 print(f"响应内容: {response.text}")
-    
+
     except Exception as e:
         print(f"测试过程中出现错误: {e}")
 

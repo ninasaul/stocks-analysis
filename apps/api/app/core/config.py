@@ -49,6 +49,11 @@ class Config:
     # 计算最大数据需求天数
     MAX_INDICATOR_DAYS = max(INDICATOR_MIN_DAYS.values())
     
+    # JWT 配置
+    SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+    ALGORITHM = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    
     # 提供商配置映射
     PROVIDER_CONFIG = {
         "aliyun": {
