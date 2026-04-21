@@ -6,7 +6,7 @@ import { ThemeSwitcher } from "@/components/features/theme-switcher";
 
 export function MarketingHeader() {
   return (
-    <header className="bg-background/95 supports-backdrop-filter:bg-background/80 sticky top-0 z-30 border-b backdrop-blur">
+    <header className="border-border/40 bg-background/95 supports-backdrop-filter:bg-background/80 sticky top-0 z-30 border-b backdrop-blur">
       <div className="flex w-full items-center justify-between gap-3 px-4 py-3 md:px-6">
         <Link
           href="/"

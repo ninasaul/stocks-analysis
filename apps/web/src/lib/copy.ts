@@ -1,12 +1,5 @@
 /** User-facing product copy (avoid dev-only wording in UI). */
 
-export const compliance = {
-  researchDisclaimer:
-    "仅供研究参考，不构成投资建议。本产品不提供下单、委托或任何交易执行能力。",
-  toolPositioning:
-    "本产品为证券研究信息与技术工具，不构成证券投资咨询或资产管理服务。",
-} as const;
-
 /** 落地页、订阅页、欢迎页与 App 内引导共用（与 `use-subscription-store` 套餐名一致）。 */
 export const subscriptionTierPublicCopy = {
   freeTierName: "免费版",
@@ -131,83 +124,75 @@ export const accountCopy = {
 } as const;
 
 export const landingCopy = {
-  heroEyebrow: "智谱投研 · 结构化证券研究工具",
-  heroTitleLine1: "单票择时研究",
-  heroTitleLine2: "标准化交付与复核",
+  heroEyebrow: "智谱投研 · 面向个人投资者的研究辅助",
+  heroTitleLine1: "单票择时分析",
+  heroTitleLine2: "结构化报告与复核",
   heroLead:
-    "以统一评分框架整合技术、结构与事件信号，稳定输出五态结论与可执行研究计划。",
+    "在统一评分下汇总技术、结构与风险、事件折扣等维度，输出五态结论与研究计划要点，供您整理单票择时判断。",
   heroSupport:
-    "报告覆盖关注区间、风险位、观察目标位与失效条件，便于团队按同一口径复核与留痕。",
+    "报告载明关注区间、风险位、观察目标位及失效条件，便于对照关键价位，并支持导出或打印以便自行留档。",
   heroBoundary:
     "仅提供研究信息与分析工具，不构成投资建议，不提供任何交易执行能力。",
   heroCtaPrimary: "进入工作台",
-  heroCtaSecondary: "查看使用方式",
+  heroCtaSecondary: "查看使用说明",
   heroCtaLogin: "登录或注册",
-  heroLoginHint: "登录后可在工作台使用股票预测与选股对话，并统一查看订阅与用量状态。",
+  heroLoginHint: "登录后可使用股票预测与选股对话，并在同一处查看订阅与当日剩余次数。",
   heroStats: [
-    { value: "5", label: "五态结论口径" },
-    { value: "多维", label: "统一评分框架" },
-    { value: "固定字段", label: "研究计划结构" },
+    { value: "5", label: "五态结论" },
+    { value: "综合", label: "评分与拆解" },
+    { value: "固定", label: "报告版式字段" },
   ] as const,
-  heroTrustHeading: "面向研究闭环的统一交付字段",
-  heroTrustPills: ["五态结论口径", "风险位与失效条件", "结构化留痕与导出"] as const,
-  featuresHeading: "研究工作流与交付标准",
+  heroTrustHeading: "报告中的重点信息",
+  heroTrustPills: ["五态与综合评分", "关键价位与失效条件", "导出与打印留痕"] as const,
+  featuresHeading: "核心功能说明",
   featuresSectionLead:
-    "围绕“分析、筛选、复盘”三类任务构建统一工作流，确保输入、结论与回看使用同一字段口径。",
+    "已确定标的：生成单票结构化择时报告。尚未收窄范围：以选股对话确认条件并获取候选及说明。登录后：可查阅已保存建议并进入复盘。内容由大模型在您提供信息的基础上生成，仅供研究参考，请结合公开信息自行判断与复核。",
+  featuresMatrixSummary: {
+    label: "功能概览",
+    value: "4",
+    caption: "单票分析 · 选股辅助 · 建议记录 · 智能生成",
+  } as const,
+  featuresAnalyzeCta: "进入股票预测",
   features: [
     {
-      scope: "工作流 A",
-      title: "单票分析与执行参考",
+      scope: "股票预测",
+      title: "单票结构化择时报告",
       description:
-        "针对单只标的输出动作倾向、置信度、风险等级与关键价位，并同步给出失效条件与结论有效期。",
-      deliverable: "五态结论、关注区间、风险位、目标位、失效条件",
-      useCase: "用于盘中决策前复核、盘后归因与短周期跟踪。",
+        "一页呈现结论倾向、综合评分、风险等级与研究计划，并标明关注区间、风险位、观察目标位及失效条件；支持 Markdown 导出或浏览器打印，便于留档与复核。",
+      deliverable: "固定版式、关键价位、导出与打印",
+      useCase: "单票研判、核对关键价位与失效条件时使用。",
     },
     {
-      scope: "工作流 B",
-      title: "偏好收敛与候选生成",
+      scope: "选股对话",
+      title: "条件化候选筛选",
       description:
-        "通过对话逐步确认风险偏好、持有周期与主题约束，生成可解释的候选清单并保留筛选依据。",
-      deliverable: "偏好快照、候选列表、入选理由与淘汰说明",
-      useCase: "用于建立待研究标的池，并一键衔接至单票分析。",
+        "以对话方式确认市场、风险偏好与持有周期等条件，生成附带依据说明的候选列表；可按需进入单票报告，使筛选结论与深读分析在同一路径内衔接。",
+      deliverable: "偏好摘要、候选依据、衔接单票分析",
+      useCase: "关注面较宽、需可解释筛选再下钻时使用。",
     },
     {
-      scope: "工作流 C",
-      title: "历史存档与复盘追踪",
+      scope: "登录后",
+      title: "建议记录与复盘",
       description:
-        "登录后自动写入建议记录并汇总复盘指标，支持按时间回看同口径字段下的历史判断与执行结果。",
-      deliverable: "建议存档、复盘统计、同口径历史回看视图",
-      useCase: "用于策略迭代评估、团队复盘与流程审计留痕。",
+        "登录后自动保存股票预测相关建议，支持按时间查阅当时结论与复盘摘要；列表与复盘所涉字段口径与正式报告一致，便于对照当时判断。",
+      deliverable: "建议列表、复盘视图、口径一致",
+      useCase: "留存研究记录、定期回顾判断质量时使用。",
     },
     {
-      scope: "工作流 D",
-      title: "权益配额与使用治理",
+      scope: "智能生成",
+      title: "大模型驱动的研究输出",
       description:
-        "在统一订阅规则下管理分析与选股日配额，并在超限、到期、降级等场景给出一致提示与升级路径。",
-      deliverable: "档位口径、日配额提示、超限与到期处理规则",
-      useCase: "用于保障高频使用下的资源可控、权限透明与体验一致。",
+        "股票预测与选股说明均由大模型在您提交信息的基础上生成：单票写入固定版式字段，选股结合对话输出候选与自然语言依据；均可导出或打印，决策与风险须由您本人把关。",
+      deliverable: "模型说明、版式字段、与对话衔接",
+      useCase: "借助 AI 汇总与表述要点、自行完成决策把关时使用。",
     },
   ] as const,
-  howItWorksHeading: "标准使用路径",
-  howItWorksLead:
-    "按统一路径推进研究任务，减少跨模块切换与口径偏差。",
-  howItWorksSteps: [
-    {
-      title: "明确任务并补齐输入",
-      description: "选择分析或选股模块，补齐市场、周期与风险等关键输入。",
-    },
-    {
-      title: "读取结论并完成复核",
-      description: "围绕结论、关键位、失效条件与候选依据进行执行前复核。",
-    },
-    {
-      title: "沉淀记录并持续跟踪",
-      description: "写入历史并定期复盘，根据需要扩展订阅配额与使用容量。",
-    },
-  ] as const,
+  howItWorksHeading: "使用说明",
+  howItWorksBody:
+    "已确定标的：在「股票预测」中生成结构化报告。尚未确定范围：在「选股对话」中确认条件并获取候选及说明。保存与查阅历史建议请先登录。预测与选股分计日次数，用尽时按页面提示处理。",
   pricingHeading: subscriptionTierPublicCopy.plansSectionTitle,
   pricingDesc:
-    "免费版在登录后生效，覆盖日常研究与存档；专业版在每日股票预测与选股会话上提供更高额度。完整权益字段、访客规则与支付入口与订阅页一致。",
+    "免费版登录后生效，含基础研究与历史存档；专业版在股票预测与选股会话的每日次数上更高。访客规则、权益字段与支付入口以订阅页为准。",
   pricingBillingOptions: [
     {
       name: "免费使用",
@@ -242,8 +227,8 @@ export const landingCopy = {
       cta: "选择年付",
     },
   ] as const,
-  pricingFootnote:
-    "价格与扣款结果以支付渠道回调及后台对账为准；自然日用量与各档完整说明以订阅页为准。",
+  pricingBelowPlansNote:
+    "登录后为免费版；更高额度见订阅页。扣款与到账以支付渠道及后台为准；日用量与各档说明见订阅页。",
   pricingCta: subscriptionTierPublicCopy.ctaViewPlans,
   pricingPlanCtaFree: "在订阅页查看免费版",
   pricingPlanCtaPro: "在订阅页开通专业版",
@@ -287,9 +272,38 @@ export const landingCopy = {
   previewStatesLine: "观望 · 试仓 · 加仓 · 减仓 · 离场",
   previewRows: ["技术信号摘要", "综合得分", "风险位与失效条件"] as const,
   previewPlaceholder: "—",
-  complianceTrigger: "法律与产品定位说明",
-  complianceTitle: "研究工具定位与使用边界",
-  complianceBody: `${compliance.toolPositioning}不提供收益承诺。${compliance.researchDisclaimer}`,
+} as const;
+
+export const marketingFooterCopy = {
+  brandTagline: "面向个人投资者的单票择时研究辅助：结构化报告、选股对话与建议存档。",
+  brandDisclaimer: "仅供研究参考，不构成投资建议；不提供交易执行。",
+  columns: [
+    {
+      title: "产品",
+      links: [
+        { href: "/#landing-features", label: "功能" },
+        { href: "/#landing-pricing", label: "套餐与价格" },
+        { href: "/#landing-how", label: "使用说明" },
+        { href: "/welcome", label: "产品介绍" },
+      ],
+    },
+    {
+      title: "账户",
+      links: [
+        { href: "/login", label: "登录" },
+        { href: "/subscription", label: "订阅与配额" },
+        { href: "/app/analyze", label: "进入工作台" },
+        { href: "/#landing-faq", label: "常见问题" },
+      ],
+    },
+    {
+      title: "法律信息",
+      links: [
+        { href: "/privacy", label: "隐私政策" },
+        { href: "/terms", label: "服务条款" },
+      ],
+    },
+  ] as const,
 } as const;
 
 export const welcomeCopy = {

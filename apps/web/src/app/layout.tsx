@@ -22,6 +22,10 @@ export const metadata: Metadata = {
     template: "%s | 智谱投研",
   },
   description: "单只股票择时研究辅助：五态结论、研究计划、选股对话与订阅管理。",
+  icons: {
+    icon: [{ url: "/logo_light.svg", type: "image/svg+xml" }],
+    shortcut: "/logo_light.svg",
+  },
 };
 
 export default function RootLayout({
