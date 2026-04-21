@@ -3,6 +3,8 @@
 > 基于 TradingAgents-CN 的 Bull/Bear 辩论机制
 > 砍掉一切非核心模块，只保留"该不该买"和"什么时候买/卖"
 
+**与产品文档的关系**：智谱投研侧「股票分析 Agent 编排」的阶段划分、子 Agent 边界、跨链衔接与降级等产品定义见 `docs/product-requirements.md` 第 5 章 **5.6**。本文档偏实现参考与历史简化方案；若与 PRD 表述冲突，以 `product-requirements.md` 为准。
+
 ---
 
 ## 一、设计哲学：做减法

@@ -17,8 +17,15 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Stocks analysis",
-  description: "Next.js frontend for stocks-analysis-simple",
+  title: {
+    default: "智谱投研",
+    template: "%s | 智谱投研",
+  },
+  description: "单只股票择时研究辅助：五态结论、研究计划、选股对话与订阅管理。",
+  icons: {
+    icon: [{ url: "/logo_light.svg", type: "image/svg+xml" }],
+    shortcut: "/logo_light.svg",
+  },
 };
 
 export default function RootLayout({
@@ -28,7 +35,8 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="zh-CN"
+      suppressHydrationWarning
       className={cn("h-full", "antialiased", geistSans.variable, geistMono.variable, "font-sans", inter.variable)}
     >
       <body className="flex min-h-full flex-col">

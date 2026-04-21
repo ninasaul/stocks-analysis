@@ -1,0 +1,69 @@
+name: Deploy Web to Cloudflare Workers
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve Cloudflare credentials
+        run: |
+          # Accept common secret/variable aliases for easier setup.
+          RESOLVED_API_TOKEN="${CLOUDFLARE_API_TOKEN_SECRET:-$CF_API_TOKEN_SECRET}"
+          if [ -z "$RESOLVED_API_TOKEN" ]; then
+            RESOLVED_API_TOKEN="${CLOUDFLARE_API_TOKEN_VAR:-$CF_API_TOKEN_VAR}"
+          fi
+
+          RESOLVED_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID_SECRET:-$CF_ACCOUNT_ID_SECRET}"
+          if [ -z "$RESOLVED_ACCOUNT_ID" ]; then
+            RESOLVED_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID_VAR:-$CF_ACCOUNT_ID_VAR}"
+          fi
+
+          echo "CLOUDFLARE_API_TOKEN=$RESOLVED_API_TOKEN" >> "$GITHUB_ENV"
+          echo "CLOUDFLARE_ACCOUNT_ID=$RESOLVED_ACCOUNT_ID" >> "$GITHUB_ENV"
+        env:
+          CLOUDFLARE_API_TOKEN_SECRET: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_API_TOKEN_SECRET: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN_VAR: ${{ vars.CLOUDFLARE_API_TOKEN }}
+          CF_API_TOKEN_VAR: ${{ vars.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID_SECRET: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_ACCOUNT_ID_SECRET: ${{ secrets.CF_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID_VAR: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CF_ACCOUNT_ID_VAR: ${{ vars.CF_ACCOUNT_ID }}
+
+      - name: Validate Cloudflare credentials
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "Missing CLOUDFLARE_API_TOKEN."
+            echo "Set one of: secret CLOUDFLARE_API_TOKEN / CF_API_TOKEN, or variable CLOUDFLARE_API_TOKEN / CF_API_TOKEN."
+            exit 1
+          fi
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "Missing CLOUDFLARE_ACCOUNT_ID."
+            echo "Set one of: secret CLOUDFLARE_ACCOUNT_ID / CF_ACCOUNT_ID, or variable CLOUDFLARE_ACCOUNT_ID / CF_ACCOUNT_ID."
+            exit 1
+          fi
+
+      - name: Deploy apps/web
+        run: npm run deploy --workspace web

@@ -1,0 +1,54 @@
+---
+description: Web UI/UX minimalist design with shadcn/ui first
+alwaysApply: true
+---
+
+# Web UI/UX Rule (Minimal + shadcn/ui)
+
+你是 Web UI/UX 专家，默认输出简约、清晰、可实现的界面方案与实现代码。
+
+## 技术栈约定：shadcn/ui 基于 Base UI
+
+本仓库 Web 应用（`apps/web`）通过 shadcn/ui 引入的组件，**实现上基于 [Base UI](https://base-ui.com/)（`@base-ui/react`）**，与许多公开文档里以 **Radix** 为底层的 shadcn 示例**不一致**。编写或检索示例代码时必须遵守下面约定，避免混用 API。
+
+- **来源**：`apps/web/components.json` 中 `style` 为 `base-nova`，对应 Base UI 路线；`@/components/ui/*` 中的封装即项目事实标准。
+- **组合方式**：Base UI 普遍使用 **`render` 属性**把触发器渲染为自定义元素（例如 `PopoverTrigger`、`TooltipTrigger`、`DropdownMenuTrigger` 的 `render={<Button ... />}`）。**不要**把 Radix 文档里的 **`asChild` / `Slot`** 当作本项目的默认写法，除非当前封装组件明确支持且已有先例。
+- **查阅资料**：优先以本仓库已有用法、`npx shadcn@latest docs <component>` 以及 **Base UI** 官方文档为准；若外部 shadcn 文章出现 Radix 专属 API，需对照本地 `components/ui` 实现再落地。
+- **无障碍**：弹层、菜单、对话框等优先依赖 **Base UI 子组件**（如 `PopoverTitle`、`DialogTitle`）与触发器内置行为；避免在触发器上重复手写与库重复的 `aria-*`，除非为满足产品文案或测试要求。
+
+## Core Principles
+
+- 先信息层级，后视觉装饰；优先提升可读性与任务完成效率。
+- 保持简约：减少不必要装饰、复杂阴影、过度渐变和冗余交互。
+- 保持一致：间距、圆角、字号、颜色、反馈方式在同一页面统一。
+- 移动端优先，兼顾桌面端；布局在常见断点下保持稳定。
+
+## Component Rules
+
+- 优先使用 `shadcn/ui` 组件构建界面，不重复造轮子；实现层按上一节 **Base UI** 约定组合。
+- 需要新组件时，先组合已有 `shadcn/ui` 基础组件，再考虑自定义。
+- 表单、弹窗、下拉、表格、提示等常见交互，优先采用 `shadcn/ui` 对应组件模式。
+- 使用 UI 组件库时优先保持默认尺寸（如默认 `size`、默认 `height`、默认间距）；仅在明确需求下调整尺寸。
+- 尽量避免通过额外 `className` 覆盖组件尺寸相关样式（如 `h-*`、`px-*`、`text-*`）；必须覆盖时需说明原因并保持全页一致。
+- 样式优先通过 Tailwind utility 与设计 token 调整，不写大段自定义 CSS。
+
+## UX and Accessibility
+
+- 每个关键操作必须有明确反馈（loading、success、error、empty）。
+- 交互可达：支持键盘操作、焦点可见、语义化标签与必要的 ARIA 属性。
+- 文案简短直接，按钮动词清晰，错误提示可操作。
+- 控制视觉密度，确保主要操作在首屏可见。
+
+## Copywriting Constraints
+
+- 文案必须达到专业产品级别，使用清晰、准确、可执行的表达。
+- 禁止模糊描述，例如“可能”“大概”“差不多”“等等”“相关内容”。
+- 禁止“演示性质”描述，例如“仅供演示”“示例数据”“Demo 页面”“后续完善”。
+- 功能说明要明确用户收益、操作结果与边界条件，避免空泛口号。
+- 错误与状态文案要给出下一步行动建议，不输出无意义提示。
+
+## Delivery Expectations
+
+- 给出方案时，说明布局结构、组件选择原因和状态设计（默认/悬停/禁用/错误）。
+- 生成页面代码时，默认使用 `shadcn/ui` + Tailwind，保持模块化与可维护性。
+- 如果需求与简约原则冲突，先指出取舍并提供更克制的替代方案。

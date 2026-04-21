@@ -29,6 +29,7 @@ build
 .env
 .env.local
 .env.*.local
+.dev.vars
 
 # OS / IDE
 .DS_Store
