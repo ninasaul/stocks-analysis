@@ -28,6 +28,7 @@ import { buildMockBaseQuote, hashCode, type MockBaseQuote } from "@/lib/mock-bas
 import { analyzeCopy, subscriptionTierPublicCopy } from "@/lib/copy";
 import { useAnalysisStore } from "@/stores/use-analysis-store";
 import { useArchiveStore } from "@/stores/use-archive-store";
+import { useNotificationPreferencesStore } from "@/stores/use-notification-preferences-store";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -916,7 +917,9 @@ function AnalyzePageContent() {
       setHoldingHorizon(h.preference_snapshot.holding_horizon);
       setLinkedPreference(h.preference_snapshot);
       setPendingHandoff(null);
-      toast.message(analyzeCopy.handoffToast);
+      if (useNotificationPreferencesStore.getState().notifyTaskComplete) {
+        toast.message(analyzeCopy.handoffToast);
+      }
     });
   }, [pendingHandoff, setPendingHandoff]);
 
@@ -957,8 +960,10 @@ function AnalyzePageContent() {
     setHoldingHorizon(input.holding_horizon);
     setLinkedPreference(input.preference_snapshot ?? null);
     const ok = await generateReport(input);
-    if (ok) toast.success("报告已更新");
-    else if (useAnalysisStore.getState().error === "quota") setQuotaOpen(true);
+    if (ok && useNotificationPreferencesStore.getState().notifyTaskComplete) {
+      toast.success("报告已更新");
+    } else if (useAnalysisStore.getState().error === "quota") setQuotaOpen(true);
+    return ok;
   };
 
   const downloadMd = () => {
@@ -972,7 +977,9 @@ function AnalyzePageContent() {
     a.download = `择时报告-${activeReport.market}.${activeReport.symbol}-${new Date().toISOString().slice(0, 10)}.md`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.message(analyzeCopy.exportMdToast);
+    if (useNotificationPreferencesStore.getState().notifyWorkspaceActions) {
+      toast.message(analyzeCopy.exportMdToast);
+    }
   };
 
   const downloadHtml = () => {
@@ -985,7 +992,9 @@ function AnalyzePageContent() {
     a.download = `择时报告-${activeReport.market}.${activeReport.symbol}-${new Date().toISOString().slice(0, 10)}.html`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.message("HTML 报告已导出");
+    if (useNotificationPreferencesStore.getState().notifyWorkspaceActions) {
+      toast.message("HTML 报告已导出");
+    }
   };
 
   const printPdf = () => {
@@ -1006,7 +1015,9 @@ function AnalyzePageContent() {
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      toast.success(`${label}已复制`);
+      if (useNotificationPreferencesStore.getState().notifyWorkspaceActions) {
+        toast.success(`${label}已复制`);
+      }
       return;
     } catch {
       const ta = document.createElement("textarea");
@@ -1018,7 +1029,9 @@ function AnalyzePageContent() {
       ta.select();
       try {
         document.execCommand("copy");
-        toast.success(`${label}已复制`);
+        if (useNotificationPreferencesStore.getState().notifyWorkspaceActions) {
+          toast.success(`${label}已复制`);
+        }
       } catch {
         toast.error("复制失败，请手动复制");
       } finally {
@@ -1659,7 +1672,7 @@ function AnalyzePageContent() {
         linkedPreference={linkedPreference}
         onConfirm={async ({ input, displayKeyword }) => {
           setConfigOpen(false);
-          await executeAnalysis(input, displayKeyword);
+          return await executeAnalysis(input, displayKeyword);
         }}
       />
 

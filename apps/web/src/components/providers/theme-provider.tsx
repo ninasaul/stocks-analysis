@@ -40,8 +40,13 @@ export function ThemeProvider({
   storageKey = "stocks-theme",
   enableSystem = true,
 }: ThemeProviderProps) {
-  const [theme, setThemeState] = useState<Theme>(() => getStoredTheme(storageKey, defaultTheme));
+  /** 首帧必须与 SSR 一致：不在 useState 初始化里读 localStorage，否则客户端 hydration 会与服务端 HTML 不一致。 */
+  const [theme, setThemeState] = useState<Theme>(defaultTheme);
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme | undefined>(undefined);
+
+  useEffect(() => {
+    setThemeState(getStoredTheme(storageKey, defaultTheme));
+  }, [storageKey, defaultTheme]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");

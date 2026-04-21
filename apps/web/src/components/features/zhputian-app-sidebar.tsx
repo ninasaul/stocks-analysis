@@ -3,10 +3,18 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { ChartLineIcon, CircleUserIcon, HistoryIcon, MessageCircleIcon, StarIcon } from "lucide-react";
+import {
+  ChartLineIcon,
+  CircleUserIcon,
+  HistoryIcon,
+  MessageCircleIcon,
+  SettingsIcon,
+  StarIcon,
+} from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -27,6 +35,7 @@ const nav = [
 
 export function ZhputianAppSidebar() {
   const pathname = usePathname();
+  const settingsActive = pathname === "/app/settings" || pathname.startsWith("/app/settings/");
 
   return (
     <Sidebar collapsible="icon">
@@ -93,6 +102,20 @@ export function ZhputianAppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={settingsActive}
+              render={<Link href="/app/settings" prefetch />}
+              tooltip="设置"
+            >
+              <SettingsIcon />
+              <span>设置</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   );
