@@ -24,6 +24,7 @@ import {
   parseAnalyzeSearchInput,
   type AnalyzeSymbolSearchItem,
 } from "@/lib/analyze-symbol-search";
+import { buildMockBaseQuote, hashCode, type MockBaseQuote } from "@/lib/mock-base-quote";
 import { analyzeCopy, subscriptionTierPublicCopy } from "@/lib/copy";
 import { useAnalysisStore } from "@/stores/use-analysis-store";
 import { useArchiveStore } from "@/stores/use-archive-store";
@@ -129,17 +130,7 @@ type AnalysisListItem = {
   status: "done" | "running";
 };
 
-type BasicQuote = {
-  price: number;
-  change: number;
-  changePct: number;
-  open: number;
-  high: number;
-  low: number;
-  volume: number;
-  turnover: number;
-  updatedAt: number;
-};
+type BasicQuote = MockBaseQuote;
 
 type FactItem = {
   label: string;
@@ -305,38 +296,6 @@ function renderHighlightedText(text: string, query: string) {
       {text.slice(end)}
     </>
   );
-}
-
-function hashCode(input: string) {
-  let h = 0;
-  for (let i = 0; i < input.length; i++) h = (h * 31 + input.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-
-function buildBaseQuote(market: AnalysisInput["market"], symbol: string): BasicQuote {
-  const key = `${market}.${symbol}`;
-  const seed = hashCode(key);
-  const anchor = market === "US" ? 120 : market === "HK" ? 260 : 85;
-  const price = Number((anchor + (seed % 3000) / 37).toFixed(2));
-  const drift = ((seed % 900) - 450) / 10000;
-  const changePct = Number((drift * 100).toFixed(2));
-  const change = Number((price * drift).toFixed(2));
-  const open = Number((price - change * 0.6).toFixed(2));
-  const high = Number((Math.max(price, open) * 1.008).toFixed(2));
-  const low = Number((Math.min(price, open) * 0.992).toFixed(2));
-  const volume = 8_000_000 + (seed % 40_000_000);
-  const turnover = Number((volume * price).toFixed(0));
-  return {
-    price,
-    change,
-    changePct,
-    open,
-    high,
-    low,
-    volume,
-    turnover,
-    updatedAt: Date.now(),
-  };
 }
 
 function tickQuote(prev: BasicQuote): BasicQuote {
@@ -934,7 +893,7 @@ function AnalyzePageContent() {
       setLiveQuote(null);
       return;
     }
-    const base = buildBaseQuote(activeReport.market, activeReport.symbol);
+    const base = buildMockBaseQuote(activeReport.market, activeReport.symbol);
     setLiveQuote(base);
     const timer = window.setInterval(() => {
       setLiveQuote((prev) => (prev ? tickQuote(prev) : base));
