@@ -14,7 +14,7 @@ class TimerAgent:
         """初始化择时智能体"""
         pass
 
-    def score(self, history: List[Dict], ticker: str = None) -> Dict:
+    def score(self, history: List[Dict], ticker: str, stock_name: str = None) -> Dict:
         """
         计算择时分数
         
@@ -38,5 +38,5 @@ class TimerAgent:
         logger.debug(f"数据量充足: {ticker}, {len(history)} 条数据")
         scorer = TimingScorer(history, ticker, stock_service.get_stock_market(ticker))
         result = scorer.score_all()
-        logger.info(f"择时分析完成，信号: {result.get('signal')}, 综合得分: {result.get('composite')}")
+        logger.info(f"股票: {ticker} {stock_name} 择时分析完成，结果: {result}")
         return result

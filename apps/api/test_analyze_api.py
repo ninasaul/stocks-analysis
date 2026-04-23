@@ -1,92 +1,104 @@
 import requests
 import json
-import sys
 import os
 from dotenv import load_dotenv
 
+# 加载环境变量
 load_dotenv()
 
 BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8011")
 
-TEST_USER = {
-    "username": "tester",
-    "password": "Test123456"
-}
-
-def get_access_token():
-    """获取访问令牌"""
-    url = f"{BASE_URL}/api/auth/login"
-    response = requests.post(url, data=TEST_USER)
-    if response.status_code == 200:
-        return response.json()["access_token"]
-    else:
-        raise Exception(f"登录失败: {response.text}")
-
-# 测试股票代码列表
-tickers = ["300308"] # "600519", "000002", "300750", "688256", 
-# API 接口 URL
-base_url = f"{BASE_URL}/api/analyze"
-
-# 可选：指定LLM提供商
-provider = "aliyun"  # 可以是 "aliyun" 或 "deepseek"
-
-print(f"开始测试 /api/analyze 接口 (提供商: {provider})...\n")
-
-access_token = get_access_token()
-headers = {"Authorization": f"Bearer {access_token}"}
-
-for ticker in tickers:
-    # 构建请求参数
-    params = {
-        "ticker": ticker,
-        "mode": "full"
+# 从test_user_membership.py导入测试用户信息
+try:
+    from test_user_membership import TEST_USER
+except ImportError:
+    # 如果导入失败，使用默认值
+    TEST_USER = {
+        "username": "tester",
+        "email": "test@example.com",
+        "password": "Test123456",
+        "phone": "13800138000"
     }
 
-    print(f"测试股票: {ticker}")
-    print("-" * 50)
+# 股票列表
+STOCK_LIST = [
+    # "000858",  # 五粮液
+    # "603773",  # 沃格光电
+    # "600118",  # 中国卫星
+    # "300308",  # 中际旭创
+    # "600396"   # 华电辽能
+    "688089"   # 嘉必优
+]
 
-    try:
-        # 发送 GET 请求
-        response = requests.get(base_url, params=params, headers=headers)
+# 结果输出文件
+OUTPUT_FILE = "analyze_results.json"
 
-        # 检查响应状态码
-        if response.status_code == 200:
-            # 解析响应数据
-            data = response.json()
-
-            # 打印测试结果
-            print(f"响应状态: 成功")
-            print(f"响应内容: {json.dumps(data, ensure_ascii=False, indent=2)}")
-            print(f"股票代码: {data.get('ticker')}")
-            print(f"股票名称: {data.get('name')}")
-
-            if "timing" in data:
-                timing = data["timing"]
-                print(f"综合得分: {timing.get('composite')}")
-                print(f"交易信号: {timing.get('signal')}")
-
-                # 打印各个指标得分
-                print("\n指标得分:")
-                for key, value in timing.items():
-                    if key not in ["composite", "signal", "price_range", "error"]:
-                        print(f"  {key}: {value}")
-
-                # 打印价格区间（如果有）
-                if "price_range" in timing:
-                    price_range = timing["price_range"]
-                    print("\n价格区间:")
-                    print(f"  当前价格: {price_range.get('current_price')}")
-                    if "buy_range" in price_range:
-                        print(f"  买入区间: {price_range['buy_range']['low']} - {price_range['buy_range']['high']}")
-                    if "sell_range" in price_range:
-                        print(f"  卖出区间: {price_range['sell_range']['low']} - {price_range['sell_range']['high']}")
+def test_analyze_api():
+    """测试分析接口"""
+    # 先登录获取token
+    login_url = f"{BASE_URL}/api/auth/login"
+    login_data = {
+        "username": TEST_USER["username"],
+        "password": TEST_USER["password"]
+    }
+    
+    print("登录获取token...")
+    # 使用表单数据发送登录请求
+    login_response = requests.post(login_url, data=login_data)
+    if login_response.status_code != 200:
+        print(f"登录失败: {login_response.status_code} {login_response.text}")
+        return
+    
+    token = login_response.json().get("access_token")
+    if not token:
+        print("获取token失败")
+        return
+    
+    print(f"获取token成功: {token[:20]}...")
+    
+    # 测试分析接口
+    analyze_url = f"{BASE_URL}/api/analyze"
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
+    
+    # 清空输出文件
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        f.write("[")
+    
+    # 收集所有分析结果
+    all_results = []
+    
+    # 遍历股票列表进行分析
+    for ticker in STOCK_LIST:
+        print(f"\n测试分析接口 - 股票: {ticker}...")
+        params = {
+            "ticker": ticker,
+            "mode": "full"
+        }
+        
+        analyze_response = requests.get(analyze_url, headers=headers, params=params)
+        
+        print(f"分析接口响应状态: {analyze_response.status_code}")
+        if analyze_response.status_code == 200:
+            result = analyze_response.json()
+            print(f"分析结果已获取: {ticker}")
+            all_results.append(result)
         else:
-            print(f"响应状态: 失败 (状态码: {response.status_code})")
-            print(f"响应内容: {response.text}")
-    except Exception as e:
-        print(f"测试失败: {str(e)}")
+            print(f"分析接口失败: {analyze_response.text}")
+            # 添加失败信息到结果列表
+            all_results.append({
+                "ticker": ticker,
+                "error": f"分析失败: {analyze_response.status_code}",
+                "error_detail": analyze_response.text
+            })
+    
+    # 将所有结果写入文件
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        json.dump(all_results, f, ensure_ascii=False, indent=2)
+    
+    print(f"\n所有分析结果已保存到 {OUTPUT_FILE}")
+    print(f"共分析 {len(STOCK_LIST)} 只股票，成功 {sum(1 for r in all_results if 'error' not in r)} 只")
 
-    print("-" * 50)
-    print()
-
-print("测试完成!")
+if __name__ == "__main__":
+    test_analyze_api()

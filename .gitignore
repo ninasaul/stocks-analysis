@@ -49,3 +49,4 @@ yarn-error.log*
 
 docs/TradingAgents-CN-main
 apps/api/logs
+analyze_results.json

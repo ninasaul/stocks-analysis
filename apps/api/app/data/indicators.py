@@ -87,7 +87,17 @@ class TimingScorer:
         Returns:
             包含当前价格和相应买卖区间的字典
         """
+        logger.debug(f"开始计算价格区间，信号: {signal}")
+        
+        if len(self.closes) == 0:
+            logger.error("收盘价数据为空，无法计算价格区间")
+            return {
+                "error": "收盘价数据为空，无法计算价格区间"
+            }
+        
         current_price = self.closes[-1]
+        logger.debug(f"当前价格: {current_price}")
+        logger.debug(f"收盘价数据长度: {len(self.closes)}")
         
         # 基于布林带计算价格区间
         period = 20
@@ -97,48 +107,121 @@ class TimingScorer:
             upper = ma + 2 * std
             lower = ma - 2 * std
             middle = ma
+            logger.debug(f"布林带计算结果 - 上轨: {upper}, 中轨: {middle}, 下轨: {lower}")
         else:
-            # 如果数据不足，使用简单的百分比区间
-            upper = current_price * 1.05
-            middle = current_price
-            lower = current_price * 0.95
+            # 如果数据不足，返回空数据并打印报错
+            logger.error(f"数据不足，无法计算布林带指标，需要至少 {period} 个交易日的数据，当前只有 {len(self.closes)} 个数据点")
+            return {
+                "current_price": round(current_price, 2),
+                "error": f"数据不足，无法计算价格区间，需要至少 {period} 个交易日的数据，当前只有 {len(self.closes)} 个数据点"
+            }
+        
+        # 计算MA均线
+        ma5 = self._ma(5)
+        ma10 = self._ma(10)
+        logger.debug(f"MA均线计算结果 - MA5: {ma5}, MA10: {ma10}")
         
         # 基于 RSI 计算超买超卖区间
         rsi = self._rsi_position()
+        logger.debug(f"RSI位置: {rsi}")
         
         # 计算价格区间
         price_range = {
-            "current_price": round(current_price, 2)
+            "current_price": round(current_price, 2),
+            "bollinger": {
+                "upper": round(upper, 2),
+                "middle": round(middle, 2),
+                "lower": round(lower, 2)
+            },
+            "ma": {
+                "ma5": round(ma5, 2),
+                "ma10": round(ma10, 2)
+            }
         }
         
         # 根据信号添加相应的区间
         if signal == "BUY":
-            # 买入区间上下限值统一上浮 2%
-            buy_low = round(lower * 1.02, 2)
-            buy_high = round(middle * 1.02, 2)
+            # 计算买点
+            # 最佳买点：布林带下轨附近
+            best_buy_price = round(lower, 2)
+            # 次优买点：布林带下轨与中轨之间的中间位置
+            secondary_buy_price = round((lower + middle) / 2, 2)
+            
+            # 确定买入区间
+            buy_low = round(min(best_buy_price, secondary_buy_price) * 0.99, 2)
+            buy_high = round(max(best_buy_price, secondary_buy_price) * 1.01, 2)
+            
+            # 生成买入建议
+            suggestion = ""
+            if current_price <= lower:
+                # 股价跌破下轨
+                if rsi > 0.7:  # 超卖
+                    suggestion = "股价跌破布林带下轨，RSI超卖，最佳买点出现，建议积极买入"
+                else:
+                    suggestion = "股价跌破布林带下轨，建议在最佳买点附近分批买入"
+            elif current_price <= middle:
+                # 股价在中轨和下轨之间
+                if ma5 > ma10:  # 金叉
+                    suggestion = "股价在布林带中轨下方，MA5金叉MA10，次优买点出现，建议分批买入"
+                else:
+                    suggestion = "股价在布林带中轨下方，建议在次优买点附近分批买入"
+            else:
+                # 股价在中轨上方
+                suggestion = "股价在布林带中轨上方，建议等待回调至次优买点附近买入"
+            
             buy_range = {
+                "best_buy_price": best_buy_price,
+                "secondary_buy_price": secondary_buy_price,
                 "low": buy_low,
                 "high": buy_high,
-                "suggestion": "Buy in batches within this range"
+                "suggestion": suggestion,
+                "stop_loss": round(lower * 0.95, 2),  # 止损：下轨下方5%
+                "take_profit": round(middle * 1.1, 2)  # 止盈：中轨上方10%
             }
-            # 根据 RSI 调整建议
-            if rsi > 0.7:  # 超卖，建议买入
-                buy_range["suggestion"] = "RSI oversold, buy actively within this range"
             price_range["buy_range"] = buy_range
+            logger.debug(f"买入区间计算结果 - 最佳买入价: {best_buy_price}, 次优买入价: {secondary_buy_price}, 止损位: {buy_range['stop_loss']}, 止盈位: {buy_range['take_profit']}")
         elif signal == "SELL":
-            # 卖出区间上下限值统一下浮 2%
-            sell_low = round(middle * 0.98, 2)
-            sell_high = round(upper * 0.98, 2)
+            # 计算卖点
+            # 最佳卖点：布林带上轨附近
+            best_sell_price = round(upper, 2)
+            # 次优卖点：布林带上轨与中轨之间的中间位置
+            secondary_sell_price = round((upper + middle) / 2, 2)
+            
+            # 确定卖出区间
+            sell_low = round(min(best_sell_price, secondary_sell_price) * 0.99, 2)
+            sell_high = round(max(best_sell_price, secondary_sell_price) * 1.01, 2)
+            
+            # 生成卖出建议
+            suggestion = ""
+            if current_price >= upper:
+                # 股价突破上轨
+                if rsi < -0.7:  # 超买
+                    suggestion = "股价突破布林带上轨，RSI超买，最佳卖点出现，建议积极卖出"
+                else:
+                    suggestion = "股价突破布林带上轨，建议在最佳卖点附近分批卖出"
+            elif current_price >= middle:
+                # 股价在中轨和上轨之间
+                if ma5 < ma10:  # 死叉
+                    suggestion = "股价在布林带中轨上方，MA5死叉MA10，次优卖点出现，建议分批卖出"
+                else:
+                    suggestion = "股价在布林带中轨上方，建议在次优卖点附近分批卖出"
+            else:
+                # 股价在中轨下方
+                suggestion = "股价在布林带中轨下方，建议等待反弹至次优卖点附近卖出"
+            
             sell_range = {
+                "best_sell_price": best_sell_price,
+                "secondary_sell_price": secondary_sell_price,
                 "low": sell_low,
                 "high": sell_high,
-                "suggestion": "Sell in batches within this range"
+                "suggestion": suggestion,
+                "stop_loss": round(upper * 1.05, 2),  # 止损：上轨上方5%
+                "take_profit": round(middle * 0.9, 2)  # 止盈：中轨下方10%
             }
-            # 根据 RSI 调整建议
-            if rsi < -0.7:  # 超买，建议卖出
-                sell_range["suggestion"] = "RSI overbought, sell actively within this range"
             price_range["sell_range"] = sell_range
+            logger.debug(f"卖出区间计算结果 - 最佳卖出价: {best_sell_price}, 次优卖出价: {secondary_sell_price}, 止损位: {sell_range['stop_loss']}, 止盈位: {sell_range['take_profit']}")
         
+        logger.debug(f"价格区间计算完成: {price_range}")
         return price_range
 
     # ========== 价格维度 ==========
@@ -405,8 +488,10 @@ class TimingScorer:
         if len(self.closes) < period:
             return self.closes[-1]
         multiplier = 2 / (period + 1)
-        ema = self.closes[-(period + 20)]  # 从更早开始计算
-        for price in self.closes[-(period + 19):]:
+        # 确保从足够早的数据开始计算，避免索引错误
+        start_idx = max(0, len(self.closes) - period - 20)
+        ema = self.closes[start_idx]  # 从更早开始计算
+        for price in self.closes[start_idx + 1:]:
             ema = (price - ema) * multiplier + ema
         return float(ema)
 

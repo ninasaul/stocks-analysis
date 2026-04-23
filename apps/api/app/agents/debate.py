@@ -1,5 +1,7 @@
 """简化版 Bull/Bear 辩论"""
 
+from ..core.logging import logger
+
 BULL_PROMPT = """你是看多研究员。基于以下数据为 {ticker} 构建看多论点。
 
 ## 技术打分（10 维度）
@@ -58,54 +60,71 @@ async def run_debate(ticker: str, timing_scores: dict,
 
     再与技术打分做加权融合：
     最终信号 = 0.4 × 辩论信号 + 0.6 × 技术打分信号
+    
+    Returns:
+        辩论结果，如果失败则包含error字段
     """
-    # Bull 发言
-    bull_response = await llm.chat(
-        BULL_PROMPT.format(
-            ticker=ticker,
-            timing_scores=format_scores(timing_scores),
-            fundamental_check=str(fundamental)
-        ),
-        response_format="json"
-    )
-    bull = safe_parse_json(bull_response)
+    try:
+        # Bull 发言
+        bull_response = await llm.chat(
+            BULL_PROMPT.format(
+                ticker=ticker,
+                timing_scores=format_scores(timing_scores),
+                fundamental_check=str(fundamental)
+            ),
+            response_format="json"
+        )
+        bull = safe_parse_json(bull_response)
 
-    # Bear 发言
-    bear_response = await llm.chat(
-        BEAR_PROMPT.format(
-            ticker=ticker,
-            timing_scores=format_scores(timing_scores),
-            fundamental_check=str(fundamental),
-            bull_args=str(bull.get("arguments", []))
-        ),
-        response_format="json"
-    )
-    bear = safe_parse_json(bear_response)
+        # Bear 发言
+        bear_response = await llm.chat(
+            BEAR_PROMPT.format(
+                ticker=ticker,
+                timing_scores=format_scores(timing_scores),
+                fundamental_check=str(fundamental),
+                bull_args=str(bull.get("arguments", []))
+            ),
+            response_format="json"
+        )
+        bear = safe_parse_json(bear_response)
 
-    # 规则打分（替代 Judge LLM，省 1 次 API 调用）
-    bull_score = bull.get("score", 5)
-    bear_score = bear.get("score", 5)
-    debate_diff = bull_score - bear_score
+        # 规则打分（替代 Judge LLM，省 1 次 API 调用）
+        bull_score = bull.get("score", 5)
+        bear_score = bear.get("score", 5)
+        debate_diff = bull_score - bear_score
 
-    if debate_diff > 3:
-        debate_signal = 1.0
-    elif debate_diff < -3:
-        debate_signal = -1.0
-    else:
-        debate_signal = debate_diff / 5.0
+        if debate_diff > 3:
+            debate_signal = 1.0
+        elif debate_diff < -3:
+            debate_signal = -1.0
+        else:
+            debate_signal = debate_diff / 5.0
 
-    # 融合：60% 技术打分 + 40% 辩论结果
-    tech_score = timing_scores.get("composite", 0)
-    final_score = 0.6 * tech_score + 0.4 * debate_signal
+        # 融合：60% 技术打分 + 40% 辩论结果
+        tech_score = timing_scores.get("composite", 0)
+        final_score = 0.6 * tech_score + 0.4 * debate_signal
 
-    return {
-        "bull": bull,
-        "bear": bear,
-        "debate_signal": round(debate_signal, 2),
-        "tech_score": round(tech_score, 4),
-        "final_score": round(final_score, 4),
-        "signal": score_to_signal(final_score),
-    }
+        return {
+            "bull": bull,
+            "bear": bear,
+            "debate_signal": round(debate_signal, 2),
+            "tech_score": round(tech_score, 4),
+            "final_score": round(final_score, 4),
+            "signal": score_to_signal(final_score),
+        }
+    except Exception as e:
+        error_msg = f"多空辩论失败: {str(e)}"
+        logger.error(f"多空辩论失败: {str(e)}")
+        return {
+            "bull": {},
+            "bear": {},
+            "debate_signal": 0,
+            "tech_score": 0,
+            "final_score": 0,
+            "signal": "HOLD",
+            "error": error_msg,
+            "error_detail": str(e)
+        }
 
 
 def score_to_signal(score: float) -> str:

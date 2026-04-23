@@ -80,6 +80,7 @@ def fetch_fundamental(ticker: str) -> Dict:
     Returns:
         基本面数据字典
     """
+    # TODO 当天获取的数据进行缓存，避免重复获取
     logger.info(f"开始获取股票 {ticker} 的基本面数据")
     try:
         # 确定股票类型
@@ -149,6 +150,7 @@ def fetch_fundamental(ticker: str) -> Dict:
             })
         
         logger.info(f"获取基本面数据完成: {ticker}")
+        logger.debug(f"获取到的基本面数据: {fundamental}")
         return fundamental
     except Exception as e:
         logger.error(f"获取基本面数据失败: {e}")
