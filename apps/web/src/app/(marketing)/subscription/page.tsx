@@ -73,7 +73,11 @@ export default function SubscriptionPage() {
   const checkoutAmountLabel =
     checkoutCycle === "month"
       ? proPlan.settlementAmountLabel
-      : (proPlan.annualSettlementAmountLabel ?? "¥468");
+      : checkoutCycle === "quarter"
+        ? (proPlan.quarterlySettlementAmountLabel ?? "¥147")
+        : (proPlan.annualSettlementAmountLabel ?? "¥468");
+  const cycleSuffix =
+    checkoutCycle === "month" ? "月" : checkoutCycle === "quarter" ? "季" : "年";
 
   const startPay = () => {
     if (!agree) return;
@@ -157,7 +161,10 @@ export default function SubscriptionPage() {
           </div>
           {currentPlanId === "pro" ? (
             <p className="text-muted-foreground">
-              计费周期：<span className="text-foreground font-medium">{billingCycle === "month" ? "月付" : "年付"}</span>
+              计费周期：
+              <span className="text-foreground font-medium">
+                {billingCycle === "month" ? "月付" : billingCycle === "quarter" ? "季付" : "年付"}
+              </span>
             </p>
           ) : null}
           {periodEnd ? (
@@ -207,6 +214,17 @@ export default function SubscriptionPage() {
               <p className="text-foreground pt-1 text-2xl font-semibold tabular-nums tracking-tight">
                 {plan.priceLabel}
               </p>
+              {plan.quarterlyPriceLabel ? (
+                <div className="text-muted-foreground flex flex-col gap-0.5 pt-1 text-sm">
+                  <p>
+                    <span className="text-foreground font-medium tabular-nums">{plan.quarterlyPriceLabel}</span>
+                    <span className="text-muted-foreground">（季付）</span>
+                  </p>
+                  {plan.quarterlyEquivMonthlyLabel ? (
+                    <p className="text-xs leading-relaxed">{plan.quarterlyEquivMonthlyLabel}</p>
+                  ) : null}
+                </div>
+              ) : null}
               {plan.annualPriceLabel ? (
                 <div className="text-muted-foreground flex flex-col gap-0.5 pt-1 text-sm">
                   <p>
@@ -316,7 +334,8 @@ export default function SubscriptionPage() {
           <CardHeader>
             <CardTitle>{subscriptionTierPublicCopy.checkoutProCardTitle}</CardTitle>
             <CardDescription>
-              演示环境可按所选<strong className="text-foreground font-medium">月付</strong>或
+              演示环境可按所选<strong className="text-foreground font-medium">月付</strong>、
+              <strong className="text-foreground font-medium">季付</strong>或
               <strong className="text-foreground font-medium">年付</strong>
               模拟扣款与周期；正式环境以支付渠道回调、后台对账与订单为准。
             </CardDescription>
@@ -332,6 +351,14 @@ export default function SubscriptionPage() {
                   onClick={() => setCheckoutCycle("month")}
                 >
                   月付（{proPlan.settlementAmountLabel}/月）
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={checkoutCycle === "quarter" ? "default" : "outline"}
+                  onClick={() => setCheckoutCycle("quarter")}
+                >
+                  季付（{proPlan.quarterlySettlementAmountLabel ?? "¥147"}/季）
                 </Button>
                 <Button
                   type="button"
@@ -359,7 +386,7 @@ export default function SubscriptionPage() {
             </label>
             <div className="flex flex-wrap gap-2">
               <Button disabled={!agree} onClick={startPay}>
-                {subscriptionCopy.payCta}（{checkoutCycle === "month" ? `${proPlan.settlementAmountLabel}/月` : `${proPlan.annualSettlementAmountLabel ?? "¥468"}/年`}）
+                {subscriptionCopy.payCta}（{checkoutAmountLabel}/{cycleSuffix}）
               </Button>
               <Button type="button" variant="outline" onClick={recordFailed}>
                 {subscriptionCopy.payFailSim}

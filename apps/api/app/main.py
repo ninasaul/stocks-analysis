@@ -269,7 +269,7 @@ def get_history(current_user: User = Depends(get_current_user)) -> dict:
 @app.get("/api/stocks/search")
 def search_stocks(
     keyword: str = Query(..., min_length=1, description="股票代码或名称关键字"),
-    limit: int = Query(20, ge=1, le=100, description="返回结果数量上限"),
+    limit: int = Query(6, ge=1, le=100, description="返回结果数量上限"),
     current_user: User = Depends(get_current_user)
 ) -> dict:
     """股票模糊搜索，数据来源为 data/stock_info.csv"""

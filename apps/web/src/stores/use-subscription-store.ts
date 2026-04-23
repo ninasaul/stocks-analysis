@@ -20,9 +20,13 @@ export type PlanDef = {
   priceLabel: string;
   /** 月付收据与模拟支付展示（不含「/月」）。 */
   settlementAmountLabel: string;
+  /** 季付收据与模拟支付展示。 */
+  quarterlySettlementAmountLabel?: string;
   /** 年付收据与模拟支付展示。 */
   annualSettlementAmountLabel?: string;
   priceNote?: string;
+  quarterlyPriceLabel?: string;
+  quarterlyEquivMonthlyLabel?: string;
   annualPriceLabel?: string;
   annualEquivMonthlyLabel?: string;
   features: string[];
@@ -60,11 +64,14 @@ const PLANS: PlanDef[] = [
     tagline: "更高日配额，适合持续跟踪与复盘",
     priceLabel: "¥49/月",
     settlementAmountLabel: "¥49",
+    quarterlySettlementAmountLabel: "¥147",
     annualSettlementAmountLabel: "¥468",
+    quarterlyPriceLabel: "¥147/季",
+    quarterlyEquivMonthlyLabel: "约合 ¥49/月",
     annualPriceLabel: "¥468/年",
     annualEquivMonthlyLabel: "约合 ¥39/月",
     priceNote:
-      "月付为连续包月；年付按年续费。演示支付可按所选周期模拟；正式环境以支付渠道与订单为准。",
+      "月付为连续包月；季付按季续费；年付按年续费。演示支付可按所选周期模拟；正式环境以支付渠道与订单为准。",
     features: [
       "每日股票预测 80 次（自然日重置）",
       "每日选股会话 30 次",
@@ -120,11 +127,17 @@ export const useSubscriptionStore = create<SubscriptionState>()(
         const end = new Date();
         if (cycle === "month") {
           end.setMonth(end.getMonth() + 1);
+        } else if (cycle === "quarter") {
+          end.setMonth(end.getMonth() + 3);
         } else {
           end.setFullYear(end.getFullYear() + 1);
         }
         const amountLabel =
-          cycle === "month" ? pro.settlementAmountLabel : (pro.annualSettlementAmountLabel ?? "¥468");
+          cycle === "month"
+            ? pro.settlementAmountLabel
+            : cycle === "quarter"
+              ? (pro.quarterlySettlementAmountLabel ?? "¥147")
+              : (pro.annualSettlementAmountLabel ?? "¥468");
         const order: SubscriptionOrder = {
           id: `ord-${Date.now()}`,
           placedAt: new Date().toISOString(),

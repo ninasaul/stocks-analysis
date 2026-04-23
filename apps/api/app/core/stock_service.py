@@ -322,6 +322,33 @@ class StockService:
         # 无法识别则返回空
         else:
             return ""
+
+    def get_stock_market_type(self, code: str) -> str:
+        """
+        根据股票代码推断市场类型
+
+        Returns:
+            市场类型：A股 / 美股 / 港股 / 其他
+        """
+        exchange = self.get_stock_market(code)
+        if exchange:
+            return "A股"
+
+        normalized_code = (code or "").strip().upper()
+
+        if normalized_code.startswith(("HK.", "HKEX:")):
+            return "港股"
+
+        if normalized_code.startswith(("US.", "NASDAQ:", "NYSE:", "AMEX:")):
+            return "美股"
+
+        if normalized_code.isdigit() and len(normalized_code) == 5:
+            return "港股"
+
+        if normalized_code.isalpha():
+            return "美股"
+
+        return "其他"
     
     def get_industry_list(self) -> List[str]:
         """获取行业列表"""
@@ -331,7 +358,7 @@ class StockService:
         """获取题材列表"""
         return self.concept_list
 
-    def search_stocks_from_csv(self, keyword: str, limit: int = 20) -> List[Dict[str, str]]:
+    def search_stocks_from_csv(self, keyword: str, limit: int = 6) -> List[Dict[str, str]]:
         """从 data/stock_info.csv 中模糊搜索股票代码和名称"""
         keyword = (keyword or "").strip()
         if not keyword:
@@ -359,7 +386,12 @@ class StockService:
                         continue
 
                     if normalized_keyword in code.lower() or normalized_keyword in name.lower():
-                        results.append({"code": code, "name": name})
+                        results.append({
+                            "code": code,
+                            "name": name,
+                            "exchange": self.get_stock_market(code).upper(),
+                            "market": self.get_stock_market_type(code)
+                        })
                         if len(results) >= limit:
                             break
         except Exception as exc:

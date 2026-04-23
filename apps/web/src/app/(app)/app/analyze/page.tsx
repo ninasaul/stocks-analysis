@@ -24,10 +24,12 @@ import {
   parseAnalyzeSearchInput,
   type AnalyzeSymbolSearchItem,
 } from "@/lib/analyze-symbol-search";
+import { requestStockSearch } from "@/lib/api/stocks";
 import { buildMockBaseQuote, hashCode, type MockBaseQuote } from "@/lib/mock-base-quote";
 import { analyzeCopy, subscriptionTierPublicCopy } from "@/lib/copy";
 import { useAnalysisStore } from "@/stores/use-analysis-store";
 import { useArchiveStore } from "@/stores/use-archive-store";
+import { useAuthStore } from "@/stores/use-auth-store";
 import { useNotificationPreferencesStore } from "@/stores/use-notification-preferences-store";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
 import { Button } from "@/components/ui/button";
@@ -54,7 +56,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { AnalyzeRunConfigDialog } from "@/components/features/analyze-run-config-dialog";
 import { AppPageLayout } from "@/components/features/app-page-layout";
-import { PageErrorState, PageLoadingState } from "@/components/features/page-state";
+import { PageEmptyState, PageErrorState, PageLoadingState } from "@/components/features/page-state";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,6 +67,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -545,6 +548,35 @@ function buildHtmlFromReport(r: TimingReport) {
 </html>`;
 }
 
+function AnalyzeHistorySkeleton() {
+  return (
+    <div className="flex flex-col gap-2 p-1" aria-hidden="true">
+      {Array.from({ length: 6 }).map((_, idx) => (
+        <div key={`history-skeleton-${idx}`} className="rounded-md border p-2.5">
+          <Skeleton className="h-4 w-3/5" />
+          <Skeleton className="mt-2 h-3.5 w-2/5" />
+          <Skeleton className="mt-2 h-3.5 w-1/3" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AnalyzeReportSkeleton() {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border p-4" aria-hidden="true">
+      <Skeleton className="h-6 w-60 max-w-full" />
+      <div className="grid gap-2 sm:grid-cols-3">
+        <Skeleton className="h-16 rounded-md" />
+        <Skeleton className="h-16 rounded-md" />
+        <Skeleton className="h-16 rounded-md" />
+      </div>
+      <Skeleton className="h-40 rounded-md" />
+      <Skeleton className="h-48 rounded-md" />
+    </div>
+  );
+}
+
 function AnalyzePageContent() {
   const router = useRouter();
   const pathname = usePathname();
@@ -559,6 +591,7 @@ function AnalyzePageContent() {
   const buildMarkdown = useAnalysisStore((s) => s.buildMarkdown);
   const currentInput = useAnalysisStore((s) => s.currentInput);
   const error = useAnalysisStore((s) => s.error);
+  const authSession = useAuthStore((s) => s.session);
 
   const [searchKeyword, setSearchKeyword] = useState("");
   const [market, setMarket] = useState<AnalysisInput["market"]>("CN");
@@ -575,6 +608,8 @@ function AnalyzePageContent() {
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [actionReasonOpen, setActionReasonOpen] = useState(false);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [selectedSearchKey, setSelectedSearchKey] = useState<string | null>(null);
+  const [remoteSearchItems, setRemoteSearchItems] = useState<SearchItem[]>([]);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
   const analyzeReportScrollRef = useRef<HTMLDivElement | null>(null);
   const stockCodeParam = searchParams.get("stockCode");
@@ -626,6 +661,7 @@ function AnalyzePageContent() {
   const searchItems = useMemo(() => {
     const byKey = new Map<string, SearchItem>();
     for (const m of ANALYZE_SYMBOL_MOCK_UNIVERSE) byKey.set(m.key, m);
+    for (const item of remoteSearchItems) byKey.set(item.key, item);
     if (archiveHydrated) {
       for (const k of recentKeys) {
         if (byKey.has(k)) continue;
@@ -643,7 +679,7 @@ function AnalyzePageContent() {
       return ia - ib;
     });
     return list;
-  }, [archiveHydrated, recentKeys]);
+  }, [archiveHydrated, recentKeys, remoteSearchItems]);
 
   const filteredSearchItems = useMemo(() => {
     const query = searchKeyword.trim().toLowerCase();
@@ -664,6 +700,26 @@ function AnalyzePageContent() {
       .slice(0, 12)
       .map((entry) => entry.item);
   }, [searchItems, searchKeyword]);
+
+  const selectedSearchItemByKey = useMemo(() => {
+    if (!selectedSearchKey) return null;
+    return searchItems.find((item) => item.key === selectedSearchKey) ?? null;
+  }, [searchItems, selectedSearchKey]);
+
+  const selectedSearchItem = useMemo(() => {
+    if (selectedSearchItemByKey) return selectedSearchItemByKey;
+    const parsed = parseSearchInput(searchKeyword, market);
+    if (!parsed?.symbol) return null;
+    const selectedKey = `${parsed.market}.${parsed.symbol}`.toLowerCase();
+    return searchItems.find((item) => item.key.toLowerCase() === selectedKey) ?? null;
+  }, [market, searchItems, searchKeyword, selectedSearchItemByKey]);
+
+  const selectedInput = useMemo(() => {
+    if (selectedSearchItem) {
+      return { market: selectedSearchItem.market, symbol: selectedSearchItem.symbol };
+    }
+    return parseSearchInput(searchKeyword, market);
+  }, [market, searchKeyword, selectedSearchItem]);
 
   const searchItemNameByKey = useMemo(() => {
     const map = new Map<string, string>();
@@ -693,7 +749,7 @@ function AnalyzePageContent() {
       status: "done",
     }));
     if (loading) {
-      const parsed = parseSearchInput(searchKeyword, market);
+      const parsed = selectedInput;
       if (parsed?.symbol) {
         const key = `${parsed.market}.${parsed.symbol}`;
         const exists = list.some((x) => `${x.market}.${x.symbol}` === key);
@@ -708,7 +764,7 @@ function AnalyzePageContent() {
       }
     }
     return list;
-  }, [analysisEntries, loading, market, searchKeyword]);
+  }, [analysisEntries, loading, selectedInput]);
 
   const analysisListDisplay = useMemo(() => {
     const byKey = new Map<string, TimingReport>();
@@ -912,6 +968,7 @@ function AnalyzePageContent() {
     const h = pendingHandoff;
     queueMicrotask(() => {
       setSearchKeyword(`${h.market}.${h.symbol}`);
+      setSelectedSearchKey(null);
       setMarket(h.market);
       setRiskTier(h.preference_snapshot.risk_tier);
       setHoldingHorizon(h.preference_snapshot.holding_horizon);
@@ -929,9 +986,36 @@ function AnalyzePageContent() {
     const [mk, sym] = first.split(".") as [AnalysisInput["market"], string];
     if (mk && sym) {
       setSearchKeyword(first);
+      setSelectedSearchKey(null);
       setMarket(mk);
     }
   }, [recentKeys, searchKeyword]);
+
+  useEffect(() => {
+    const keyword = searchKeyword.trim();
+    const parsed = selectedInput;
+    const searchTerm = parsed?.symbol?.trim() || keyword;
+    if (authSession !== "user" || !searchTerm || (parsed && parsed.market !== "CN")) {
+      setRemoteSearchItems([]);
+      return;
+    }
+
+    let canceled = false;
+    const timer = window.setTimeout(() => {
+      void requestStockSearch(searchTerm, 6)
+        .then((items) => {
+          if (!canceled) setRemoteSearchItems(items);
+        })
+        .catch(() => {
+          if (!canceled) setRemoteSearchItems([]);
+        });
+    }, 200);
+
+    return () => {
+      canceled = true;
+      window.clearTimeout(timer);
+    };
+  }, [authSession, searchKeyword, selectedInput]);
 
   useEffect(() => {
     if (!searchFocused) return;
@@ -948,13 +1032,15 @@ function AnalyzePageContent() {
 
   const applySearchItem = (item: SearchItem) => {
     setMarket(item.market);
-    setSearchKeyword(`${item.market}.${item.symbol}`);
+    setSelectedSearchKey(item.key);
+    setSearchKeyword(`${item.name}（${formatAnalyzeBoardSymbol(item.market, item.symbol)}）`);
     setSearchFocused(false);
   };
 
   const executeAnalysis = async (input: AnalysisInput, displayKeyword: string) => {
     setMarket(input.market);
     setSearchKeyword(displayKeyword);
+    setSelectedSearchKey(null);
     updateStockCodeParam(`${input.market}.${input.symbol}`);
     setRiskTier(input.risk_tier);
     setHoldingHorizon(input.holding_horizon);
@@ -1047,6 +1133,7 @@ function AnalyzePageContent() {
       : activeReport
         ? `报告已更新，当前标的是 ${activeReport.market}.${activeReport.symbol}。`
         : "请先填写参数并生成报告。";
+  const isInitialHydrating = !localHistoryLoaded || !archiveHydrated;
 
   return (
     <AppPageLayout
@@ -1081,6 +1168,7 @@ function AnalyzePageContent() {
                 onFocus={() => setSearchFocused(true)}
                 onChange={(event) => {
                   setSearchKeyword(event.target.value);
+                  setSelectedSearchKey(null);
                   if (!searchFocused) setSearchFocused(true);
                 }}
                 onKeyDown={(event) => {
@@ -1181,7 +1269,9 @@ function AnalyzePageContent() {
 
       <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
         <section className="rounded-lg border p-2 print:hidden">
-          {analysisListItems.length ? (
+          {isInitialHydrating ? (
+            <AnalyzeHistorySkeleton />
+          ) : analysisListItems.length ? (
             <ScrollArea className="max-h-[min(65vh,36rem)]">
               <div className="flex flex-col gap-2 pr-2">
                 <AnalysisHistoryList
@@ -1193,11 +1283,23 @@ function AnalyzePageContent() {
               </div>
             </ScrollArea>
           ) : (
-            <p className="text-muted-foreground px-2 py-1.5 text-sm">暂无记录</p>
+            <PageEmptyState
+              className="border-0 shadow-none"
+              title="暂无分析记录"
+              description="输入股票代码或名称后点击「分析」，系统会生成并保存报告。"
+              actions={
+                <Button type="button" variant="outline" onClick={() => setConfigOpen(true)} disabled={loading}>
+                  开始分析
+                </Button>
+              }
+            />
           )}
         </section>
 
         <div id="analyze-print-root" className="min-w-0 scroll-smooth flex flex-col gap-4 print:gap-3">
+        {isInitialHydrating ? (
+          <AnalyzeReportSkeleton />
+        ) : null}
         {loading && !report ? (
           <PageLoadingState
             className="print:analyze-hide"
@@ -1214,6 +1316,19 @@ function AnalyzePageContent() {
             actions={
               <Button type="button" variant="secondary" onClick={() => setConfigOpen(true)} disabled={loading}>
                 重新生成
+              </Button>
+            }
+          />
+        ) : null}
+
+        {!isInitialHydrating && !loading && error !== "unknown" && !activeReport ? (
+          <PageEmptyState
+            className="print:analyze-hide"
+            title="还没有可展示的报告"
+            description="可先从上方搜索标的，再点击「分析」生成首份报告。支持输入代码、简称或 CN.600519。"
+            actions={
+              <Button type="button" onClick={() => setConfigOpen(true)}>
+                立即开始
               </Button>
             }
           />
