@@ -1,0 +1,16 @@
+.git
+.github
+**/.turbo
+**/node_modules
+**/.next
+**/.wrangler
+**/__pycache__
+**/*.pyc
+**/.venv
+.env
+.env.*
+!.env.example
+apps/api/data
+*.db
+*.sqlite
+*.sqlite-*

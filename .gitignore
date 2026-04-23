@@ -34,6 +34,7 @@ build
 .env.local
 .env.*.local
 .dev.vars
+scripts/deploy-web-vps.env
 
 # OS / IDE
 .DS_Store
