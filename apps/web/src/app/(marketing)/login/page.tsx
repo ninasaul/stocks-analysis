@@ -1,14 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { QRCodeSVG } from "qrcode.react";
 import { loginCopy } from "@/lib/copy";
+import { requestWechatQrCode } from "@/lib/api/auth";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { Button } from "@/components/ui/button";
@@ -32,19 +33,21 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const phoneSchema = z.object({
+const accountSchema = z.object({
+  identifier: z.string().min(3, "请输入用户名、邮箱或手机号"),
+});
+
+const passwordLoginSchema = accountSchema.extend({
+  password: z.string().min(8, "密码至少 8 位").max(16, "密码最多 16 位"),
+});
+
+const smsLoginSchema = z.object({
   phone: z.string().regex(/^1\d{10}$/, "请输入有效的 11 位手机号"),
-});
-
-const passwordLoginSchema = phoneSchema.extend({
-  password: z.string().min(8, "密码至少 8 位"),
-});
-
-const smsLoginSchema = phoneSchema.extend({
   code: z.string().length(6, "验证码为 6 位"),
 });
 
-const resetPasswordSchema = phoneSchema.extend({
+const resetPasswordSchema = z.object({
+  phone: z.string().regex(/^1\d{10}$/, "请输入有效的 11 位手机号"),
   code: z.string().length(6, "验证码为 6 位"),
   newPassword: z.string().min(8, "新密码至少 8 位"),
 });
@@ -53,48 +56,69 @@ type PasswordLoginForm = z.infer<typeof passwordLoginSchema>;
 type SmsForm = z.infer<typeof smsLoginSchema>;
 type ResetForm = z.infer<typeof resetPasswordSchema>;
 
-function createMockWechatQrValue() {
-  const nonce = Math.random().toString(36).slice(2, 10);
-  return `weixin://mock-login?scene=stocks-analysis&nonce=${nonce}&ts=${Date.now()}`;
-}
-
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const authHydrated = useStoreHydrated(useAuthStore);
   const session = useAuthStore((s) => s.session);
-  const loginPassword = useAuthStore((s) => s.loginPasswordMock);
+  const loginPassword = useAuthStore((s) => s.loginPassword);
   const loginSms = useAuthStore((s) => s.loginSmsMock);
+  const redirectTo = searchParams.get("next") || "/app/analyze";
 
   const [agree, setAgree] = useState(false);
   const [smsCooldown, setSmsCooldown] = useState(0);
-  const [wxExpire, setWxExpire] = useState(120);
-  const [wxQrValue, setWxQrValue] = useState(createMockWechatQrValue);
+  const [wxExpire, setWxExpire] = useState(0);
+  const [wxQrUrl, setWxQrUrl] = useState<string | null>(null);
+  const [wxLoading, setWxLoading] = useState(false);
+  const [wxError, setWxError] = useState<string | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetCooldown, setResetCooldown] = useState(0);
+  const [passwordLoginLoading, setPasswordLoginLoading] = useState(false);
 
   useEffect(() => {
     if (!authHydrated) return;
     if (session === "user") {
-      router.replace("/app/analyze");
+      router.replace(redirectTo);
     }
-  }, [authHydrated, session, router]);
+  }, [authHydrated, redirectTo, session, router]);
+
+  const loadWechatQr = useCallback(async () => {
+    setWxError(null);
+    setWxLoading(true);
+    try {
+      const { qr_url, state } = await requestWechatQrCode();
+      sessionStorage.setItem("wechat_oauth_state", state);
+      sessionStorage.setItem("wechat_oauth_next", redirectTo);
+      setWxQrUrl(qr_url);
+      setWxExpire(120);
+    } catch (e) {
+      setWxQrUrl(null);
+      setWxExpire(0);
+      const message = e instanceof Error ? e.message : loginCopy.wechatQrLoadFailed;
+      const looksUnconfigured =
+        message.includes("未配置") || message.includes("WECHAT_APP_ID") || message.includes("503");
+      setWxError(looksUnconfigured ? loginCopy.wechatNotConfigured : message);
+    } finally {
+      setWxLoading(false);
+    }
+  }, [redirectTo]);
 
   useEffect(() => {
+    if (!wxQrUrl) return;
     const t = window.setInterval(() => {
       setWxExpire((s) => (s > 0 ? s - 1 : 0));
     }, 1000);
     return () => window.clearInterval(t);
-  }, []);
+  }, [wxQrUrl]);
 
   useEffect(() => {
-    if (wxExpire !== 0) return;
-    setWxQrValue(createMockWechatQrValue());
-    setWxExpire(120);
-  }, [wxExpire]);
+    if (!wxQrUrl || wxExpire > 0) return;
+    void loadWechatQr();
+  }, [wxExpire, wxQrUrl, loadWechatQr]);
 
   const loginPasswordForm = useForm<PasswordLoginForm>({
     resolver: zodResolver(passwordLoginSchema),
-    defaultValues: { phone: "", password: "" },
+    defaultValues: { identifier: "", password: "" },
   });
 
   const smsForm = useForm<SmsForm>({
@@ -122,17 +146,25 @@ export default function LoginPage() {
     }, 1000);
   };
 
-  const onPasswordLogin = loginPasswordForm.handleSubmit((data) => {
+  const onPasswordLogin = loginPasswordForm.handleSubmit(async (data) => {
     if (!agree) return;
-    const ok = loginPassword(data.phone, data.password);
-    if (ok) router.push("/app/analyze");
-    else loginPasswordForm.setError("root", { message: loginCopy.errors.passwordWrong });
+    setPasswordLoginLoading(true);
+    try {
+      await loginPassword(data.identifier, data.password);
+      router.push(redirectTo);
+    } catch (error) {
+      loginPasswordForm.setError("root", {
+        message: error instanceof Error ? error.message : loginCopy.errors.passwordWrong,
+      });
+    } finally {
+      setPasswordLoginLoading(false);
+    }
   });
 
   const onSmsLogin = smsForm.handleSubmit((data) => {
     if (!agree) return;
     const ok = loginSms(data.phone, data.code);
-    if (ok) router.push("/app/analyze");
+    if (ok) router.push(redirectTo);
     else smsForm.setError("root", { message: loginCopy.errors.smsWrong });
   });
 
@@ -186,7 +218,13 @@ export default function LoginPage() {
           </p>
         </CardHeader>
         <CardContent className="space-y-5">
-          <Tabs defaultValue="password" className="space-y-4">
+          <Tabs
+            defaultValue="password"
+            className="space-y-4"
+            onValueChange={(v) => {
+              if (v === "wechat") void loadWechatQr();
+            }}
+          >
             <TabsList className="grid h-auto w-full grid-cols-3 rounded-lg bg-muted/70 p-1">
               <TabsTrigger value="password" className="rounded-md text-xs md:text-sm">
                 密码
@@ -203,14 +241,13 @@ export default function LoginPage() {
               <form onSubmit={onPasswordLogin} className="space-y-4">
                 <FieldGroup>
                   <Field>
-                    <FieldLabel htmlFor="phone-login">手机号</FieldLabel>
+                    <FieldLabel htmlFor="identifier-login">账号</FieldLabel>
                     <Input
-                      id="phone-login"
-                      inputMode="numeric"
-                      placeholder="请输入 11 位手机号"
-                      {...loginPasswordForm.register("phone")}
+                      id="identifier-login"
+                      placeholder="用户名、邮箱或手机号"
+                      {...loginPasswordForm.register("identifier")}
                     />
-                    <FieldError errors={[loginPasswordForm.formState.errors.phone]} />
+                    <FieldError errors={[loginPasswordForm.formState.errors.identifier]} />
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="password-login">密码</FieldLabel>
@@ -227,8 +264,8 @@ export default function LoginPage() {
                   <p className="text-destructive text-sm">{loginPasswordForm.formState.errors.root.message}</p>
                 ) : null}
                 <div className="flex items-center justify-between gap-3">
-                  <Button type="submit" disabled={!agree} className="min-w-28">
-                    登录
+                  <Button type="submit" disabled={!agree || passwordLoginLoading} className="min-w-28">
+                    {passwordLoginLoading ? "登录中..." : "登录"}
                   </Button>
                   <Button type="button" variant="link" className="h-auto px-1" onClick={() => setResetOpen(true)}>
                     忘记密码
@@ -277,18 +314,31 @@ export default function LoginPage() {
             </TabsContent>
 
             <TabsContent value="wechat" className="space-y-4">
-              <div className="mx-auto bg-muted/70 relative flex aspect-square max-w-[220px] items-center justify-center rounded-xl border p-3">
-                <QRCodeSVG
-                  value={wxQrValue}
-                  size={184}
-                  level="M"
-                  includeMargin
-                  className="h-full w-full rounded-md bg-white p-1"
-                />
-              </div>
-              <p className="text-center text-xs text-muted-foreground">
-                请使用微信扫码，二维码每 120 秒自动更新（剩余 {wxExpire}s）
-              </p>
+              {wxLoading && !wxQrUrl ? (
+                <p className="text-muted-foreground text-center text-sm">正在获取二维码…</p>
+              ) : null}
+              {wxError ? <p className="text-destructive text-center text-sm">{wxError}</p> : null}
+              {wxQrUrl ? (
+                <>
+                  <div className="bg-muted/70 relative mx-auto flex aspect-square max-w-[220px] items-center justify-center rounded-xl border p-3">
+                    <QRCodeSVG
+                      value={wxQrUrl}
+                      size={184}
+                      level="M"
+                      includeMargin
+                      className="h-full w-full rounded-md bg-white p-1"
+                    />
+                  </div>
+                  <p className="text-muted-foreground text-center text-xs">
+                    请使用微信扫码；授权成功后将自动进入工作台。二维码约 120 秒后刷新（剩余 {wxExpire}s）
+                  </p>
+                </>
+              ) : null}
+              {wxError || wxQrUrl ? (
+                <Button type="button" variant="outline" className="w-full" onClick={() => void loadWechatQr()}>
+                  刷新二维码
+                </Button>
+              ) : null}
             </TabsContent>
           </Tabs>
 

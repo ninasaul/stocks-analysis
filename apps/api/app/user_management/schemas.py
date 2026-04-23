@@ -33,6 +33,8 @@ class UserResponse(BaseModel):
     username: str
     email: str
     phone: Optional[str] = None
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
     status: str
     created_at: datetime
     updated_at: datetime
@@ -188,9 +190,31 @@ class WechatBindRequest(BaseModel):
     invite_code: Optional[str] = Field(None, description="邀请码（可选，用于新用户自动创建账号）")
 
 
+class MiniprogramPhoneBindRequest(BaseModel):
+    """
+    小程序绑定手机号请求。
+
+    注意：此处的 code 来自 getPhoneNumber 按钮回调里的 e.detail.code，
+    与 wx.login 的 code 完全不同；服务端通过 getuserphonenumber 换手机号，无需 session_key 解密。
+    """
+    code: str = Field(..., description="getPhoneNumber 返回的动态令牌")
+
+
 class WechatLoginRequest(BaseModel):
     """微信登录请求模型"""
     code: str = Field(..., description="微信授权码")
+
+
+class UnifiedUserProfileResponse(BaseModel):
+    """统一用户资料（跨 user / wechat_user 展示）"""
+    user_id: int
+    username: str
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    phone: Optional[str] = None
+    email: str
+    openid: Optional[str] = None
+    unionid: Optional[str] = None
 
 
 class WechatLoginResponse(BaseModel):
@@ -199,6 +223,11 @@ class WechatLoginResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     user: UserResponse
+    wechat_user: Optional[WechatUserResponse] = Field(
+        None,
+        description="微信侧用户资料（openid/unionid/nickname/avatar_url）"
+    )
+    profile: UnifiedUserProfileResponse = Field(..., description="统一用户资料字段（推荐前端优先使用）")
     is_new_user: bool = Field(..., description="是否为新用户")
 
 

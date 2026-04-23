@@ -115,13 +115,16 @@ class DatabaseInitializer:
             phone VARCHAR(20) UNIQUE,
             status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'suspended')),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            display_name VARCHAR(100),
+            avatar_url VARCHAR(255)
         );
 
         CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
         CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
         CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
         CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
+        CREATE INDEX IF NOT EXISTS idx_users_display_name ON users(display_name);
         """
         self.execute_sql(sql, "创建用户表")
 
@@ -240,9 +243,21 @@ class DatabaseInitializer:
         self.create_refresh_tokens_table()
         self.create_token_blacklist_table()
         self.create_wechat_users_table()
+        self.apply_schema_patches()
 
         print("=" * 50)
         print("所有表创建完成！\n")
+
+    def apply_schema_patches(self):
+        """
+        对已存在的库做幂等补丁，保证旧环境也具备最新字段与索引。
+        """
+        sql = """
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(100);
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(255);
+        CREATE INDEX IF NOT EXISTS idx_users_display_name ON users(display_name);
+        """
+        self.execute_sql(sql, "应用数据库结构补丁（仅加列/索引，不做历史数据回填）")
 
     def drop_all_tables(self):
         """删除所有表（慎用！）"""

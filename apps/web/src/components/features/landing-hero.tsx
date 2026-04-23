@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { FileTextIcon, MessagesSquareIcon, HistoryIcon, SparklesIcon } from "lucide-react";
 import { landingCopy, subscriptionCopy } from "@/lib/copy";
@@ -28,6 +28,140 @@ import { cn } from "@/lib/utils";
 import { FallingPattern } from "@/components/features/falling-pattern";
 
 const featureIcons = [FileTextIcon, MessagesSquareIcon, HistoryIcon, SparklesIcon] as const;
+const howItWorksSteps = [
+  {
+    icon: SparklesIcon,
+    title: "AI Agent 解析任务",
+    description: "先识别你是单票深度研判，还是先选股再下钻，并自动匹配最佳工作流。",
+  },
+  {
+    icon: MessagesSquareIcon,
+    title: "AI Agent 交互收敛",
+    description: "在对话中补齐风险偏好、持有周期与条件，持续澄清问题直到可执行。",
+  },
+  {
+    icon: FileTextIcon,
+    title: "AI Agent 生成输出",
+    description: "产出结构化报告：评分、风险等级、关键价位、失效条件，支持导出与打印。",
+  },
+  {
+    icon: HistoryIcon,
+    title: "AI Agent 记录复盘",
+    description: "登录后自动沉淀建议到历史与复盘，便于按同一口径回看与校验判断质量。",
+  },
+] as const;
+
+const HERO_TYPE_MS = 52;
+const HERO_TYPE_LINE_PAUSE_MS = 380;
+
+function HeroTypewriterTitle({
+  line1,
+  line2,
+  id,
+  className,
+}: {
+  line1: string;
+  line2: string;
+  id: string;
+  className?: string;
+}) {
+  const [line1Shown, setLine1Shown] = useState(line1);
+  const [line2Shown, setLine2Shown] = useState(line2);
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    setLine1Shown("");
+    setLine2Shown("");
+  }, [line1, line2]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const clearTimers = () => {
+      for (const t of timersRef.current) clearTimeout(t);
+      timersRef.current = [];
+    };
+    clearTimers();
+
+    let i1 = 0;
+    let i2 = 0;
+    let phase: "line1" | "pause" | "line2" | "done" = "line1";
+
+    const schedule = (fn: () => void, ms: number) => {
+      timersRef.current.push(setTimeout(fn, ms));
+    };
+
+    const tick = () => {
+      if (phase === "line1") {
+        if (i1 < line1.length) {
+          i1 += 1;
+          setLine1Shown(line1.slice(0, i1));
+          schedule(tick, HERO_TYPE_MS);
+        } else {
+          phase = "pause";
+          schedule(tick, HERO_TYPE_LINE_PAUSE_MS);
+        }
+        return;
+      }
+      if (phase === "pause") {
+        phase = "line2";
+        tick();
+        return;
+      }
+      if (phase === "line2") {
+        if (i2 < line2.length) {
+          i2 += 1;
+          setLine2Shown(line2.slice(0, i2));
+          schedule(tick, HERO_TYPE_MS);
+        } else {
+          phase = "done";
+        }
+      }
+    };
+
+    schedule(tick, 120);
+    return clearTimers;
+  }, [line1, line2]);
+
+  const reduced =
+    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const complete = line1Shown.length === line1.length && line2Shown.length === line2.length;
+  const showCaret = !reduced && !complete;
+
+  return (
+    <h1
+      id={id}
+      aria-label={`${line1} ${line2}`}
+      className={cn("landing-hero-in text-foreground text-balance text-4xl font-semibold tracking-tight sm:text-5xl md:text-[3.35rem] md:leading-[1.06]", className)}
+    >
+      <span aria-hidden className="inline-block text-left">
+        <span className="block">
+          {line1Shown}
+          {showCaret && line1Shown.length < line1.length ? (
+            <span
+              className="bg-foreground/85 ml-px inline-block w-[2px] shrink-0 align-[-0.08em] motion-safe:animate-pulse motion-reduce:animate-none md:h-[1.06em] md:align-[-0.06em]"
+              style={{ height: "1em" }}
+              aria-hidden
+            />
+          ) : null}
+        </span>
+        <span className="block">
+          {line2Shown}
+          {showCaret && line1Shown.length === line1.length && line2Shown.length < line2.length ? (
+            <span
+              className="bg-foreground/85 ml-px inline-block w-[2px] shrink-0 align-[-0.08em] motion-safe:animate-pulse motion-reduce:animate-none md:h-[1.06em] md:align-[-0.06em]"
+              style={{ height: "1em" }}
+              aria-hidden
+            />
+          ) : null}
+        </span>
+      </span>
+    </h1>
+  );
+}
 
 /** 进入视口后淡入上移；尊重系统「减少动态效果」。 */
 function LandingReveal({ children, className, delayMs = 0 }: { children: ReactNode; className?: string; delayMs?: number }) {
@@ -82,7 +216,7 @@ function LandingReportPreview() {
       <h2 id="landing-report-preview-heading" className="sr-only">
         {landingCopy.previewTitle}
       </h2>
-      <div className="border-border/45 bg-card/80 overflow-hidden rounded-xl border text-left shadow-sm backdrop-blur-md supports-backdrop-filter:bg-card/58">
+      <div className="border-border/45 bg-card/80 overflow-hidden rounded-xl border text-left shadow-sm backdrop-blur-md supports-backdrop-filter:bg-card/58 motion-safe:transition-[transform,box-shadow,border-color,background-color] motion-safe:duration-450 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.005] motion-safe:hover:shadow-lg motion-safe:hover:border-primary/30 motion-safe:hover:bg-card/84 supports-backdrop-filter:motion-safe:hover:bg-card/60">
         <div className="border-border/35 border-b bg-muted/45 px-3 py-2 backdrop-blur-sm supports-backdrop-filter:bg-muted/32">
           <div className="flex items-center gap-2">
             <span className="bg-red-500/80 inline-flex size-2 rounded-full" aria-hidden />
@@ -95,52 +229,57 @@ function LandingReportPreview() {
         </div>
         <Card className="rounded-none border-0 bg-transparent shadow-none">
           <CardHeader className="gap-2 border-b border-border/35 pb-4">
-            <CardTitle className="text-base">{landingCopy.previewTitle}</CardTitle>
-            <p className="text-muted-foreground text-xs font-mono">CN.600519 · 2026-04-20 14:30 · 日线</p>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base">贵州茅台（600519.SH）</CardTitle>
+              <Badge variant="outline" className="text-[10px]">
+                示例数据
+              </Badge>
+            </div>
+            <p className="text-muted-foreground text-xs font-mono">2026-04-20 14:30 · 日线 · CNY</p>
           </CardHeader>
           <CardContent className="flex flex-col gap-4 py-5">
             <div className="rounded-lg border border-border/40 bg-muted/25 px-3 py-2.5">
-              <p className="text-muted-foreground mb-2 text-xs font-medium">建议动作</p>
+              <p className="text-muted-foreground mb-2 text-xs font-medium">交易建议</p>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge>加仓</Badge>
-                <span className="text-muted-foreground text-xs">置信度 78</span>
+                <span className="text-muted-foreground text-xs">现价 1642.38（+1.76%）</span>
                 <span className="text-muted-foreground text-xs">风险：中等</span>
               </div>
               <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
-                趋势延续且量价配合，短期回撤未破关键支撑，维持正向偏多判断。
+                趋势向上且成交额温和放大，回踩未破 10 日均线，维持偏多观点，回撤可分批吸纳。
               </p>
             </div>
             <div className="grid grid-cols-3 gap-2">
               <div className="rounded-md border border-border/35 px-2.5 py-2">
                 <p className="text-muted-foreground text-[11px]">综合评分</p>
-                <p className="text-foreground mt-1 text-sm font-semibold tabular-nums">82 / 100</p>
+                <p className="text-foreground mt-1 text-sm font-semibold tabular-nums">84 / 100</p>
               </div>
               <div className="rounded-md border border-border/35 px-2.5 py-2">
-                <p className="text-muted-foreground text-[11px]">建议仓位</p>
-                <p className="text-foreground mt-1 text-sm font-semibold tabular-nums">35% - 45%</p>
+                <p className="text-muted-foreground text-[11px]">市盈率(TTM)</p>
+                <p className="text-foreground mt-1 text-sm font-semibold tabular-nums">26.4x</p>
               </div>
               <div className="rounded-md border border-border/35 px-2.5 py-2">
-                <p className="text-muted-foreground text-[11px]">有效期</p>
-                <p className="text-foreground mt-1 text-sm font-semibold tabular-nums">2 - 4 交易日</p>
+                <p className="text-muted-foreground text-[11px]">成交额</p>
+                <p className="text-foreground mt-1 text-sm font-semibold tabular-nums">42.7 亿</p>
               </div>
             </div>
             <div className="border-border/35 border-t pt-3">
               <dl className="flex flex-col gap-2.5">
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4">
                   <dt className="text-muted-foreground text-xs">关注区间</dt>
-                  <dd className="text-foreground/90 font-mono text-xs tabular-nums">1548 - 1588</dd>
+                  <dd className="text-foreground/90 font-mono text-xs tabular-nums">1628 - 1665</dd>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4">
                   <dt className="text-muted-foreground text-xs">风险位</dt>
-                  <dd className="text-foreground/90 font-mono text-xs tabular-nums">1526</dd>
+                  <dd className="text-foreground/90 font-mono text-xs tabular-nums">1598</dd>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4">
                   <dt className="text-muted-foreground text-xs">观察目标</dt>
-                  <dd className="text-foreground/90 font-mono text-xs tabular-nums">1628 / 1660</dd>
+                  <dd className="text-foreground/90 font-mono text-xs tabular-nums">1688 / 1720</dd>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4">
                   <dt className="text-muted-foreground text-xs">失效条件</dt>
-                  <dd className="text-foreground/90 font-mono text-xs tabular-nums">日线收于 1526 下方</dd>
+                  <dd className="text-foreground/90 font-mono text-xs tabular-nums">日线收于 1598 下方</dd>
                 </div>
               </dl>
             </div>
@@ -284,13 +423,34 @@ function LandingFeaturesSection() {
 
             <Card
               id="landing-how"
-              className={cn(landingCardMotion, "border-border/45 bg-background/70 rounded-2xl shadow-none sm:col-span-2")}
+              className={cn(
+                landingCardMotion,
+                "scroll-mt-28 border-border/45 bg-background/70 rounded-2xl shadow-none sm:col-span-2",
+              )}
             >
               <CardHeader className="gap-2 pb-2">
                 <CardTitle className="text-foreground text-lg">{landingCopy.howItWorksHeading}</CardTitle>
               </CardHeader>
-              <CardContent className="pt-0">
+              <CardContent className="space-y-4 pt-0">
                 <p className="text-muted-foreground text-sm leading-relaxed">{landingCopy.howItWorksBody}</p>
+                <ul className="grid gap-2.5 sm:grid-cols-2">
+                  {howItWorksSteps.map((step) => {
+                    const Icon = step.icon;
+                    return (
+                      <li key={step.title} className="rounded-lg border border-border/35 bg-background/55 p-3">
+                        <div className="flex items-start gap-2.5">
+                          <span className="bg-background text-muted-foreground inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/40">
+                            <Icon className="size-4" aria-hidden />
+                          </span>
+                          <div className="space-y-1">
+                            <p className="text-foreground text-sm font-medium leading-none">{step.title}</p>
+                            <p className="text-muted-foreground text-xs leading-relaxed">{step.description}</p>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
               </CardContent>
             </Card>
           </div>
@@ -432,13 +592,11 @@ export function LandingHero() {
         />
         <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center gap-10 px-4 py-16 md:px-6 md:py-24 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-center lg:gap-10">
           <div className="flex max-w-xl flex-col items-center text-center lg:items-start lg:text-left">
-            <h1
+            <HeroTypewriterTitle
               id="landing-hero-title"
-              className="landing-hero-in text-foreground text-balance text-4xl font-semibold tracking-tight sm:text-5xl md:text-[3.35rem] md:leading-[1.06]"
-            >
-              <span className="block">{landingCopy.heroTitleLine1}</span>
-              <span className="block">{landingCopy.heroTitleLine2}</span>
-            </h1>
+              line1={landingCopy.heroTitleLine1}
+              line2={landingCopy.heroTitleLine2}
+            />
             <p className="landing-hero-in landing-hero-in-delay-1 text-muted-foreground mt-4 text-sm leading-relaxed md:text-base">
               {landingCopy.heroLead}
             </p>
@@ -458,14 +616,6 @@ export function LandingHero() {
                 "landing-hero-in landing-hero-in-delay-3 mt-3 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs lg:justify-start",
               )}
             >
-              <Button className="h-auto p-0 text-xs" variant="link" render={<Link href="/#landing-how" scroll />}>
-                {landingCopy.heroCtaSecondary}
-              </Button>
-              <span className="text-muted-foreground/60">·</span>
-              <Button variant="link" className="h-auto p-0 text-xs font-medium" render={<Link href="/login" />}>
-                {landingCopy.heroCtaLogin}
-              </Button>
-              <span className="text-muted-foreground/60">·</span>
               <span className="text-muted-foreground/90">{landingCopy.heroEyebrow}</span>
             </div>
 
@@ -497,30 +647,18 @@ export function LandingHero() {
               </h2>
             </header>
             <div className="mx-auto mt-10 max-w-3xl">
-              <Accordion className="space-y-3">
+              <Accordion className="space-y-2">
                 {landingCopy.faqItems.map((item) => (
                   <AccordionItem
                     key={item.q}
                     value={item.q}
-                    className="border-border/45 bg-background/70 motion-safe:transition-[background-color,box-shadow,transform] motion-safe:duration-200 rounded-lg border px-4 hover:bg-background/90 motion-safe:hover:shadow-sm"
+                    className="border-border/45 bg-background/65 rounded-md border px-4 motion-safe:transition-colors motion-safe:duration-200 hover:bg-muted/30"
                   >
-                    <AccordionTrigger className="py-4 text-left">
-                      <span className="flex items-start gap-3">
-                        <span className="bg-foreground text-background mt-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded text-[10px] font-semibold">
-                          Q
-                        </span>
-                        <span className="text-foreground text-sm font-semibold leading-relaxed md:text-base">
-                          {item.q}
-                        </span>
-                      </span>
+                    <AccordionTrigger className="py-4 text-left text-sm font-semibold leading-relaxed md:text-base">
+                      {item.q}
                     </AccordionTrigger>
                     <AccordionContent className="pb-4">
-                      <div className="flex items-start gap-3">
-                        <span className="bg-muted text-muted-foreground mt-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded text-[10px] font-semibold">
-                          A
-                        </span>
-                        <p className="text-muted-foreground text-sm leading-relaxed md:text-[15px]">{item.a}</p>
-                      </div>
+                      <p className="text-muted-foreground text-sm leading-relaxed md:text-[15px]">{item.a}</p>
                     </AccordionContent>
                   </AccordionItem>
                 ))}

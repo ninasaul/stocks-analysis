@@ -1,0 +1,108 @@
+.wrap {
+  padding: 48rpx 32rpx;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+.hero {
+  margin-bottom: 40rpx;
+}
+
+.brand {
+  display: block;
+  font-size: 44rpx;
+  font-weight: 700;
+  margin-bottom: 16rpx;
+}
+
+.sub {
+  display: block;
+  font-size: 26rpx;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.sheet {
+  background: #fff;
+  border-radius: 20rpx;
+  padding: 36rpx 28rpx 28rpx;
+  box-shadow: 0 8rpx 32rpx rgba(15, 23, 42, 0.08);
+  border: 1rpx solid #e2e8f0;
+}
+
+.profile-block {
+  margin-bottom: 24rpx;
+}
+
+.section-title {
+  display: block;
+  margin-bottom: 14rpx;
+  font-size: 24rpx;
+  color: #475569;
+}
+
+.profile-row {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.avatar-btn {
+  width: 140rpx;
+  height: 140rpx;
+  border-radius: 16rpx;
+  border: 1rpx solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 16rpx;
+}
+
+.nickname-input {
+  flex: 1;
+  height: 80rpx;
+  border: 1rpx solid #cbd5e1;
+  border-radius: 12rpx;
+  padding: 0 20rpx;
+  font-size: 28rpx;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.btn {
+  background: #0f172a;
+  color: #fff;
+  border-radius: 12rpx;
+  font-size: 30rpx;
+}
+
+.ghost {
+  margin-top: 24rpx;
+  background: #f1f5f9;
+  color: #0f172a;
+  border-radius: 12rpx;
+  font-size: 28rpx;
+}
+
+.err {
+  display: block;
+  margin-top: 24rpx;
+  font-size: 26rpx;
+  color: #b91c1c;
+}
+
+.hint {
+  margin-top: 40rpx;
+  font-size: 24rpx;
+  color: #64748b;
+  line-height: 1.6;
+}

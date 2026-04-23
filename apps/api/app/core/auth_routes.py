@@ -1,15 +1,54 @@
 """JWT 认证相关的 API 路由"""
-from datetime import timedelta
-from fastapi import APIRouter, HTTPException, status, Depends, Request
+from datetime import timedelta, datetime
+from typing import Union
+
+from fastapi import APIRouter, HTTPException, status, Depends, Request, Query
 from fastapi.security import OAuth2PasswordRequestForm
-from ..core.auth import authenticate_user, create_access_token, create_refresh_token, get_current_user, verify_token, add_token_to_blacklist
+
+from ..core.auth import (
+    authenticate_user,
+    create_access_token,
+    create_refresh_token,
+    get_current_user,
+    verify_token,
+    add_token_to_blacklist,
+)
 from ..core.config import config
 from ..core.rate_limit import rate_limit_login
-from ..user_management.schemas import UserCreate, UserResponse, LoginResponse, RefreshTokenRequest, RefreshTokenResponse, LogoutRequest
+from ..user_management.models import User, UserStatus
+from ..user_management.schemas import (
+    UserCreate,
+    UserResponse,
+    LoginResponse,
+    RefreshTokenRequest,
+    RefreshTokenResponse,
+    LogoutRequest,
+)
 from ..user_management.services import UserService, RefreshTokenService
-from datetime import datetime
 
 router = APIRouter(prefix="/api/auth", tags=["认证"])
+
+
+def _issue_login_response(user: User) -> LoginResponse:
+    """签发访问令牌与刷新令牌并写入 refresh_tokens 表。"""
+    access_token_expires = timedelta(minutes=config.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username},
+        expires_delta=access_token_expires,
+    )
+    refresh_token_expires = timedelta(days=7)
+    refresh_token = create_refresh_token(
+        data={"sub": user.username, "type": "refresh"},
+        expires_delta=refresh_token_expires,
+    )
+    refresh_token_expires_at = datetime.utcnow() + refresh_token_expires
+    RefreshTokenService.create_refresh_token(user.id, refresh_token, refresh_token_expires_at)
+    return LoginResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+        user=UserResponse(**user.to_dict()),
+    )
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -32,7 +71,10 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
     """
     rate_limit_login(request, form_data.username)
 
-    user = authenticate_user(form_data.username, form_data.password)
+    try:
+        user = authenticate_user(form_data.username, form_data.password)
+    except HTTPException:
+        raise
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -40,31 +82,21 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    access_token_expires = timedelta(minutes=config.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username},
-        expires_delta=access_token_expires
-    )
-
-    refresh_token_expires = timedelta(days=7)
-    refresh_token = create_refresh_token(
-        data={"sub": user.username, "type": "refresh"},
-        expires_delta=refresh_token_expires
-    )
-    refresh_token_expires_at = datetime.utcnow() + refresh_token_expires
-
-    RefreshTokenService.create_refresh_token(user.id, refresh_token, refresh_token_expires_at)
-
-    return LoginResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
-        user=UserResponse(**user.to_dict())
-    )
+    return _issue_login_response(user)
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserCreate):
+@router.post(
+    "/register",
+    response_model=Union[UserResponse, LoginResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def register(
+    user_data: UserCreate,
+    grant_tokens: bool = Query(
+        False,
+        description="为 true 时在响应中返回 access_token 与 refresh_token，等同于注册后立即登录",
+    ),
+):
     """
     用户注册
 
@@ -89,6 +121,8 @@ async def register(user_data: UserCreate):
     if not user:
         raise HTTPException(status_code=500, detail="创建用户失败")
 
+    if grant_tokens:
+        return _issue_login_response(user)
     return UserResponse(**user.to_dict())
 
 
@@ -139,6 +173,12 @@ async def refresh_access_token(request_data: RefreshTokenRequest):
             detail="用户不存在"
         )
 
+    if user.status != UserStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="账号已停用或尚未激活",
+        )
+
     access_token_expires = timedelta(minutes=config.ACCESS_TOKEN_EXPIRE_MINUTES)
     new_access_token = create_access_token(
         data={"sub": user.username},
@@ -159,7 +199,8 @@ async def refresh_access_token(request_data: RefreshTokenRequest):
     RefreshTokenService.rotate_refresh_token(
         request_data.refresh_token,
         new_refresh_token,
-        new_refresh_token_expires_at
+        new_refresh_token_expires_at,
+        user_id=user.id,
     )
 
     return RefreshTokenResponse(

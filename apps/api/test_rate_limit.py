@@ -3,7 +3,7 @@ import time
 import requests
 import json
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8011"
 TEST_USER = {
     "username": "ratetest",
     "password": "Test123456",

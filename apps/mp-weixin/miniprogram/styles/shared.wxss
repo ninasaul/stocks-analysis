@@ -1,0 +1,33 @@
+/* 与五态结论配套的弱色标签（历史列表等） */
+.badge {
+  flex-shrink: 0;
+  font-size: 22rpx;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  font-weight: 500;
+}
+
+.badge-neutral {
+  color: #475569;
+  background: #f1f5f9;
+}
+
+.badge-trial {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.badge-add {
+  color: #047857;
+  background: #d1fae5;
+}
+
+.badge-reduce {
+  color: #b45309;
+  background: #fef3c7;
+}
+
+.badge-exit {
+  color: #b91c1c;
+  background: #fee2e2;
+}

@@ -1,0 +1,15 @@
+{
+  "name": "mp-weixin",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "node -e \"console.log('用微信开发者工具打开 apps/mp-weixin；源码在 miniprogram/，TS 由工具内置插件编译');\"",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "icons:tabbar": "node scripts/generate-tabbar-icons.mjs"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "miniprogram-api-typings": "^4.1.0",
+    "typescript": "~5.7.3"
+  }
+}

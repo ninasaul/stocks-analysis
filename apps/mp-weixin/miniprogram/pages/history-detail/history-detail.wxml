@@ -1,0 +1,49 @@
+<view class="page" wx:if="{{entry}}">
+  <view class="card rep-card {{reportCardMod}}">
+    <text class="h1">{{entry.title}}</text>
+    <view class="badge-wrap">
+      <text class="badge {{badgeClass}}">{{actionLabel}}</text>
+    </view>
+    <text class="sub">{{entry.market}}.{{entry.symbol}} · {{timeframeLabel}} · {{riskLabel}} · 置信度 {{entry.confidence}}</text>
+  </view>
+  <view class="card">
+    <text class="h2">结论</text>
+    <text class="line">五态：{{actionLabel}}</text>
+    <text class="line">{{entry.action_reason}}</text>
+  </view>
+  <view class="card">
+    <text class="h2">评分（60/25/15）</text>
+    <text class="line">技术 {{entry.score_breakdown.technical}}</text>
+    <text class="line">结构与风险 {{entry.score_breakdown.structure_risk}}</text>
+    <text class="line">事件折扣 {{entry.score_breakdown.event_discount}}</text>
+    <text class="line">综合 {{entry.score_breakdown.total}}</text>
+  </view>
+  <view class="card">
+    <text class="h2">研究计划</text>
+    <text class="line">关注区间 {{entry.plan.focus_range}}</text>
+    <text class="line">风险位 {{entry.plan.risk_level_price}}</text>
+    <text class="line">观察目标 {{entry.plan.target_price}}</text>
+    <text class="line">风险敞口 {{entry.plan.risk_exposure_pct}}</text>
+    <text class="line">失效 {{entry.plan.invalidation}}</text>
+    <text class="line">有效期 {{entry.plan.valid_until}}</text>
+  </view>
+  <view class="card">
+    <text class="h2">依据</text>
+    <text class="line" wx:for="{{entry.evidence_positive}}" wx:for-index="i" wx:key="i">· {{item}}</text>
+    <text class="h2 small-gap">负向</text>
+    <text class="line" wx:for="{{entry.evidence_negative}}" wx:for-index="j" wx:key="j">· {{item}}</text>
+  </view>
+  <view class="card" wx:if="{{entry.reminders && entry.reminders.length}}">
+    <text class="h2">提醒</text>
+    <text class="line" wx:for="{{entry.reminders}}" wx:for-index="k" wx:key="k">· {{item}}</text>
+  </view>
+  <view class="footer foot-safe">
+    <button class="footer-btn primary" bindtap="onReAnalyze">用该标的再预测</button>
+    <button class="footer-btn foot-gap" bindtap="onBack">返回列表</button>
+  </view>
+</view>
+<view wx:else class="page empty-wrap">
+  <text class="empty">未找到该记录，可能已被清理或链接无效。</text>
+  <button class="footer-btn" bindtap="onGoHistory">返回历史列表</button>
+  <button class="footer-btn primary empty-gap" bindtap="onGoAnalyze">去股票预测</button>
+</view>

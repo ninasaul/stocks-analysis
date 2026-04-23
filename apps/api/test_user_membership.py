@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # API 基础 URL
-BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8011")
 
 # 固定的测试账户信息
 TEST_USER = {

@@ -1,0 +1,38 @@
+<view class="page">
+  <view class="card">
+    <text class="h1">自选</text>
+    <text class="desc">管理关注标的，快速查看价格变化并一键进入分析。</text>
+  </view>
+  <view class="card row add-bar">
+    <input
+      class="input"
+      value="{{query}}"
+      bindinput="onQueryInput"
+      placeholder="代码或 CN.600519"
+      confirm-type="search"
+    />
+    <button class="add-btn" size="mini" bindtap="onAdd">添加</button>
+  </view>
+  <text class="hint-line" wx:if="{{lines.length}}">轻点列表行可带去「股票预测」并预填标的</text>
+  <text class="err" wx:if="{{errMsg}}">{{errMsg}}</text>
+  <view wx:if="{{!lines.length}}" class="empty">
+    <text class="empty-t">暂无自选</text>
+    <text class="empty-sub">支持输入代码或 CN.600519 格式添加标的。</text>
+    <button class="empty-btn" bindtap="onGoAnalyze">去股票预测</button>
+  </view>
+  <view
+    wx:for="{{lines}}"
+    wx:key="k"
+    class="row-card mp-press"
+    hover-class="mp-press-hover"
+    hover-stay-time="80"
+    data-k="{{item.k}}"
+    bindtap="onOpenAnalyze"
+  >
+    <view class="grow">
+      <text class="title {{item.tone}}">{{item.title}}</text>
+      <text class="sub">{{item.sub}}</text>
+    </view>
+    <button size="mini" catchtap="onRemove" data-k="{{item.k}}">删除</button>
+  </view>
+</view>

@@ -1,0 +1,448 @@
+.page {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 24rpx 24rpx calc(48rpx + env(safe-area-inset-bottom));
+  background: #f2f3f5;
+  color: #0f172a;
+}
+
+/* ========== 身份卡 ========== */
+.identity {
+  background: linear-gradient(135deg, #0b1220 0%, #1d2939 100%);
+  border-radius: 20rpx;
+  padding: 28rpx 24rpx;
+  color: #f9fafb;
+  margin-bottom: 20rpx;
+  box-shadow: 0 6rpx 18rpx rgba(11, 18, 32, 0.12);
+}
+
+.identity-top {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+}
+
+.avatar-wrap {
+  flex: 0 0 auto;
+}
+
+.avatar {
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 999rpx;
+  background: #344054;
+  box-shadow: inset 0 0 0 2rpx rgba(255, 255, 255, 0.08);
+}
+
+.avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 46rpx;
+  font-weight: 600;
+  color: #f8fafc;
+  background: linear-gradient(135deg, #3b82f6, #0ea5e9);
+}
+
+.identity-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.identity-name-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  min-width: 0;
+}
+
+.identity-name {
+  font-size: 34rpx;
+  font-weight: 600;
+  line-height: 1.2;
+  max-width: 320rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wx-chip {
+  flex: 0 0 auto;
+  font-size: 20rpx;
+  line-height: 1;
+  padding: 7rpx 12rpx;
+  border-radius: 999rpx;
+  background: rgba(16, 185, 129, 0.16);
+  color: #6ee7b7;
+  letter-spacing: 0.5rpx;
+}
+
+.identity-meta {
+  margin-top: 10rpx;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14rpx;
+}
+
+.identity-phone {
+  font-size: 24rpx;
+  color: #d0d5dd;
+  letter-spacing: 0.5rpx;
+}
+
+.identity-phone-warn {
+  color: #fcd34d;
+}
+
+.identity-id {
+  font-size: 22rpx;
+  color: #98a2b3;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+}
+
+.identity-sub {
+  display: block;
+  margin-top: 10rpx;
+  font-size: 23rpx;
+  color: #98a2b3;
+  line-height: 1.4;
+}
+
+.identity-sync {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 10rpx 16rpx;
+  border-radius: 14rpx;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.identity-sync-text {
+  font-size: 22rpx;
+  color: #e4e7ec;
+  font-weight: 500;
+}
+
+.identity-sync-stamp {
+  margin-top: 4rpx;
+  font-size: 18rpx;
+  color: #98a2b3;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* ========== 订阅卡 ========== */
+.plan-card {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 22rpx 22rpx;
+  margin-bottom: 20rpx;
+  border: 1rpx solid #e5e7eb;
+  box-shadow: 0 2rpx 6rpx rgba(15, 23, 42, 0.03);
+}
+
+.plan-pro {
+  background: linear-gradient(135deg, #fff7ed 0%, #ffffff 60%);
+  border-color: #fed7aa;
+}
+
+.plan-left {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  min-width: 0;
+}
+
+.plan-tag {
+  flex: 0 0 auto;
+  width: 76rpx;
+  height: 76rpx;
+  border-radius: 14rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24rpx;
+  font-weight: 700;
+  letter-spacing: 1rpx;
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.plan-pro .plan-tag {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  box-shadow: 0 4rpx 10rpx rgba(217, 119, 6, 0.24);
+}
+
+.plan-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.plan-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.plan-desc {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  color: #475569;
+  line-height: 1.45;
+}
+
+.plan-desc-mute {
+  color: #94a3b8;
+  margin-top: 2rpx;
+}
+
+.plan-cta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4rpx;
+  padding-left: 14rpx;
+}
+
+.plan-cta-text {
+  font-size: 23rpx;
+  color: #2563eb;
+  font-weight: 500;
+}
+
+.plan-pro .plan-cta-text {
+  color: #c2410c;
+}
+
+.plan-cta-arrow {
+  font-size: 28rpx;
+  color: #2563eb;
+  line-height: 1;
+}
+
+.plan-pro .plan-cta-arrow {
+  color: #c2410c;
+}
+
+/* ========== 使用数据 ========== */
+.stats {
+  display: flex;
+  align-items: stretch;
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 22rpx 0;
+  margin-bottom: 24rpx;
+  border: 1rpx solid #e5e7eb;
+  box-shadow: 0 2rpx 6rpx rgba(15, 23, 42, 0.03);
+}
+
+.stat-cell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6rpx;
+}
+
+.stat-num {
+  font-size: 40rpx;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  font-size: 22rpx;
+  color: #64748b;
+}
+
+.stat-divider {
+  width: 1rpx;
+  margin: 8rpx 0;
+  background: #e5e7eb;
+}
+
+/* ========== 分组 cell ========== */
+.group {
+  margin-bottom: 24rpx;
+}
+
+.group-title {
+  font-size: 22rpx;
+  color: #64748b;
+  padding: 0 8rpx 10rpx;
+  letter-spacing: 0.5rpx;
+}
+
+.group-body {
+  background: #fff;
+  border-radius: 16rpx;
+  border: 1rpx solid #e5e7eb;
+  overflow: hidden;
+}
+
+.row {
+  position: relative;
+  background: #fff;
+}
+
+.row + .row::before {
+  content: "";
+  position: absolute;
+  left: 24rpx;
+  right: 0;
+  top: 0;
+  height: 1rpx;
+  background: #eef1f4;
+}
+
+.row-btn {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+  background: #fff;
+  border-radius: 0;
+  border: none;
+  line-height: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+.row-btn::after {
+  border: none;
+}
+
+.row-btn[disabled] {
+  background: #fff;
+  color: inherit;
+  opacity: 0.72;
+}
+
+.row-inner {
+  min-height: 96rpx;
+  padding: 22rpx 24rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.row-label {
+  font-size: 27rpx;
+  color: #0f172a;
+  font-weight: 500;
+}
+
+.row-right {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  max-width: 60%;
+  overflow: hidden;
+}
+
+.row-value {
+  font-size: 25rpx;
+  color: #475569;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-value-dim {
+  color: #94a3b8;
+  font-size: 23rpx;
+}
+
+.row-value-mono {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 23rpx;
+  color: #475569;
+}
+
+.row-value-cta {
+  color: #2563eb;
+  font-weight: 500;
+}
+
+.row-arrow {
+  font-size: 32rpx;
+  color: #cbd5e1;
+  line-height: 1;
+}
+
+/* ========== 通用按压态 ========== */
+.mp-press-hover {
+  background: #f8fafc;
+}
+
+/* ========== CTA ========== */
+.cta-wrap {
+  margin-top: 8rpx;
+}
+
+.cta-primary,
+.cta-danger {
+  display: block;
+  width: 100%;
+  margin: 0;
+  line-height: 92rpx;
+  min-height: 92rpx;
+  border-radius: 16rpx;
+  font-size: 30rpx;
+  font-weight: 500;
+}
+
+.cta-primary::after,
+.cta-danger::after {
+  border: none;
+}
+
+.cta-primary {
+  background: #0f172a;
+  color: #fff;
+  box-shadow: 0 6rpx 16rpx rgba(15, 23, 42, 0.18);
+}
+
+.cta-danger {
+  background: #fff;
+  color: #d92d20;
+  border: 1rpx solid #fecaca;
+}
+
+.cta-danger[disabled] {
+  opacity: 0.7;
+}
+
+.cta-hint {
+  display: block;
+  margin-top: 16rpx;
+  font-size: 22rpx;
+  color: #64748b;
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* ========== Footer ========== */
+.footer {
+  margin-top: 40rpx;
+  text-align: center;
+  font-size: 20rpx;
+  color: #cbd5e1;
+  letter-spacing: 0.5rpx;
+}

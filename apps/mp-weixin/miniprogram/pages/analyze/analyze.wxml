@@ -1,0 +1,60 @@
+<view class="page">
+  <view class="card input-card">
+    <view class="head">
+      <text class="title">股票预测</text>
+      <text class="state {{guest ? 'state-off' : 'state-on'}}">{{guest ? "未登录" : "已登录"}}</text>
+    </view>
+    <text class="status">{{matchStatus}}</text>
+    <view class="input-row">
+      <input
+        class="input"
+        value="{{keyword}}"
+        bindinput="onKeywordInput"
+        placeholder="输入代码，例如 600519 或 CN.600519"
+        confirm-type="search"
+      />
+      <button class="clear" bindtap="onClearKeyword" disabled="{{!keyword}}">清空</button>
+    </view>
+    <text class="picked" wx:if="{{selectedLine}}">{{selectedLine}}</text>
+
+    <scroll-view scroll-y class="hits" wx:if="{{searchHits.length}}">
+      <view
+        class="hit"
+        wx:for="{{searchHits}}"
+        wx:key="key"
+        data-key="{{item.key}}"
+        bindtap="onPickHit"
+      >
+        <text class="hit-left">{{item.symbol}} {{item.name}}</text>
+        <text class="hit-right">{{item.key}}</text>
+      </view>
+    </scroll-view>
+
+    <button class="primary" bindtap="onRunAnalyze" loading="{{loading}}" disabled="{{loading || !runEnabled}}">
+      {{loading ? "预测中..." : "AI 一键预测"}}
+    </button>
+    <text class="err" wx:if="{{errMsg}}">{{errMsg}}</text>
+  </view>
+
+  <view class="card result-card {{reportCardMod}}" wx:if="{{report}}">
+    <view class="result-head">
+      <text class="symbol">{{report.market}}.{{report.symbol}}</text>
+      <text class="pill pill-{{report.action}}">{{actionLabel}}</text>
+    </view>
+    <view class="meta">
+      <text>风险 {{riskLabel}}</text>
+      <text>置信 {{confidencePct}}%</text>
+      <text>{{analysisTime}}</text>
+    </view>
+    <text class="quote">{{quoteLine}}</text>
+    <view class="plan">
+      <text>关注区间 {{report.plan.focus_range}}</text>
+      <text>风险位 {{report.plan.risk_level_price}}</text>
+      <text>目标位 {{report.plan.target_price}}</text>
+      <text>失效条件 {{report.plan.invalidation}}</text>
+      <text>有效期 {{report.plan.valid_until}}</text>
+    </view>
+  </view>
+
+  <text class="compliance">仅供研究参考，不构成投资建议。</text>
+</view>

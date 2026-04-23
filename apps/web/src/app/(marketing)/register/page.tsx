@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,9 +17,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 
 const registerSchema = z
   .object({
+    username: z
+      .string()
+      .min(3, "用户名至少 3 位")
+      .max(50, "用户名最多 50 位")
+      .regex(/^[a-zA-Z0-9_-]+$/, "用户名只能包含字母、数字、下划线和连字符"),
+    email: z.string().email("请输入有效邮箱"),
     phone: z.string().regex(/^1\d{10}$/, "请输入有效的 11 位手机号"),
-    password: z.string().min(8, "密码至少 8 位"),
-    confirmPassword: z.string().min(8, "请再次输入密码"),
+    password: z.string().min(8, "密码至少 8 位").max(16, "密码最多 16 位"),
+    confirmPassword: z.string().min(8, "请再次输入密码").max(16, "密码最多 16 位"),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "两次输入的密码不一致",
@@ -30,28 +36,44 @@ type RegisterForm = z.infer<typeof registerSchema>;
 
 export default function RegisterPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const authHydrated = useStoreHydrated(useAuthStore);
   const session = useAuthStore((s) => s.session);
-  const registerPassword = useAuthStore((s) => s.registerPasswordMock);
+  const registerPassword = useAuthStore((s) => s.registerPassword);
+  const redirectTo = searchParams.get("next") || "/app/analyze";
   const [agree, setAgree] = useState(false);
+  const [registerLoading, setRegisterLoading] = useState(false);
 
   const form = useForm<RegisterForm>({
     resolver: zodResolver(registerSchema),
-    defaultValues: { phone: "", password: "", confirmPassword: "" },
+    defaultValues: { username: "", email: "", phone: "", password: "", confirmPassword: "" },
   });
 
   useEffect(() => {
     if (!authHydrated) return;
     if (session === "user") {
-      router.replace("/app/analyze");
+      router.replace(redirectTo);
     }
-  }, [authHydrated, session, router]);
+  }, [authHydrated, redirectTo, session, router]);
 
-  const onSubmit = form.handleSubmit((data) => {
+  const onSubmit = form.handleSubmit(async (data) => {
     if (!agree) return;
-    const ok = registerPassword(data.phone, data.password);
-    if (ok) router.push("/app/analyze");
-    else form.setError("root", { message: loginCopy.errors.registerFailed });
+    setRegisterLoading(true);
+    try {
+      await registerPassword({
+        username: data.username,
+        email: data.email,
+        phone: data.phone,
+        password: data.password,
+      });
+      router.push(redirectTo);
+    } catch (error) {
+      form.setError("root", {
+        message: error instanceof Error ? error.message : loginCopy.errors.registerFailed,
+      });
+    } finally {
+      setRegisterLoading(false);
+    }
   });
 
   if (!authHydrated) {
@@ -85,6 +107,25 @@ export default function RegisterPage() {
         <CardContent className="space-y-5">
           <form onSubmit={onSubmit} className="space-y-4">
             <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="username-register">用户名</FieldLabel>
+                <Input
+                  id="username-register"
+                  placeholder="字母、数字、下划线或连字符"
+                  {...form.register("username")}
+                />
+                <FieldError errors={[form.formState.errors.username]} />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="email-register">邮箱</FieldLabel>
+                <Input
+                  id="email-register"
+                  type="email"
+                  placeholder="请输入常用邮箱"
+                  {...form.register("email")}
+                />
+                <FieldError errors={[form.formState.errors.email]} />
+              </Field>
               <Field>
                 <FieldLabel htmlFor="phone-register">手机号</FieldLabel>
                 <Input
@@ -136,8 +177,8 @@ export default function RegisterPage() {
               </label>
             </div>
 
-            <Button type="submit" disabled={!agree} className="min-w-28">
-              创建账号
+            <Button type="submit" disabled={!agree || registerLoading} className="min-w-28">
+              {registerLoading ? "创建中..." : "创建账号"}
             </Button>
           </form>
         </CardContent>

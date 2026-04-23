@@ -1,0 +1,22 @@
+<view class="page">
+  <view class="card">
+    <text class="h1">设置</text>
+    <text class="p">在这里查看当前连接信息与账号相关设置入口。</text>
+    <text class="p">更多偏好项可在桌面端继续管理，账户状态会自动保持一致。</text>
+  </view>
+  <view class="card">
+    <text class="h2">当前后端</text>
+    <view class="mono-wrap">
+      <text class="mono">{{apiLine}}</text>
+    </view>
+    <text class="p small-gap">{{storageHint}}</text>
+  </view>
+  <view class="card">
+    <text class="h2">数据与记录</text>
+    <button class="ghost" bindtap="onGoHistory">历史与复盘</button>
+  </view>
+  <view class="card">
+    <text class="h2">合规提示</text>
+    <text class="p">仅供研究参考，不构成投资建议。不提供交易执行与下单能力。</text>
+  </view>
+</view>

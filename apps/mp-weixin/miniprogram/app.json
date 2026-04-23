@@ -1,0 +1,52 @@
+{
+  "pages": [
+    "pages/watchlist/watchlist",
+    "pages/analyze/analyze",
+    "pages/pick/pick",
+    "pages/account/account",
+    "pages/login/login",
+    "pages/history/history",
+    "pages/history-detail/history-detail",
+    "pages/settings/settings"
+  ],
+  "window": {
+    "navigationBarTitleText": "智谱投研",
+    "navigationBarBackgroundColor": "#0f172a",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f8fafc"
+  },
+  "tabBar": {
+    "color": "#64748b",
+    "selectedColor": "#0f172a",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/watchlist/watchlist",
+        "text": "自选",
+        "iconPath": "assets/tab-watch.png",
+        "selectedIconPath": "assets/tab-watch-active.png"
+      },
+      {
+        "pagePath": "pages/analyze/analyze",
+        "text": "预测",
+        "iconPath": "assets/tab-analyze.png",
+        "selectedIconPath": "assets/tab-analyze-active.png"
+      },
+      {
+        "pagePath": "pages/pick/pick",
+        "text": "选股",
+        "iconPath": "assets/tab-pick.png",
+        "selectedIconPath": "assets/tab-pick-active.png"
+      },
+      {
+        "pagePath": "pages/account/account",
+        "text": "我的",
+        "iconPath": "assets/tab-account.png",
+        "selectedIconPath": "assets/tab-account-active.png"
+      }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

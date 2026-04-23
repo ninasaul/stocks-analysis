@@ -1,0 +1,167 @@
+<view class="page">
+  <!-- 身份卡 -->
+  <view class="identity">
+    <view class="identity-top">
+      <view class="avatar-wrap">
+        <image wx:if="{{avatarUrl}}" class="avatar" src="{{avatarUrl}}" mode="aspectFill" />
+        <view wx:else class="avatar avatar-fallback">{{avatarLabel}}</view>
+      </view>
+      <view class="identity-main">
+        <view class="identity-name-row">
+          <text class="identity-name">{{displayName}}</text>
+          <text wx:if="{{!guest}}" class="wx-chip">微信已连接</text>
+        </view>
+        <view class="identity-meta">
+          <text wx:if="{{!guest && hasPhone}}" class="identity-phone">{{phoneMasked}}</text>
+          <text wx:elif="{{!guest && !hasPhone}}" class="identity-phone identity-phone-warn">未绑定手机号</text>
+          <text wx:if="{{!guest && accountIdLine}}" class="identity-id">{{accountIdLine}}</text>
+        </view>
+        <text wx:if="{{guest}}" class="identity-sub">{{connectionLine}}</text>
+      </view>
+      <view wx:if="{{!guest}}" class="identity-sync" bindtap="onManualSync">
+        <text class="identity-sync-text">{{syncing ? "同步中" : "同步"}}</text>
+        <text class="identity-sync-stamp">{{syncStamp}}</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 订阅卡 -->
+  <view class="plan-card mp-press {{isPro ? 'plan-pro' : 'plan-free'}}" hover-class="mp-press-hover" hover-stay-time="80" bindtap="onTapPlan">
+    <view class="plan-left">
+      <view class="plan-tag">{{isPro ? "PRO" : "FREE"}}</view>
+      <view class="plan-body">
+        <text class="plan-title">{{planName}}</text>
+        <text class="plan-desc">{{planPeriodLine}}</text>
+        <text wx:if="{{!guest && isPro}}" class="plan-desc plan-desc-mute">自动续费 · {{autoRenewLine}}</text>
+      </view>
+    </view>
+    <view class="plan-cta">
+      <text class="plan-cta-text">{{planCtaLabel}}</text>
+      <text class="plan-cta-arrow">›</text>
+    </view>
+  </view>
+
+  <!-- 使用数据 -->
+  <view class="stats">
+    <view class="stat-cell">
+      <text class="stat-num">{{statsWatch}}</text>
+      <text class="stat-label">自选</text>
+    </view>
+    <view class="stat-divider"></view>
+    <view class="stat-cell">
+      <text class="stat-num">{{statsReports}}</text>
+      <text class="stat-label">分析报告</text>
+    </view>
+    <view class="stat-divider"></view>
+    <view class="stat-cell">
+      <text class="stat-num">{{statsToday}}</text>
+      <text class="stat-label">今日分析</text>
+    </view>
+  </view>
+
+  <!-- 账号信息 -->
+  <view wx:if="{{!guest}}" class="group">
+    <view class="group-title">账号</view>
+    <view class="group-body">
+      <button
+        wx:if="{{!hasPhone}}"
+        class="row row-btn"
+        open-type="getPhoneNumber"
+        bindgetphonenumber="onGetPhoneNumber"
+        loading="{{phoneBinding}}"
+        disabled="{{phoneBinding}}"
+      >
+        <view class="row-inner">
+          <text class="row-label">手机号</text>
+          <view class="row-right">
+            <text class="row-value row-value-cta">去绑定</text>
+            <text class="row-arrow">›</text>
+          </view>
+        </view>
+      </button>
+      <view wx:else class="row mp-press" hover-class="mp-press-hover" hover-stay-time="80" bindtap="onTapPhoneCell">
+        <view class="row-inner">
+          <text class="row-label">手机号</text>
+          <view class="row-right">
+            <text class="row-value">{{phoneMasked}}</text>
+          </view>
+        </view>
+      </view>
+      <view class="row">
+        <view class="row-inner">
+          <text class="row-label">登录方式</text>
+          <view class="row-right">
+            <text class="row-value">微信小程序</text>
+          </view>
+        </view>
+      </view>
+      <view wx:if="{{accountIdLine}}" class="row">
+        <view class="row-inner">
+          <text class="row-label">账号</text>
+          <view class="row-right">
+            <text class="row-value row-value-mono">{{accountIdLine}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 服务与工具 -->
+  <view class="group">
+    <view class="group-title">工具</view>
+    <view class="group-body">
+      <view class="row mp-press" hover-class="mp-press-hover" hover-stay-time="80" bindtap="onGoHistory">
+        <view class="row-inner">
+          <text class="row-label">历史与复盘</text>
+          <view class="row-right">
+            <text class="row-value row-value-dim">{{statsReports}}</text>
+            <text class="row-arrow">›</text>
+          </view>
+        </view>
+      </view>
+      <view class="row mp-press" hover-class="mp-press-hover" hover-stay-time="80" bindtap="onSettings">
+        <view class="row-inner">
+          <text class="row-label">使用偏好</text>
+          <view class="row-right">
+            <text class="row-arrow">›</text>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 帮助 -->
+  <view class="group">
+    <view class="group-title">帮助</view>
+    <view class="group-body">
+      <view class="row mp-press" hover-class="mp-press-hover" hover-stay-time="80" bindtap="onTapCompliance">
+        <view class="row-inner">
+          <text class="row-label">合规与免责</text>
+          <view class="row-right">
+            <text class="row-arrow">›</text>
+          </view>
+        </view>
+      </view>
+      <view class="row mp-press" hover-class="mp-press-hover" hover-stay-time="80" bindtap="onTapAbout">
+        <view class="row-inner">
+          <text class="row-label">关于</text>
+          <view class="row-right">
+            <text class="row-value row-value-dim">{{appVersion}}</text>
+            <text class="row-arrow">›</text>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 登录 / 退出 -->
+  <view wx:if="{{guest}}" class="cta-wrap">
+    <button class="cta-primary" bindtap="onGoLogin">微信登录</button>
+    <text class="cta-hint">登录后同步订阅状态、绑定手机号并与 Web 端数据一致</text>
+  </view>
+  <view wx:else class="cta-wrap">
+    <button class="cta-danger" bindtap="onLogout" loading="{{logoutPending}}" disabled="{{logoutPending}}">退出登录</button>
+  </view>
+
+  <view class="footer">智谱投研 {{appVersion}}</view>
+</view>
