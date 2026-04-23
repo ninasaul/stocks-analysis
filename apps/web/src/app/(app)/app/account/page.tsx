@@ -55,7 +55,7 @@ export default function AccountPage() {
               </Badge>
               {currentPlanId === "pro" ? (
                 <span className="text-muted-foreground">
-                  · {billingCycle === "month" ? "月付" : "年付"}
+                  · {billingCycle === "month" ? "月付" : billingCycle === "quarter" ? "季付" : "年付"}
                 </span>
               ) : null}
             </div>

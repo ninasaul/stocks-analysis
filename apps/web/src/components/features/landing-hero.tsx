@@ -2,11 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import { FileTextIcon, MessagesSquareIcon, HistoryIcon, SparklesIcon } from "lucide-react";
 import { landingCopy, subscriptionCopy } from "@/lib/copy";
-import { useStoreHydrated } from "@/hooks/use-store-hydrated";
-import { useAuthStore } from "@/stores/use-auth-store";
 import { GUEST_QUOTA } from "@/stores/use-subscription-store";
 import {
   Accordion,
@@ -550,33 +547,6 @@ function LandingPricingSection() {
 }
 
 export function LandingHero() {
-  const session = useAuthStore((s) => s.session);
-  const router = useRouter();
-  const authHydrated = useStoreHydrated(useAuthStore);
-
-  useEffect(() => {
-    if (!authHydrated) return;
-    if (session === "user") {
-      router.replace("/app/analyze");
-    }
-  }, [authHydrated, session, router]);
-
-  if (!authHydrated) {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center px-4" role="status" aria-live="polite">
-        <p className="text-muted-foreground text-sm">加载中…</p>
-      </div>
-    );
-  }
-
-  if (session === "user") {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center px-4" role="status" aria-live="polite">
-        <p className="text-muted-foreground text-sm">正在进入工作台…</p>
-      </div>
-    );
-  }
-
   return (
     <div className="bg-background">
       <section

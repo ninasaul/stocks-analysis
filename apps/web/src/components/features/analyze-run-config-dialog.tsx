@@ -363,6 +363,7 @@ export function AnalyzeRunConfigDialog({
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
   const [fallbackMarket, setFallbackMarket] = useState<AnalysisInput["market"]>("CN");
+  const [selectedSearchKey, setSelectedSearchKey] = useState<string | null>(null);
   const [searchFocused, setSearchFocused] = useState(false);
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [depth, setDepth] = useState<AnalysisDepth>(3);
@@ -381,6 +382,14 @@ export function AnalyzeRunConfigDialog({
     queueMicrotask(() => {
       setSearchDraft(searchKeyword.trim());
       setFallbackMarket(market);
+      const parsed = parseAnalyzeSearchInput(searchKeyword.trim(), market);
+      if (parsed?.symbol) {
+        const matchedKey = `${parsed.market}.${parsed.symbol}`.toLowerCase();
+        const matched = symbolSearchItems.find((item) => item.key.toLowerCase() === matchedKey);
+        setSelectedSearchKey(matched?.key ?? null);
+      } else {
+        setSelectedSearchKey(null);
+      }
       const themes = linkedPreference?.themes ?? [];
       if (linkedPreference) {
         setDepth(inferDepth(riskTier, holdingHorizon));
@@ -414,7 +423,7 @@ export function AnalyzeRunConfigDialog({
       setSearchFocused(false);
       setActiveSearchIndex(0);
     });
-  }, [open, searchKeyword, market, riskTier, holdingHorizon, linkedPreference, prefsHydrated]);
+  }, [open, searchKeyword, market, riskTier, holdingHorizon, linkedPreference, prefsHydrated, symbolSearchItems]);
 
   useEffect(() => {
     if (!open) return;
@@ -449,10 +458,21 @@ export function AnalyzeRunConfigDialog({
     return Math.min(Math.max(0, activeSearchIndex), filteredSearchItems.length - 1);
   }, [activeSearchIndex, filteredSearchItems.length]);
 
+  const selectedSearchItem = useMemo(() => {
+    if (!selectedSearchKey) return null;
+    return symbolSearchItems.find((item) => item.key === selectedSearchKey) ?? null;
+  }, [selectedSearchKey, symbolSearchItems]);
+
+  const resolvedSearch = useMemo(() => {
+    if (selectedSearchItem) {
+      return { market: selectedSearchItem.market, symbol: selectedSearchItem.symbol };
+    }
+    return parseAnalyzeSearchInput(searchDraft.trim(), fallbackMarket);
+  }, [fallbackMarket, searchDraft, selectedSearchItem]);
+
   const resolvedMarket = useMemo(() => {
-    const p = parseAnalyzeSearchInput(searchDraft.trim(), fallbackMarket);
-    return p?.market ?? fallbackMarket;
-  }, [searchDraft, fallbackMarket]);
+    return resolvedSearch?.market ?? fallbackMarket;
+  }, [fallbackMarket, resolvedSearch]);
 
   useEffect(() => {
     if (resolvedMarket !== "CN") return;
@@ -468,7 +488,8 @@ export function AnalyzeRunConfigDialog({
 
   const applySearchItem = (item: AnalyzeSymbolSearchItem) => {
     setFallbackMarket(item.market);
-    setSearchDraft(`${item.market}.${item.symbol}`);
+    setSelectedSearchKey(item.key);
+    setSearchDraft(`${item.name}（${item.market}.${item.symbol}）`);
     setSearchFocused(false);
   };
 
@@ -544,13 +565,13 @@ export function AnalyzeRunConfigDialog({
   };
 
   const canSubmitSearch = useMemo(() => {
-    const p = parseAnalyzeSearchInput(searchDraft.trim(), fallbackMarket);
+    const p = resolvedSearch;
     return Boolean(p?.symbol?.trim());
-  }, [searchDraft, fallbackMarket]);
+  }, [resolvedSearch]);
 
   const handleConfirm = async () => {
     if (loading) return;
-    const parsed = parseAnalyzeSearchInput(searchDraft.trim(), fallbackMarket);
+    const parsed = resolvedSearch;
     if (!parsed?.symbol?.trim()) {
       toast.error("请选择或输入标的，支持代码、简称或 CN.600519 格式。");
       return;
@@ -664,6 +685,7 @@ export function AnalyzeRunConfigDialog({
                           onFocus={() => setSearchFocused(true)}
                           onChange={(e) => {
                             setSearchDraft(e.target.value);
+                            setSelectedSearchKey(null);
                             setActiveSearchIndex(0);
                             if (!searchFocused) setSearchFocused(true);
                           }}

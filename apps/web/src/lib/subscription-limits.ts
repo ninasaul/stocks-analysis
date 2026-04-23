@@ -4,7 +4,7 @@
  */
 export type PlanId = "free" | "pro";
 
-export type BillingCycle = "month" | "year";
+export type BillingCycle = "month" | "quarter" | "year";
 
 export const GUEST_QUOTA = {
   dailyStockAnalysis: 1,

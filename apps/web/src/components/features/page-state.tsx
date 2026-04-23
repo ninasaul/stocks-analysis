@@ -1,8 +1,9 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { InboxIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
@@ -36,14 +37,16 @@ export function PageLoadingState({
 type PageEmptyStateProps = {
   title: string;
   description: string;
+  icon?: ReactNode;
   actions?: ReactNode;
   className?: string;
 };
 
-export function PageEmptyState({ title, description, actions, className }: PageEmptyStateProps) {
+export function PageEmptyState({ title, description, icon, actions, className }: PageEmptyStateProps) {
   return (
     <Empty className={cn("border", className)}>
       <EmptyHeader>
+        <EmptyMedia variant="icon">{icon ?? <InboxIcon />}</EmptyMedia>
         <EmptyTitle>{title}</EmptyTitle>
         <EmptyDescription>{description}</EmptyDescription>
       </EmptyHeader>
