@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import pytesseract
 import os
+import csv
 from io import BytesIO
 from typing import List, Dict, Optional
 from fastapi import UploadFile, HTTPException
@@ -329,3 +330,40 @@ class StockService:
     def get_concept_list(self) -> List[str]:
         """获取题材列表"""
         return self.concept_list
+
+    def search_stocks_from_csv(self, keyword: str, limit: int = 20) -> List[Dict[str, str]]:
+        """从 data/stock_info.csv 中模糊搜索股票代码和名称"""
+        keyword = (keyword or "").strip()
+        if not keyword:
+            return []
+
+        normalized_keyword = keyword.lower()
+        data_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "data"
+        )
+        csv_file = os.path.join(data_dir, "stock_info.csv")
+
+        if not os.path.exists(csv_file):
+            logger.warning(f"股票信息文件不存在: {csv_file}")
+            return []
+
+        results: List[Dict[str, str]] = []
+        try:
+            with open(csv_file, "r", encoding="utf-8-sig", newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    code = str(row.get("code", "")).strip()
+                    name = str(row.get("name", "")).strip()
+                    if not code or not name:
+                        continue
+
+                    if normalized_keyword in code.lower() or normalized_keyword in name.lower():
+                        results.append({"code": code, "name": name})
+                        if len(results) >= limit:
+                            break
+        except Exception as exc:
+            logger.error(f"读取股票信息 CSV 失败: {exc}")
+            return []
+
+        return results

@@ -266,6 +266,25 @@ def get_history(current_user: User = Depends(get_current_user)) -> dict:
     }
 
 
+@app.get("/api/stocks/search")
+def search_stocks(
+    keyword: str = Query(..., min_length=1, description="股票代码或名称关键字"),
+    limit: int = Query(20, ge=1, le=100, description="返回结果数量上限"),
+    current_user: User = Depends(get_current_user)
+) -> dict:
+    """股票模糊搜索，数据来源为 data/stock_info.csv"""
+    logger.info(
+        f"用户 {current_user.id} ({current_user.username}) 搜索股票: "
+        f"keyword={keyword}, limit={limit}"
+    )
+    stocks = stock_service.search_stocks_from_csv(keyword=keyword, limit=limit)
+    return {
+        "keyword": keyword,
+        "count": len(stocks),
+        "stocks": stocks
+    }
+
+
 @app.get("/api/trade")
 async def execute_trade(
     ticker: str = Query(..., description="股票代码"),
