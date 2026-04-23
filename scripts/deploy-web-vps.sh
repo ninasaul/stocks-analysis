@@ -159,6 +159,13 @@ if [[ "${SKIP_RSYNC:-}" != "1" ]]; then
   rsync "${RSYNC_FLAGS[@]}" -e "$RSYNC_SSH" \
     "${RSYNC_EXCLUDES[@]}" \
     "${ROOT_DIR}/" "${RSYNC_REMOTE}"
+
+  # 源码目录必须与本地完全一致，避免残留旧文件导致 Next.js 路由冲突（例如
+  # 路由分组间的 parallel pages 冲突）。对 apps/web/src/ 做一次带 --delete 的
+  # 强同步；此目录不包含运行时数据，删除安全。
+  echo "==> rsync 强同步源码目录 apps/web/src/（带 --delete）"
+  rsync -az --delete -e "$RSYNC_SSH" \
+    "${ROOT_DIR}/apps/web/src/" "${RSYNC_REMOTE}apps/web/src/"
 else
   echo "==> SKIP_RSYNC=1: 使用 VPS 上已有目录（${RSYNC_REMOTE}）"
 fi
