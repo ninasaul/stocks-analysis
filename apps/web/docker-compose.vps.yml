@@ -1,0 +1,12 @@
+# 在 VPS 上执行（任意工作目录均可）：
+#   docker compose -f /某路径/docker-compose.vps.yml up -d
+#
+# 若宿主机 3000 已被占用或前面有反代，可改环境变量 WEB_PORT。
+
+services:
+  web:
+    image: ${WEB_IMAGE:-stocks-web:latest}
+    container_name: stocks-web
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    restart: unless-stopped
