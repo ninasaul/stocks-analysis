@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Tuple
 import hashlib
 import logging
+import re
 from .models import User, Membership, ApiCallLog, UserStatus, MembershipType, MembershipStatus, RefreshToken
 from .schemas import UserCreate, UserUpdate, MembershipCreate, MembershipUpdate
 from ..core.database import execute_query, execute_insert, execute_update, execute_delete
@@ -113,6 +114,82 @@ class UserService:
         if result:
             return User.from_db_row(result[0])
         return None
+
+    @staticmethod
+    def get_user_by_phone(phone: str) -> Optional[User]:
+        """根据手机号获取用户（不含空串）"""
+        if not phone or not str(phone).strip():
+            return None
+        query = "SELECT * FROM users WHERE phone = %s"
+        result = execute_query(query, (str(phone).strip(),))
+        if result:
+            return User.from_db_row(result[0])
+        return None
+
+    @staticmethod
+    def _sanitize_username(raw: str) -> str:
+        """
+        将昵称/输入清洗成系统用户名：
+        - 仅保留 [a-zA-Z0-9_-]
+        - 长度 3~50
+        """
+        if not raw:
+            return "wechat_user"
+        v = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(raw)).strip("_")
+        if not v:
+            v = "wechat_user"
+        if len(v) < 3:
+            v = f"{v}_{'x' * (3 - len(v))}"
+        return v[:50]
+
+    @staticmethod
+    def generate_unique_username(preferred: str, seed: str = "") -> str:
+        """
+        生成唯一用户名（基于 preferred 清洗后去重）。
+        """
+        base = UserService._sanitize_username(preferred)
+        if not UserService.get_user_by_username(base):
+            return base
+
+        digest = hashlib.md5((seed or base).encode("utf-8")).hexdigest()[:6]
+        candidate = f"{base[:43]}_{digest}"
+        if not UserService.get_user_by_username(candidate):
+            return candidate
+
+        for i in range(2, 1000):
+            suffix = f"_{i}"
+            c = f"{base[:50 - len(suffix)]}{suffix}"
+            if not UserService.get_user_by_username(c):
+                return c
+        # 极端情况下兜底
+        return f"wechat_{hashlib.md5((base + seed).encode('utf-8')).hexdigest()[:12]}"
+
+    @staticmethod
+    def update_profile_fields(
+        user_id: int,
+        display_name: Optional[str] = None,
+        avatar_url: Optional[str] = None,
+    ) -> Optional[User]:
+        """
+        更新用户展示资料字段（display_name/avatar_url）。
+        仅更新非空参数，避免覆盖已有信息。
+        """
+        updates = []
+        params = []
+        if display_name and str(display_name).strip():
+            updates.append("display_name = %s")
+            params.append(str(display_name).strip()[:100])
+        if avatar_url and str(avatar_url).strip():
+            updates.append("avatar_url = %s")
+            params.append(str(avatar_url).strip()[:255])
+        if not updates:
+            return UserService.get_user_by_id(user_id)
+        updates.append("updated_at = %s")
+        params.append(datetime.now())
+        params.append(user_id)
+        query = f"UPDATE users SET {', '.join(updates)} WHERE id = %s"
+        execute_update(query, tuple(params))
+        return UserService.get_user_by_id(user_id)
 
     @staticmethod
     def update_user(user_id: int, user_data: UserUpdate) -> Optional[User]:
@@ -995,7 +1072,12 @@ class RefreshTokenService:
             raise
 
     @staticmethod
-    def rotate_refresh_token(old_token: str, new_token: str, new_expires_at: datetime) -> Optional[RefreshToken]:
+    def rotate_refresh_token(
+        old_token: str,
+        new_token: str,
+        new_expires_at: datetime,
+        user_id: Optional[int] = None,
+    ) -> Optional[RefreshToken]:
         """
         刷新令牌轮换 - 撤销旧令牌，创建新令牌
 
@@ -1009,9 +1091,13 @@ class RefreshTokenService:
         """
         try:
             old_refresh_token = RefreshTokenService.get_refresh_token_by_token(old_token)
+            uid = old_refresh_token.user_id if old_refresh_token else user_id
+            if uid is None:
+                logger.error("刷新令牌轮换失败: 无法解析用户 ID")
+                return None
             if old_refresh_token:
                 RefreshTokenService.revoke_refresh_token(old_refresh_token.id)
-            return RefreshTokenService.create_refresh_token(old_refresh_token.user_id, new_token, new_expires_at)
+            return RefreshTokenService.create_refresh_token(uid, new_token, new_expires_at)
         except Exception as e:
             logger.error(f"刷新令牌轮换失败: {e}")
             raise
@@ -1019,6 +1105,91 @@ class RefreshTokenService:
 
 class WechatUserService:
     """微信用户服务"""
+
+    # 小程序服务端 access_token（cgi-bin/token），用于 getuserphonenumber 等
+    _mp_access_token: Optional[str] = None
+    _mp_access_token_expires_at: float = 0.0
+
+    @staticmethod
+    def _miniprogram_app_credentials() -> Tuple[str, str]:
+        import os
+        appid = os.getenv("WECHAT_MINIPROGRAM_APP_ID", "") or os.getenv("WECHAT_APP_ID", "")
+        secret = os.getenv("WECHAT_MINIPROGRAM_APP_SECRET", "") or os.getenv("WECHAT_APP_SECRET", "")
+        if not appid or not secret:
+            raise ValueError("缺少小程序 AppID/AppSecret，无法换取服务端 access_token")
+        return appid, secret
+
+    @staticmethod
+    def get_miniprogram_access_token() -> str:
+        """
+        获取小程序服务端 access_token（client_credential），带简单内存缓存。
+        用于 wxa/business/getuserphonenumber 等接口。
+        """
+        import time
+        import requests
+
+        now = time.time()
+        if (
+            WechatUserService._mp_access_token
+            and now < WechatUserService._mp_access_token_expires_at - 120
+        ):
+            return WechatUserService._mp_access_token
+
+        appid, secret = WechatUserService._miniprogram_app_credentials()
+        url = "https://api.weixin.qq.com/cgi-bin/token"
+        resp = requests.get(
+            url,
+            params={"grant_type": "client_credential", "appid": appid, "secret": secret},
+            timeout=10,
+        )
+        data = resp.json()
+        if data.get("errcode"):
+            raise RuntimeError(f"获取小程序 access_token 失败: {data}")
+        token = data.get("access_token")
+        if not token:
+            raise RuntimeError(f"获取小程序 access_token 失败（无 access_token）: {data}")
+        expires_in = int(data.get("expires_in", 7200))
+        WechatUserService._mp_access_token = token
+        WechatUserService._mp_access_token_expires_at = now + expires_in
+        return token
+
+    @staticmethod
+    def get_phone_number_from_wxa_code(phone_code: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        使用「手机号获取 code」换取用户手机号（新版，无需 session_key 解密 encryptedData）。
+
+        Args:
+            phone_code: 小程序 button open-type=getPhoneNumber 回调里 e.detail.code
+
+        Returns:
+            (手机号, 错误信息) 成功时错误信息 None
+        """
+        import requests
+
+        if not phone_code or not str(phone_code).strip():
+            return None, "缺少手机号动态令牌 code"
+        try:
+            access_token = WechatUserService.get_miniprogram_access_token()
+        except Exception as e:
+            logger.error(f"小程序 access_token 失败: {e}")
+            return None, str(e)
+
+        url = f"https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token={access_token}"
+        try:
+            resp = requests.post(url, json={"code": phone_code.strip()}, timeout=10)
+            data = resp.json()
+        except Exception as e:
+            logger.error(f"getuserphonenumber 请求失败: {e}")
+            return None, str(e)
+
+        if data.get("errcode") != 0:
+            return None, data.get("errmsg", "getuserphonenumber 失败")
+
+        info = data.get("phone_info") or {}
+        phone = info.get("phoneNumber") or info.get("purePhoneNumber")
+        if not phone:
+            return None, "微信未返回手机号"
+        return str(phone).strip(), None
 
     @staticmethod
     def get_wechat_user_by_openid(openid: str) -> Optional['WechatUser']:
@@ -1125,7 +1296,7 @@ class WechatUserService:
 
     @staticmethod
     def update_wechat_user(wechat_user_id: int, nickname: str = None,
-                          avatar_url: str = None) -> Optional['WechatUser']:
+                          avatar_url: str = None, unionid: str = None) -> Optional['WechatUser']:
         """
         更新微信用户信息
 
@@ -1133,6 +1304,7 @@ class WechatUserService:
             wechat_user_id: 微信用户ID
             nickname: 昵称
             avatar_url: 头像URL
+            unionid: 微信 unionid（开放平台下可与多端账号关联）
 
         Returns:
             更新后的微信用户对象
@@ -1148,6 +1320,9 @@ class WechatUserService:
             if avatar_url is not None:
                 updates.append("avatar_url = %s")
                 params.append(avatar_url)
+            if unionid is not None:
+                updates.append("unionid = %s")
+                params.append(unionid)
 
             if not updates:
                 return WechatUserService.get_wechat_user_by_id(wechat_user_id)
@@ -1246,7 +1421,10 @@ class WechatUserService:
     @staticmethod
     def get_wechat_login_url(state: str = None) -> str:
         """
-        获取微信授权登录URL
+        获取微信开放平台「网站应用」PC 扫码登录 URL（qrconnect + scope=snsapi_login）。
+
+        WECHAT_APP_ID 须为 open.weixin.qq.com 网站应用的 AppID；若误用公众号/小程序 AppID，
+        用户扫码会报「Scope 参数错误或没有 Scope 权限」。
 
         Args:
             state: 状态参数，用于防止CSRF攻击
@@ -1255,17 +1433,21 @@ class WechatUserService:
             微信授权登录URL
         """
         import os
+        from urllib.parse import quote
+
         appid = os.getenv("WECHAT_APP_ID", "")
-        redirect_uri = os.getenv("WECHAT_REDIRECT_URI", "http://localhost:8000/api/auth/wechat/callback")
-        
+        redirect_uri = os.getenv("WECHAT_REDIRECT_URI", "http://localhost:3000/login/wechat")
+
         if not state:
             import uuid
             state = str(uuid.uuid4())
 
+        redirect_q = quote(redirect_uri, safe="")
+        state_q = quote(state, safe="")
         url = (
-            f"https://open.weixin.qq.com/connect/qrconnect?"
-            f"appid={appid}&redirect_uri={redirect_uri}"
-            f"&response_type=code&scope=snsapi_login&state={state}#wechat_redirect"
+            "https://open.weixin.qq.com/connect/qrconnect?"
+            f"appid={appid}&redirect_uri={redirect_q}"
+            f"&response_type=code&scope=snsapi_login&state={state_q}#wechat_redirect"
         )
         return url
 
@@ -1298,6 +1480,41 @@ class WechatUserService:
             return response.json()
         except Exception as e:
             logger.error(f"获取微信access_token失败: {e}")
+            return {"errcode": -1, "errmsg": str(e)}
+
+    @staticmethod
+    def get_wechat_jscode2session(code: str) -> dict:
+        """
+        小程序 wx.login 临时登录凭证校验（jscode2session）
+
+        Args:
+            code: wx.login 返回的 code
+
+        Returns:
+            含 openid、session_key，或 errcode/errmsg
+        """
+        import requests
+        import os
+        # 小程序登录允许独立于网页扫码的凭证；未配置时回退到 WECHAT_APP_* 以兼容旧配置
+        appid = os.getenv("WECHAT_MINIPROGRAM_APP_ID", "") or os.getenv("WECHAT_APP_ID", "")
+        appsecret = os.getenv("WECHAT_MINIPROGRAM_APP_SECRET", "") or os.getenv("WECHAT_APP_SECRET", "")
+        if not appid or not appsecret:
+            return {
+                "errcode": -2,
+                "errmsg": "缺少小程序微信配置（WECHAT_MINIPROGRAM_APP_ID/WECHAT_MINIPROGRAM_APP_SECRET）"
+            }
+        url = "https://api.weixin.qq.com/sns/jscode2session"
+        params = {
+            "appid": appid,
+            "secret": appsecret,
+            "js_code": code,
+            "grant_type": "authorization_code",
+        }
+        try:
+            response = requests.get(url, params=params, timeout=10)
+            return response.json()
+        except Exception as e:
+            logger.error(f"jscode2session 请求失败: {e}")
             return {"errcode": -1, "errmsg": str(e)}
 
     @staticmethod
@@ -1354,6 +1571,14 @@ class WechatUserService:
                     WechatUserService.update_wechat_user(
                         wechat_user.id, unionid=unionid
                     )
+                if wechat_user.nickname or wechat_user.avatar_url:
+                    enriched = UserService.update_profile_fields(
+                        user.id,
+                        display_name=wechat_user.nickname,
+                        avatar_url=wechat_user.avatar_url,
+                    )
+                    if enriched:
+                        user = enriched
                 return user, False
             return None, False
 
@@ -1361,7 +1586,10 @@ class WechatUserService:
         nickname = user_info.get("nickname")
         avatar_url = user_info.get("headimgurl")
 
-        username = f"wechat_{openid[:16]}"
+        username = UserService.generate_unique_username(
+            nickname or f"wechat_{openid[:16]}",
+            seed=openid,
+        )
         email = f"wechat_{openid[:16]}@placeholder.com"
         password = UserService.hash_password(openid)
 
@@ -1384,8 +1612,135 @@ class WechatUserService:
                 logger.error("创建微信用户关联失败")
                 return None, False
 
+            UserService.update_profile_fields(
+                user_id,
+                display_name=nickname,
+                avatar_url=avatar_url,
+            )
             user = UserService.get_user_by_id(user_id)
             return user, True
         except Exception as e:
             logger.error(f"微信登录创建用户失败: {e}")
             return None, False
+
+    @staticmethod
+    def process_wechat_miniprogram_login(
+        code: str,
+        nickname: Optional[str] = None,
+        avatar_url: Optional[str] = None,
+    ) -> Tuple[Optional[User], bool, Optional[str]]:
+        """
+        处理微信小程序登录（jscode2session）
+
+        小程序 openid 与网页扫码 openid 不同；若微信返回 unionid 且已绑定开放平台，
+        可通过 unionid 与已有 wechat_users 记录关联到同一账号。
+
+        Args:
+            code: wx.login 返回的 code
+            nickname: 小程序端已授权昵称（可选）
+            avatar_url: 小程序端已授权头像（可选）
+
+        Returns:
+            (用户对象, 是否为新用户, 错误信息)
+        """
+        session = WechatUserService.get_wechat_jscode2session(code)
+        if session.get("errcode"):
+            logger.error(f"微信小程序登录失败: {session}")
+            errcode = session.get("errcode")
+            errmsg = session.get("errmsg", "未知错误")
+            extra = ""
+            # 40029 invalid code；40163 code been used。多为 AppID/Secret 与小程序不一致，或 code 已用过/过期。
+            if errcode in (40029, 40163):
+                extra = (
+                    "。请核对：后端 WECHAT_MINIPROGRAM_APP_ID/WECHAT_MINIPROGRAM_APP_SECRET（未配置时回退的 "
+                    "WECHAT_APP_ID/WECHAT_APP_SECRET）须与当前微信开发者工具里的「小程序 AppID」为同一应用；"
+                    "且每个 wx.login 的 code 只能换 session 一次，勿重复请求或并发使用同一 code（约 5 分钟内有效）。"
+                )
+            return None, False, f"jscode2session 失败（errcode={errcode}）：{errmsg}{extra}"
+
+        openid = session.get("openid")
+        unionid = session.get("unionid")
+        if not openid:
+            return None, False, "jscode2session 未返回 openid"
+
+        wechat_user = WechatUserService.get_wechat_user_by_openid(openid)
+        if wechat_user:
+            user = UserService.get_user_by_id(wechat_user.user_id)
+            if user and user.status == UserStatus.ACTIVE:
+                needs_update = (
+                    (unionid and unionid != wechat_user.unionid)
+                    or (nickname and nickname != wechat_user.nickname)
+                    or (avatar_url and avatar_url != wechat_user.avatar_url)
+                )
+                if needs_update:
+                    WechatUserService.update_wechat_user(
+                        wechat_user.id,
+                        unionid=unionid if unionid and unionid != wechat_user.unionid else None,
+                        nickname=nickname if nickname and nickname != wechat_user.nickname else None,
+                        avatar_url=avatar_url if avatar_url and avatar_url != wechat_user.avatar_url else None,
+                    )
+                if nickname or avatar_url or wechat_user.nickname or wechat_user.avatar_url:
+                    enriched = UserService.update_profile_fields(
+                        user.id,
+                        display_name=nickname or wechat_user.nickname,
+                        avatar_url=avatar_url or wechat_user.avatar_url,
+                    )
+                    if enriched:
+                        user = enriched
+                return user, False, None
+            return None, False, "该微信关联账号不可用（不存在或已禁用）"
+
+        if unionid:
+            linked = WechatUserService.get_wechat_user_by_unionid(unionid)
+            if linked:
+                user = UserService.get_user_by_id(linked.user_id)
+                if user and user.status == UserStatus.ACTIVE:
+                    if nickname or avatar_url:
+                        WechatUserService.update_wechat_user(
+                            linked.id,
+                            nickname=nickname,
+                            avatar_url=avatar_url,
+                        )
+                        UserService.update_profile_fields(
+                            user.id,
+                            display_name=nickname,
+                            avatar_url=avatar_url,
+                        )
+                    return user, False, None
+                return None, False, "unionid 关联账号不可用（不存在或已禁用）"
+
+        username = f"wechat_mp_{openid[:16]}"
+        if nickname:
+            username = UserService.generate_unique_username(nickname, seed=openid)
+        email = f"wechat_mp_{openid[:16]}@placeholder.com"
+        password = UserService.hash_password(openid)
+
+        try:
+            query = """
+                INSERT INTO users (username, email, password_hash)
+                VALUES (%s, %s, %s)
+            """
+            params = (username, email, password)
+            user_id = execute_insert(query, params)
+            if not user_id:
+                return None, False, "创建用户失败（未返回 user_id）"
+
+            MembershipService.create_membership_for_user(user_id)
+
+            wechat_user = WechatUserService.create_wechat_user(
+                user_id, openid, unionid, nickname, avatar_url
+            )
+            if not wechat_user:
+                logger.error("创建微信用户关联失败")
+                return None, False, "创建微信用户关联失败"
+
+            UserService.update_profile_fields(
+                user_id,
+                display_name=nickname,
+                avatar_url=avatar_url,
+            )
+            user = UserService.get_user_by_id(user_id)
+            return user, True, None
+        except Exception as e:
+            logger.error(f"微信小程序登录创建用户失败: {e}")
+            return None, False, f"微信小程序登录创建用户失败: {e}"

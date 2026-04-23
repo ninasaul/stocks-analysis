@@ -11,7 +11,7 @@ import logging
 
 from .database import execute_query
 from .config import config
-from ..user_management.models import User
+from ..user_management.models import User, UserStatus
 
 load_dotenv()
 
@@ -296,5 +296,11 @@ def authenticate_user(identifier: str, password: str) -> Optional[User]:
     user = User.from_db_row(result[0])
     if not verify_password(password, user.password_hash):
         return None
+
+    if user.status != UserStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="账号已停用或尚未激活",
+        )
 
     return user

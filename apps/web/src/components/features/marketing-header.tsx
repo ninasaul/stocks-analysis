@@ -1,10 +1,19 @@
+"use client";
+
 import Link from "next/link";
 import Image from "next/image";
-import { subscriptionTierPublicCopy } from "@/lib/copy";
+import { landingCopy, subscriptionTierPublicCopy } from "@/lib/copy";
 import { Button } from "@/components/ui/button";
 import { ThemeSwitcher } from "@/components/features/theme-switcher";
+import { useStoreHydrated } from "@/hooks/use-store-hydrated";
+import { useAuthStore } from "@/stores/use-auth-store";
 
 export function MarketingHeader() {
+  const authHydrated = useStoreHydrated(useAuthStore);
+  const session = useAuthStore((state) => state.session);
+  const isUser = authHydrated && session === "user";
+  const isGuest = authHydrated && session === "guest";
+
   return (
     <header className="border-border/40 bg-background/95 supports-backdrop-filter:bg-background/80 sticky top-0 z-30 border-b backdrop-blur">
       <div className="flex w-full items-center justify-between gap-3 px-4 py-3 md:px-6">
@@ -39,7 +48,7 @@ export function MarketingHeader() {
             className="hidden text-muted-foreground md:inline-flex"
             render={<Link href="/#landing-features" scroll />}
           >
-            功能
+            产品特征
           </Button>
           <Button
             variant="ghost"
@@ -47,7 +56,7 @@ export function MarketingHeader() {
             className="hidden text-muted-foreground md:inline-flex"
             render={<Link href="/#landing-how" scroll />}
           >
-            使用方式
+            {landingCopy.howItWorksHeading}
           </Button>
           <Button
             variant="ghost"
@@ -66,12 +75,24 @@ export function MarketingHeader() {
             常见问题
           </Button>
           <ThemeSwitcher />
-          <Button variant="ghost" size="sm" render={<Link href="/login" />}>
-            登录
-          </Button>
-          <Button size="sm" className="hidden sm:inline-flex" render={<Link href="/app/analyze" />}>
-            进入工作台
-          </Button>
+          {!authHydrated ? (
+            <div className="h-8 w-24 animate-pulse rounded-md border border-border/40 bg-muted/25" aria-hidden />
+          ) : null}
+          {isGuest ? (
+            <>
+              <Button variant="ghost" size="sm" render={<Link href="/login" />}>
+                登录
+              </Button>
+              <Button size="sm" className="hidden sm:inline-flex" render={<Link href="/register" />}>
+                注册
+              </Button>
+            </>
+          ) : null}
+          {isUser ? (
+            <Button size="sm" render={<Link href="/app/analyze" />}>
+              进入工作台
+            </Button>
+          ) : null}
         </nav>
       </div>
     </header>

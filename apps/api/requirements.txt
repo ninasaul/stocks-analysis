@@ -2,8 +2,11 @@ fastapi==0.135.2
 uvicorn==0.42.0
 akshare==1.18.55
 python-dotenv==1.0.1
-numpy==1.26.4
+numpy==2.4.4
 pandas==2.3.3
+opencv-python-headless==4.13.0.92
+pytesseract==0.3.13
+baostock==0.9.1
 aiohttp==3.13.3
 psycopg2-binary==2.9.11
 pydantic[email]==2.12.5

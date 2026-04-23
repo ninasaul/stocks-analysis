@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8011")
 
 def test_wechat_qrcode():
     """测试获取微信登录二维码"""
@@ -23,6 +23,9 @@ def test_wechat_qrcode():
             print(f"State: {data['state']}")
             print("✅ 获取二维码成功")
             return True, data
+        if response.status_code == 503:
+            print("⚠️ 获取二维码跳过：服务端未配置 WECHAT_APP_ID")
+            return False, None
         else:
             print(f"❌ 获取二维码失败: {response.text}")
             return False, None
@@ -167,8 +170,7 @@ def main():
     config_ok = check_wechat_config()
 
     if not config_ok:
-        print("\n由于微信配置不完整，部分测试无法执行。")
-        print("但可以测试获取二维码接口（返回模拟URL）。")
+        print("\n由于微信配置不完整，获取二维码接口将返回 503。")
 
     success_count = 0
     total_count = 0

@@ -53,7 +53,12 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
       });
       useArchiveStore.getState().tryAddArchive(entry, isGuest);
       return true;
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (/(调用次数|额度|会员|配额)/.test(message)) {
+        set({ loading: false, error: "quota" });
+        return false;
+      }
       set({ loading: false, error: "unknown" });
       return false;
     }

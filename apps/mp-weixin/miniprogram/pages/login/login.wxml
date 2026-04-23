@@ -1,0 +1,39 @@
+<view class="wrap">
+  <view class="hero">
+    <text class="brand">智谱投研</text>
+    <text class="sub">股票研究与决策助手 · 多端账号数据一致</text>
+  </view>
+  <view class="sheet">
+    <view class="profile-block">
+      <text class="section-title">完善资料（可选）</text>
+      <view class="profile-row">
+        <button
+          class="avatar-btn"
+          open-type="chooseAvatar"
+          bindchooseavatar="onChooseAvatar"
+          disabled="{{loading}}"
+        >
+          <image class="avatar" wx:if="{{profileAvatarUrl}}" src="{{profileAvatarUrl}}" mode="aspectFill" />
+          <text wx:else>选择头像</text>
+        </button>
+        <input
+          class="nickname-input"
+          type="nickname"
+          maxlength="20"
+          placeholder="请输入昵称"
+          value="{{profileNickname}}"
+          bindblur="onNicknameBlur"
+          disabled="{{loading}}"
+        />
+      </view>
+    </view>
+    <button class="btn" bindtap="onWechatLogin" loading="{{loading}}" disabled="{{loading}}">
+      微信一键登录
+    </button>
+    <button class="ghost" bindtap="onSkipLogin" disabled="{{loading}}">暂不登录，返回浏览</button>
+    <text class="err" wx:if="{{errMsg}}">{{errMsg}}</text>
+  </view>
+  <view class="hint">
+    <text>登录后可同步账号资料、分析记录与订阅状态。</text>
+  </view>
+</view>

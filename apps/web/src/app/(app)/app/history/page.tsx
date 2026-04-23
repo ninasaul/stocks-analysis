@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { historyCopy } from "@/lib/copy";
-import { canUseArchives, useArchiveStore } from "@/stores/use-archive-store";
+import { useArchiveStore } from "@/stores/use-archive-store";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
 import { Button } from "@/components/ui/button";
@@ -72,14 +72,12 @@ function formatDate(timestamp: number) {
 export default function HistoryPage() {
   const authHydrated = useStoreHydrated(useAuthStore);
   const archiveHydrated = useStoreHydrated(useArchiveStore);
-  const session = useAuthStore((s) => s.session);
   const archives = useArchiveStore((s) => s.archives);
   const [keyword, setKeyword] = useState("");
   const [actionFilter, setActionFilter] = useState("all");
   const [riskFilter, setRiskFilter] = useState("all");
   const [sortMode, setSortMode] = useState<SortMode>("latest");
   const hydrated = authHydrated && archiveHydrated;
-  const allow = session === "user" && canUseArchives();
 
   const stats = useMemo(() => {
     if (archives.length === 0) return null;
@@ -137,14 +135,6 @@ export default function HistoryPage() {
     <AppPageLayout title="历史与复盘" description={historyCopy.pageSubtitle} contentClassName="gap-6">
       {!hydrated ? (
         <PageLoadingState title="正在加载历史记录" description="请稍候，正在同步你的存档与复盘数据。" />
-      ) : !allow ? (
-        <Empty className="border">
-          <EmptyHeader>
-            <EmptyTitle>{historyCopy.needLoginTitle}</EmptyTitle>
-            <EmptyDescription>{historyCopy.needLoginDesc}</EmptyDescription>
-          </EmptyHeader>
-          <Button render={<Link href="/login" />}>去登录</Button>
-        </Empty>
       ) : (
         <Tabs defaultValue="list">
           <TabsList>

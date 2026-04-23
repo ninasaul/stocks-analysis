@@ -43,6 +43,8 @@ class User:
         email: str = "",
         password_hash: str = "",
         phone: Optional[str] = None,
+        display_name: Optional[str] = None,
+        avatar_url: Optional[str] = None,
         status: UserStatus = UserStatus.ACTIVE,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None
@@ -52,6 +54,8 @@ class User:
         self.email = email
         self.password_hash = password_hash
         self.phone = phone
+        self.display_name = display_name
+        self.avatar_url = avatar_url
         self.status = status
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
@@ -63,6 +67,8 @@ class User:
             "username": self.username,
             "email": self.email,
             "phone": self.phone,
+            "display_name": self.display_name,
+            "avatar_url": self.avatar_url,
             "status": self.status.value,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
@@ -77,6 +83,8 @@ class User:
             email=data.get("email", ""),
             password_hash=data.get("password_hash", ""),
             phone=data.get("phone"),
+            display_name=data.get("display_name"),
+            avatar_url=data.get("avatar_url"),
             status=UserStatus(data.get("status", UserStatus.ACTIVE.value)),
             created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None,
             updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
@@ -93,7 +101,9 @@ class User:
             phone=row[4],
             status=UserStatus(row[5]),
             created_at=row[6],
-            updated_at=row[7]
+            updated_at=row[7],
+            display_name=row[8] if len(row) > 8 else None,
+            avatar_url=row[9] if len(row) > 9 else None,
         )
 
 

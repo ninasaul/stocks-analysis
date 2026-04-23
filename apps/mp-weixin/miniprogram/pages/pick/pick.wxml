@@ -1,0 +1,120 @@
+<view class="page">
+  <view class="hero">
+    <view class="hero-head">
+      <view>
+        <text class="hero-title">智能选股</text>
+        <text class="hero-sub">结构化偏好采集与候选生成</text>
+      </view>
+      <button size="mini" class="hero-reset" bindtap="onReset">重置流程</button>
+    </view>
+    <view class="phase-row">
+      <text class="phase-title">{{phaseTitle}}</text>
+      <text class="phase-progress">进度 {{progressText}}</text>
+    </view>
+    <view class="progress-track">
+      <view class="progress-fill" style="width: {{progressPct}}%;"></view>
+    </view>
+    <text class="phase-hint">{{phaseHint}}</text>
+  </view>
+
+  <view class="snapshot">
+    <view class="snap-row">
+      <text class="snap-key">市场</text>
+      <text class="snap-val">{{prefMarket}}</text>
+      <text class="snap-key">行业</text>
+      <text class="snap-val">{{prefSector}}</text>
+    </view>
+    <view class="snap-row">
+      <text class="snap-key">周期</text>
+      <text class="snap-val">{{prefHorizon}}</text>
+      <text class="snap-key">风格</text>
+      <text class="snap-val">{{prefStyle}}</text>
+    </view>
+    <view class="snap-row">
+      <text class="snap-key">风险</text>
+      <text class="snap-val">{{prefRisk}}</text>
+      <text class="snap-key">流动性</text>
+      <text class="snap-val">{{prefCap}}</text>
+    </view>
+    <view class="snap-row">
+      <text class="snap-key">主题</text>
+      <text class="snap-val snap-val-wide">{{prefThemes}}</text>
+    </view>
+    <view class="snap-row">
+      <text class="snap-key">排除</text>
+      <text class="snap-val snap-val-wide">{{prefExclusions}}</text>
+    </view>
+  </view>
+
+  <view class="candidate-card" wx:if="{{candidates.length}}">
+    <view class="candidate-head">
+      <text class="candidate-title">候选标的</text>
+      <text class="candidate-count">{{candidates.length}} 只</text>
+    </view>
+    <view class="candidate-item" wx:for="{{candidates}}" wx:key="code">
+      <view class="candidate-main">
+        <text class="candidate-name">{{item.name}}</text>
+        <text class="candidate-code">{{item.code}}</text>
+      </view>
+      <text class="candidate-reason">{{item.reason}}</text>
+      <button
+        size="mini"
+        class="candidate-btn"
+        data-code="{{item.code}}"
+        data-m="{{state.preference_snapshot.market}}"
+        data-name="{{item.name}}"
+        bindtap="onOpenAnalyze"
+      >
+        去股票预测
+      </button>
+    </view>
+  </view>
+
+  <view class="thread-wrap">
+    <scroll-view scroll-y class="thread" scroll-into-view="{{scrollInto}}" scroll-with-animation>
+      <view wx:for="{{state.messages}}" wx:key="id" id="{{item.id}}" class="msg {{item.role}}">
+        <text class="msg-text">{{item.content}}</text>
+      </view>
+    </scroll-view>
+  </view>
+
+  <view class="actions" wx:if="{{primaryActions.length || secondaryActions.length}}">
+    <button
+      wx:for="{{primaryActions}}"
+      wx:key="action_id"
+      class="action-primary"
+      data-id="{{item.action_id}}"
+      bindtap="onActionTap"
+    >
+      {{item.label}}
+    </button>
+    <view class="action-chips" wx:if="{{secondaryActions.length}}">
+      <button
+        wx:for="{{secondaryActions}}"
+        wx:key="action_id"
+        size="mini"
+        class="action-chip"
+        data-id="{{item.action_id}}"
+        bindtap="onActionTap"
+      >
+        {{item.label}}
+      </button>
+    </view>
+  </view>
+
+  <view class="composer">
+    <input
+      class="draft"
+      value="{{draft}}"
+      bindinput="onDraftInput"
+      placeholder="继续咨询策略，或描述你的选股偏好"
+      confirm-type="send"
+      bindconfirm="onSendDraft"
+    />
+    <button class="send-btn" size="mini" bindtap="onSendDraft">发送</button>
+  </view>
+
+  <view class="compliance">
+    <text>本页用于研究辅助，不构成投资建议；候选结果基于偏好条件与研究样本生成。</text>
+  </view>
+</view>

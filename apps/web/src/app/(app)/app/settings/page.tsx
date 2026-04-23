@@ -36,13 +36,11 @@ export default function SettingsBasicPage() {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const authHydrated = useStoreHydrated(useAuthStore);
   const subHydrated = useStoreHydrated(useSubscriptionStore);
-  const session = useAuthStore((s) => s.session);
   const user = useAuthStore((s) => s.user);
   const getPlan = useSubscriptionStore((s) => s.getPlan);
   const currentPlanId = useSubscriptionStore((s) => s.currentPlanId);
 
-  const subscriptionReady = session === "guest" || subHydrated;
-  const accountReady = authHydrated && subscriptionReady;
+  const accountReady = authHydrated && subHydrated;
 
   const statusLine = useMemo(
     () => appearanceStatusText(theme, resolvedTheme),
@@ -133,15 +131,6 @@ export default function SettingsBasicPage() {
               <Spinner />
               正在同步账号与套餐状态
             </div>
-          ) : session === "guest" ? (
-            <>
-              <p className="text-sm leading-relaxed">
-                当前为游客。登录后可同步研究存档、订阅权益与跨设备相关能力。
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary">游客</Badge>
-              </div>
-            </>
           ) : (
             <>
               <p className="text-sm leading-relaxed">
@@ -164,11 +153,6 @@ export default function SettingsBasicPage() {
           <Button variant="outline" render={<Link href="/subscription" prefetch />}>
             订阅与用量
           </Button>
-          {accountReady && session === "guest" ? (
-            <Button variant="secondary" render={<Link href="/login" prefetch />}>
-              去登录
-            </Button>
-          ) : null}
         </CardFooter>
       </Card>
 

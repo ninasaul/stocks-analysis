@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo } from "react";
 import { useArchiveStore } from "@/stores/use-archive-store";
-import { useAuthStore } from "@/stores/use-auth-store";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -39,9 +38,7 @@ function formatDate(timestamp: number) {
 }
 
 export default function HistoryDetailPage() {
-  const authHydrated = useStoreHydrated(useAuthStore);
   const archiveHydrated = useStoreHydrated(useArchiveStore);
-  const session = useAuthStore((s) => s.session);
   const archives = useArchiveStore((s) => s.archives);
   const params = useParams();
   const id = typeof params.id === "string" ? params.id : "";
@@ -49,7 +46,7 @@ export default function HistoryDetailPage() {
   const entryIndex = useMemo(() => archives.findIndex((archive) => archive.id === id), [archives, id]);
   const newerEntry = entryIndex > 0 ? archives[entryIndex - 1] : null;
   const olderEntry = entryIndex >= 0 && entryIndex < archives.length - 1 ? archives[entryIndex + 1] : null;
-  const hydrated = authHydrated && archiveHydrated;
+  const hydrated = archiveHydrated;
 
   if (!hydrated) {
     return (
@@ -81,15 +78,7 @@ export default function HistoryDetailPage() {
         </>
       }
     >
-      {session !== "user" ? (
-        <Empty className="border">
-          <EmptyHeader>
-            <EmptyTitle>需要登录后查看详情</EmptyTitle>
-            <EmptyDescription>请先登录，再进入历史列表访问个人存档内容。</EmptyDescription>
-          </EmptyHeader>
-          <Button render={<Link href="/login" />}>去登录</Button>
-        </Empty>
-      ) : !entry ? (
+      {!entry ? (
         <Empty className="border">
           <EmptyHeader>
             <EmptyTitle>未找到记录</EmptyTitle>
