@@ -1,7 +1,7 @@
 """认证相关的 API 路由"""
 from fastapi import APIRouter, HTTPException, status, Depends, Request, Body
 from fastapi.security import OAuth2PasswordRequestForm
-from datetime import timedelta
+from datetime import timedelta, datetime
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -236,10 +236,10 @@ async def refresh_token(
     # 创建新的刷新令牌
     refresh_token_expires = timedelta(days=7)
     new_refresh_token = create_refresh_token(
-        data={"sub": user.username, "type": "refresh"},
+        data={"sub": user.username},
         expires_delta=refresh_token_expires
     )
-    refresh_token_expires_at = user.created_at + refresh_token_expires
+    refresh_token_expires_at = datetime.utcnow() + refresh_token_expires
 
     # 保存新的刷新令牌到数据库
     RefreshTokenService.create_refresh_token(user.id, new_refresh_token, refresh_token_expires_at)
