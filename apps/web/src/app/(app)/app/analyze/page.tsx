@@ -993,9 +993,12 @@ function AnalyzePageContent() {
 
   useEffect(() => {
     const keyword = searchKeyword.trim();
-    const parsed = selectedInput;
-    const searchTerm = parsed?.symbol?.trim() || keyword;
-    if (authSession !== "user" || !searchTerm || (parsed && parsed.market !== "CN")) {
+    const picked =
+      selectedSearchItem != null
+        ? { market: selectedSearchItem.market, symbol: selectedSearchItem.symbol.trim() }
+        : parseSearchInput(searchKeyword, market);
+    const searchTerm = picked?.symbol?.trim() || keyword;
+    if (authSession !== "user" || !searchTerm || (picked && picked.market !== "CN")) {
       setRemoteSearchItems([]);
       return;
     }
@@ -1015,7 +1018,9 @@ function AnalyzePageContent() {
       canceled = true;
       window.clearTimeout(timer);
     };
-  }, [authSession, searchKeyword, selectedInput]);
+    // 勿依赖 selectedInput：其为每次 useMemo 新对象；远程结果更新后 searchItems 里条目引用会变，
+    // 会误触发无限轮询。用 key / keyword 等标量表达「搜什么」即可。
+  }, [authSession, searchKeyword, market, selectedSearchItem?.key]);
 
   useEffect(() => {
     if (!searchFocused) return;
