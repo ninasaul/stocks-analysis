@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { BellIcon, ChartLineIcon, Settings2Icon } from "lucide-react";
 import { AppPageLayout } from "@/components/features/app-page-layout";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -13,6 +14,7 @@ const sections = [
     href: "/app/settings",
     label: "基础设置",
     hint: "外观与合规入口",
+    icon: Settings2Icon,
     isActive: (pathname: string) =>
       pathname === "/app/settings" || pathname === "/app/settings/",
   },
@@ -20,12 +22,14 @@ const sections = [
     href: "/app/settings/analysis",
     label: "分析设置",
     hint: "股票预测默认值",
+    icon: ChartLineIcon,
     isActive: (pathname: string) => pathname.startsWith("/app/settings/analysis"),
   },
   {
     href: "/app/settings/notifications",
     label: "通知设置",
     hint: "页面内提示开关",
+    icon: BellIcon,
     isActive: (pathname: string) => pathname.startsWith("/app/settings/notifications"),
   },
 ] as const;
@@ -53,16 +57,14 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
             >
               {sections.map((item) => {
                 const active = item.isActive(pathname);
+                const Icon = item.icon;
                 return (
                   <Button
                     key={item.href}
                     type="button"
                     variant={active ? "secondary" : "ghost"}
                     size="sm"
-                    className={cn(
-                      "h-auto min-h-8 shrink-0 flex-col gap-0.5 px-3 py-2 text-left font-normal whitespace-normal lg:w-full",
-                      "items-start justify-start",
-                    )}
+                    className="h-auto min-h-8 w-auto shrink-0 justify-start gap-2 px-3 py-2 text-left font-normal whitespace-normal lg:w-full"
                     render={
                       <Link
                         href={item.href}
@@ -71,8 +73,13 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                       />
                     }
                   >
-                    <span className="text-sm font-medium">{item.label}</span>
-                    <span className="hidden text-xs text-muted-foreground lg:block">{item.hint}</span>
+                    <Icon className="size-4 shrink-0" aria-hidden />
+                    <span className="flex min-w-0 flex-col items-start gap-0 leading-tight">
+                      <span className="text-sm">{item.label}</span>
+                      <span className="hidden truncate text-xs text-muted-foreground lg:block">
+                        {item.hint}
+                      </span>
+                    </span>
                   </Button>
                 );
               })}
