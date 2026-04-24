@@ -49,6 +49,8 @@ export type WechatLoginResult = LoginResult & {
 };
 
 type ApiErrorPayload = {
+  message?: string;
+  error?: string;
   detail?: string | Array<string | { msg?: string; type?: string }>;
 };
 
@@ -61,7 +63,13 @@ function joinUrl(path: string): string {
 async function parseApiError(response: Response): Promise<string> {
   try {
     const payload = (await response.json()) as ApiErrorPayload;
-    const { detail } = payload;
+    const { detail, message, error } = payload;
+    if (typeof message === "string" && message.trim().length > 0) {
+      return message;
+    }
+    if (typeof error === "string" && error.trim().length > 0) {
+      return error;
+    }
     if (typeof detail === "string" && detail.trim().length > 0) {
       return detail;
     }
@@ -101,17 +109,35 @@ export async function requestWechatLogin(code: string): Promise<WechatLoginResul
 }
 
 export async function requestPasswordLogin(payload: LoginPayload): Promise<LoginResult> {
-  const form = new URLSearchParams();
-  form.set("username", payload.identifier);
-  form.set("password", payload.password);
+  const sendFormRequest = () => {
+    const form = new URLSearchParams();
+    form.set("username", payload.identifier);
+    form.set("password", payload.password);
+    return fetch(joinUrl("/api/auth/login"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: form.toString(),
+    });
+  };
 
-  const response = await fetch(joinUrl("/api/auth/login"), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: form.toString(),
-  });
+  const sendJsonRequest = () =>
+    fetch(joinUrl("/api/auth/login"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        username: payload.identifier,
+        password: payload.password,
+      }),
+    });
+
+  let response = await sendFormRequest();
+  if (response.status === 415 || response.status === 422) {
+    response = await sendJsonRequest();
+  }
 
   if (!response.ok) {
     throw new Error(await parseApiError(response));
@@ -150,18 +176,31 @@ export async function requestRegister(
 }
 
 export async function requestCurrentUser(accessToken: string): Promise<AuthApiUser> {
-  const response = await fetch(joinUrl("/api/auth/me"), {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+  };
+  const response = await fetch(joinUrl("/api/users/me"), {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+    headers,
   });
 
-  if (!response.ok) {
+  if (response.ok) {
+    return (await response.json()) as AuthApiUser;
+  }
+
+  if (response.status !== 404) {
     throw new Error(await parseApiError(response));
   }
 
-  return (await response.json()) as AuthApiUser;
+  // Backward compatibility for older API deployments.
+  const fallbackResponse = await fetch(joinUrl("/api/auth/me"), {
+    method: "GET",
+    headers,
+  });
+  if (!fallbackResponse.ok) {
+    throw new Error(await parseApiError(fallbackResponse));
+  }
+  return (await fallbackResponse.json()) as AuthApiUser;
 }
 
 export async function requestRefreshToken(payload: RefreshTokenPayload): Promise<RefreshTokenResult> {
