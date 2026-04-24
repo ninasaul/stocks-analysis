@@ -19,6 +19,13 @@ ENV PYTHONIOENCODING=utf-8
 # ======================
 RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
 
+# ======================
+# 环境变量（容器重启后仍保留）
+# ======================
+ENV PYTHONPATH=/app/apps/api
+ENV HOST=0.0.0.0
+ENV PORT=8011
+
 EXPOSE 8011
 WORKDIR /app
 
