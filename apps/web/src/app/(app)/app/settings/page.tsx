@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
+import { MoonIcon, SunIcon, SunMoonIcon } from "lucide-react";
 import { useTheme } from "@/components/providers/theme-provider";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useSubscriptionStore } from "@/stores/use-subscription-store";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
@@ -61,33 +63,33 @@ export default function SettingsBasicPage() {
             <Field>
               <FieldLabel id="settings-theme-label">颜色模式</FieldLabel>
               <FieldDescription>选择后即时生效，并写入本机浏览器。</FieldDescription>
-              <div
-                className="flex flex-wrap gap-2 pt-1"
-                role="group"
+              <ToggleGroup
+                variant="outline"
+                spacing={0}
+                size="default"
+                value={[theme]}
+                onValueChange={(next) => {
+                  const v = next[0];
+                  if (v === "light" || v === "dark" || v === "system") {
+                    setTheme(v);
+                  }
+                }}
                 aria-labelledby="settings-theme-label"
+                className="w-full min-w-0 sm:w-auto"
               >
-                <Button
-                  type="button"
-                  variant={theme === "light" ? "default" : "outline"}
-                  onClick={() => setTheme("light")}
-                >
+                <ToggleGroupItem value="light" className="min-w-0 flex-1">
+                  <SunIcon aria-hidden />
                   浅色
-                </Button>
-                <Button
-                  type="button"
-                  variant={theme === "dark" ? "default" : "outline"}
-                  onClick={() => setTheme("dark")}
-                >
+                </ToggleGroupItem>
+                <ToggleGroupItem value="dark" className="min-w-0 flex-1">
+                  <MoonIcon aria-hidden />
                   深色
-                </Button>
-                <Button
-                  type="button"
-                  variant={theme === "system" ? "default" : "outline"}
-                  onClick={() => setTheme("system")}
-                >
+                </ToggleGroupItem>
+                <ToggleGroupItem value="system" className="min-w-0 flex-1">
+                  <SunMoonIcon aria-hidden />
                   跟随系统
-                </Button>
-              </div>
+                </ToggleGroupItem>
+              </ToggleGroup>
             </Field>
           </FieldGroup>
           {statusLine ? (

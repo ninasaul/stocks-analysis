@@ -30,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { PageLoadingState } from "@/components/features/page-state";
@@ -99,32 +100,38 @@ export function AnalyzePreferencesSettings() {
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
         <FieldSet className="min-w-0 gap-3 border-0 p-0">
-          <FieldLegend variant="label" className="px-0">
+          <FieldLegend variant="label" className="px-0" id="settings-depth-legend">
             默认分析深度
           </FieldLegend>
-          <Select
+          <RadioGroup
             value={String(depth)}
             onValueChange={(v) => {
               const n = Number(v);
-              if (n === 1 || n === 2 || n === 3 || n === 4 || n === 5) setDepth(n);
+              if (n === 1 || n === 2 || n === 3 || n === 4 || n === 5) {
+                setDepth(n);
+              }
             }}
+            aria-labelledby="settings-depth-legend"
+            className="max-w-xl gap-1 lg:max-w-2xl"
           >
-            <SelectTrigger className="w-full min-w-0 max-w-xl lg:max-w-2xl">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {([1, 2, 3, 4, 5] as const).map((d) => {
-                  const meta = ANALYZE_DEPTH_SUMMARY[d];
-                  return (
-                    <SelectItem key={d} value={String(d)}>
-                      {meta.title}（{meta.hint}）
-                    </SelectItem>
-                  );
-                })}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+            {([1, 2, 3, 4, 5] as const).map((d) => {
+              const meta = ANALYZE_DEPTH_SUMMARY[d];
+              return (
+                <label
+                  key={d}
+                  className="hover:bg-muted/50 -mx-1 flex cursor-pointer items-start gap-3 rounded-md px-1 py-2"
+                >
+                  <RadioGroupItem value={String(d)} className="mt-0.5" />
+                  <span className="min-w-0 flex-1 space-y-1">
+                    <span className="text-foreground block text-sm leading-snug font-medium">
+                      {meta.title}
+                    </span>
+                    <FieldDescription className="text-xs leading-relaxed">{meta.hint}</FieldDescription>
+                  </span>
+                </label>
+              );
+            })}
+          </RadioGroup>
         </FieldSet>
 
         <Separator />
