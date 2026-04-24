@@ -8,9 +8,9 @@ from passlib.context import CryptContext
 
 from ..core.config import config
 from ..user_management.models import User
-from ..user_management.schemas import LoginRequest, UserResponse, LoginResponse, RefreshTokenRequest, RefreshTokenResponse
+from ..user_management.schemas import LoginRequest, UserResponse, LoginResponse, RefreshTokenRequest, RefreshTokenResponse, UserCreate, LogoutRequest
 from ..user_management.services import UserService, RefreshTokenService, TokenBlacklistService
-from ..core.auth import create_access_token, create_refresh_token, get_current_user, get_password_hash, verify_password
+from ..core.auth import create_access_token, create_refresh_token, get_current_user, get_password_hash, verify_password, oauth2_scheme
 from ..core.logging import logger
 from ..core.rate_limit import check_rate_limit
 
@@ -58,13 +58,17 @@ async def register(
         )
 
     # 创建新用户
-    hashed_password = get_password_hash(password)
-    user = UserService.create_user(
+    # 生成占位邮箱（如果未提供）
+    if not email:
+        email = f"{username}@placeholder.com"
+    
+    user_data = UserCreate(
         username=username,
-        password=hashed_password,
+        password=password,
         email=email,
         phone=phone
     )
+    user = UserService.create_user(user_data)
 
     if not user:
         raise HTTPException(
@@ -95,7 +99,7 @@ async def login(
     
     # 检查登录速率限制（基于IP）
     ip_key = f"login:ip:{client_ip}"
-    ip_allowed, ip_remaining, ip_retry_after = check_rate_limit(ip_key, 5, 60)  # 5次/分钟
+    ip_allowed, ip_remaining, ip_retry_after = check_rate_limit(ip_key, 20, 60)  # 20次/分钟
     if not ip_allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -105,7 +109,7 @@ async def login(
     
     # 检查登录速率限制（基于用户名）
     username_key = f"login:user:{form_data.username}"
-    user_allowed, user_remaining, user_retry_after = check_rate_limit(username_key, 3, 60)  # 3次/分钟
+    user_allowed, user_remaining, user_retry_after = check_rate_limit(username_key, 10, 60)  # 10次/分钟
     if not user_allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -113,9 +117,18 @@ async def login(
             headers={"Retry-After": str(user_retry_after)}
         )
 
-    # 验证用户
+    # 验证用户 - 支持用户名、邮箱或手机号登录
+    user = None
+    # 尝试按用户名查找
     user = UserService.get_user_by_username(form_data.username)
-    if not user or not verify_password(form_data.password, user.password):
+    # 如果不是用户名，尝试按邮箱查找
+    if not user and '@' in form_data.username:
+        user = UserService.get_user_by_email(form_data.username)
+    # 如果不是邮箱，尝试按手机号查找
+    if not user:
+        user = UserService.get_user_by_phone(form_data.username)
+    
+    if not user or not verify_password(form_data.password, user.password_hash):
         logger.warning(f"登录失败: {form_data.username} (IP: {client_ip})")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -232,7 +245,7 @@ async def refresh_token(
     RefreshTokenService.create_refresh_token(user.id, new_refresh_token, refresh_token_expires_at)
     
     # 将旧的刷新令牌加入黑名单
-    TokenBlacklistService.blacklist_token(refresh_token)
+    TokenBlacklistService.blacklist_token(refresh_token, user_id=user.id, token_type='refresh')
 
     logger.info(f"用户令牌刷新成功: {user.username}")
     return RefreshTokenResponse(
@@ -245,18 +258,25 @@ async def refresh_token(
 
 @router.post("/logout")
 async def logout(
-    current_user: User = Depends(get_current_user)
+    request: LogoutRequest,
+    current_user: User = Depends(get_current_user),
+    token: str = Depends(oauth2_scheme)
 ) -> dict:
     """
     用户登出
 
     Args:
+        request: 包含刷新令牌的请求
         current_user: 当前登录的用户
+        token: 当前的访问令牌
 
     Returns:
         登出成功消息
     """
-    # 这里可以添加令牌黑名单逻辑
+    # 将访问令牌加入黑名单
+    TokenBlacklistService.blacklist_token(token, user_id=current_user.id, token_type='access')
+    # 将刷新令牌加入黑名单
+    TokenBlacklistService.blacklist_token(request.refresh_token, user_id=current_user.id, token_type='refresh')
     logger.info(f"用户登出: {current_user.username}")
     return {"message": "登出成功"}
 

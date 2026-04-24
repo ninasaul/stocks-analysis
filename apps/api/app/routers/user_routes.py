@@ -77,10 +77,10 @@ async def get_current_user_membership(
         会员信息
     """
     logger.info(f"用户 {current_user.id} ({current_user.username}) 获取会员信息")
-    membership = MembershipService.get_user_membership(current_user.id)
+    membership = MembershipService.get_membership_by_user_id(current_user.id)
     if not membership:
         # 如果用户没有会员信息，自动创建普通会员
-        membership = MembershipService.create_membership(current_user.id, "普通会员")
+        membership = MembershipService.create_membership_for_user(current_user.id)
         if not membership:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -104,10 +104,16 @@ async def renew_membership(
     Returns:
         更新后的会员信息
     """
-    logger.info(f"用户 {current_user.id} ({current_user.username}) 会员续费: {renew_request.membership_type}")
+    logger.info(f"用户 {current_user.id} ({current_user.username}) 会员续费: {renew_request.duration_months}个月")
+    membership = MembershipService.get_membership_by_user_id(current_user.id)
+    if not membership:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会员信息不存在"
+        )
     membership = MembershipService.renew_membership(
-        current_user.id,
-        renew_request.membership_type
+        membership.id,
+        renew_request.duration_months
     )
     if not membership:
         raise HTTPException(
@@ -132,10 +138,17 @@ async def upgrade_membership(
     Returns:
         更新后的会员信息
     """
-    logger.info(f"用户 {current_user.id} ({current_user.username}) 会员升级: {upgrade_request.new_membership_type}")
+    logger.info(f"用户 {current_user.id} ({current_user.username}) 会员升级: {upgrade_request.new_type}")
+    membership = MembershipService.get_membership_by_user_id(current_user.id)
+    if not membership:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会员信息不存在"
+        )
     membership = MembershipService.upgrade_membership(
-        current_user.id,
-        upgrade_request.new_membership_type
+        membership.id,
+        upgrade_request.new_type,
+        upgrade_request.duration_months
     )
     if not membership:
         raise HTTPException(

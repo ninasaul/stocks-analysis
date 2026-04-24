@@ -1072,6 +1072,46 @@ class RefreshTokenService:
             raise
 
     @staticmethod
+    def is_refresh_token_valid(user_id: int, token: str) -> bool:
+        """
+        检查刷新令牌是否有效
+
+        Args:
+            user_id: 用户ID
+            token: 刷新令牌字符串
+
+        Returns:
+            是否有效
+        """
+        try:
+            from .models import RefreshTokenStatus
+            query = """
+                SELECT id, status, expires_at
+                FROM refresh_tokens
+                WHERE user_id = %s AND token = %s
+            """
+            result = execute_query(query, (user_id, token))
+            if not result:
+                return False
+            
+            token_id, status, expires_at = result[0]
+            
+            # 检查状态是否为active
+            if status != RefreshTokenStatus.ACTIVE.value:
+                return False
+            
+            # 检查是否过期
+            if expires_at < datetime.now():
+                # 标记为过期
+                RefreshTokenService.mark_as_expired(token_id)
+                return False
+            
+            return True
+        except Exception as e:
+            logger.error(f"检查刷新令牌有效性失败: {e}")
+            return False
+
+    @staticmethod
     def rotate_refresh_token(
         old_token: str,
         new_token: str,

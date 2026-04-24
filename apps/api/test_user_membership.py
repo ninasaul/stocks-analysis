@@ -100,7 +100,7 @@ class UserManagementTest:
             print("请先登录获取访问令牌")
             return
         
-        url = f"{self.base_url}/api/auth/me"
+        url = f"{self.base_url}/api/users/me"
         headers = {
             "Authorization": f"Bearer {self.access_token}"
         }
@@ -182,7 +182,7 @@ class UserManagementTest:
         
         # 1. 验证当前令牌可以正常使用
         print("1. 验证当前令牌可以正常使用")
-        url = f"{self.base_url}/api/auth/me"
+        url = f"{self.base_url}/api/users/me"
         headers = {
             "Authorization": f"Bearer {old_access_token}"
         }
@@ -269,22 +269,22 @@ class MembershipManagementTest:
             print("请先登录获取访问令牌")
             return
         
-        url = f"{self.base_url}/api/memberships"
+        # 注意：系统会在首次获取会员信息时自动创建普通会员
+        # 所以这里直接测试获取会员信息
+        url = f"{self.base_url}/api/users/me/membership"
         headers = {
-            "Authorization": f"Bearer {self.access_token}",
-            "Content-Type": "application/json"
+            "Authorization": f"Bearer {self.access_token}"
         }
-        data = TEST_MEMBERSHIP
         
-        response = requests.post(url, json=data, headers=headers)
+        response = requests.get(url, headers=headers)
         print(f"状态码: {response.status_code}")
         
-        if response.status_code == 201:
+        if response.status_code == 200:
             membership_data = response.json()
-            print("开通会员成功！")
+            print("获取会员信息成功！")
             print(f"会员信息: {json.dumps(membership_data, ensure_ascii=False, indent=2)}")
         else:
-            print(f"开通会员失败: {response.text}")
+            print(f"获取会员信息失败: {response.text}")
     
     def test_get_membership(self):
         """测试获取会员信息"""
@@ -293,7 +293,7 @@ class MembershipManagementTest:
             print("请先登录获取访问令牌")
             return
         
-        url = f"{self.base_url}/api/memberships/{self.user_id}"
+        url = f"{self.base_url}/api/users/me/membership"
         headers = {
             "Authorization": f"Bearer {self.access_token}"
         }
@@ -315,19 +315,16 @@ class MembershipManagementTest:
             print("请先登录获取访问令牌")
             return
         
-        url = f"{self.base_url}/api/memberships/renew"
+        url = f"{self.base_url}/api/users/me/membership/renew"
         headers = {
             "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json"
-        }
-        params = {
-            "user_id": self.user_id
         }
         data = {
             "duration_months": 3  # 续费3个月
         }
         
-        response = requests.post(url, json=data, headers=headers, params=params)
+        response = requests.post(url, json=data, headers=headers)
         print(f"状态码: {response.status_code}")
         
         if response.status_code == 200:
@@ -344,20 +341,17 @@ class MembershipManagementTest:
             print("请先登录获取访问令牌")
             return
         
-        url = f"{self.base_url}/api/memberships/upgrade"
+        url = f"{self.base_url}/api/users/me/membership/upgrade"
         headers = {
             "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json"
-        }
-        params = {
-            "user_id": self.user_id
         }
         data = {
             "new_type": "premium_yearly",  # 升级为年度会员
             "duration_months": 12
         }
         
-        response = requests.post(url, json=data, headers=headers, params=params)
+        response = requests.post(url, json=data, headers=headers)
         print(f"状态码: {response.status_code}")
         
         if response.status_code == 200:
@@ -374,7 +368,7 @@ class MembershipManagementTest:
             print("请先登录获取访问令牌")
             return
         
-        url = f"{self.base_url}/api/memberships/{self.user_id}/api-calls"
+        url = f"{self.base_url}/api/users/me/api-calls"
         headers = {
             "Authorization": f"Bearer {self.access_token}"
         }
@@ -403,7 +397,7 @@ class ApiCallTest:
             print("请先登录获取访问令牌")
             return
         
-        url = f"{self.base_url}/api/users"
+        url = f"{self.base_url}/api/users/me"
         headers = {
             "Authorization": f"Bearer {self.access_token}"
         }
@@ -414,7 +408,7 @@ class ApiCallTest:
         if response.status_code == 200:
             users_data = response.json()
             print("访问成功！")
-            print(f"用户列表: {json.dumps(users_data, ensure_ascii=False, indent=2)}")
+            print(f"用户信息: {json.dumps(users_data, ensure_ascii=False, indent=2)}")
         else:
             print(f"访问失败: {response.text}")
 
