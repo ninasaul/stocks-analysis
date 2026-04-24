@@ -47,7 +47,7 @@ class Reflector:
             decision_data: 包含决策相关数据的字典
         
         Returns:
-            反思结果
+            反思结果，如果失败则包含error字段
         """
         # 构建反思提示
         prompt = f"""
@@ -89,10 +89,15 @@ JSON 格式示例：
             result = self._safe_parse_json(response)
             return result
         except Exception as e:
-            logger.error(f"反思分析失败: {e}")
+            error_msg = f"反思分析失败: {str(e)}"
+            logger.error(f"反思分析失败: {str(e)}")
             return {
-                "error": "反思分析失败",
-                "message": str(e)
+                "evaluation": "反思分析失败",
+                "analysis": "",
+                "suggestions": "",
+                "lessons": "",
+                "error": error_msg,
+                "error_detail": str(e)
             }
     
     async def reflect_on_trade(self, trade_data: Dict[str, Any]) -> Dict[str, Any]:

@@ -232,6 +232,26 @@ class DatabaseInitializer:
         """
         self.execute_sql(sql, "创建微信用户关联表")
 
+    def create_stock_analysis_results_table(self):
+        """创建股票分析结果表"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS stock_analysis_results (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            stock_code VARCHAR(20) NOT NULL,
+            analysis_date DATE NOT NULL,
+            analysis_result JSONB NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_stock_analysis_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            UNIQUE(user_id, stock_code, analysis_date)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_stock_analysis_user_date ON stock_analysis_results(user_id, analysis_date);
+        CREATE INDEX IF NOT EXISTS idx_stock_analysis_stock_date ON stock_analysis_results(stock_code, analysis_date);
+        """
+        self.execute_sql(sql, "创建股票分析结果表")
+
     def create_all_tables(self):
         """创建所有表"""
         print("\n开始创建数据库表...")
@@ -268,6 +288,7 @@ class DatabaseInitializer:
             return
 
         sql = """
+        DROP TABLE IF EXISTS stock_analysis_results CASCADE;
         DROP TABLE IF EXISTS wechat_users CASCADE;
         DROP TABLE IF EXISTS token_blacklist CASCADE;
         DROP TABLE IF EXISTS refresh_tokens CASCADE;

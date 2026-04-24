@@ -93,13 +93,15 @@ class LLMClient:
         
         logger.info(f"初始化LLM客户端: provider={self.provider}, model={self.config['model']}")
     
-    async def chat(self, prompt: str, response_format: str = "text") -> str:
+    async def chat(self, prompt: str, response_format: str = "text", temperature: float = 0.1, seed: int = 42) -> str:
         """
         同步聊天完成
         
         Args:
             prompt: 提示
             response_format: 响应格式
+            temperature: 温度参数，控制输出随机性（0-2）
+            seed: 随机种子，确保结果可重复
         
         Returns:
             响应内容
@@ -116,7 +118,9 @@ class LLMClient:
         payload = {
             "model": self.config["model"],
             "messages": [{"role": "user", "content": prompt}],
-            "stream": False
+            "stream": False,
+            "temperature": temperature,
+            "seed": seed
         }
         
         if response_format == "json":

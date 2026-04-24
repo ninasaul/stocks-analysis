@@ -1,33 +1,12 @@
 """速率限制模块"""
-import redis
 import time
 from typing import Tuple, Optional
 from fastapi import HTTPException, status, Request
-from dotenv import load_dotenv
-import os
+import logging
 
-load_dotenv()
+from .redis_manager import get_redis_client
 
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
-REDIS_DB = int(os.getenv("REDIS_DB", "0"))
-
-redis_client: Optional[redis.Redis] = None
-
-
-def get_redis_client() -> redis.Redis:
-    """获取Redis客户端（单例）"""
-    global redis_client
-    if redis_client is None:
-        redis_client = redis.Redis(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
-            password=REDIS_PASSWORD if REDIS_PASSWORD else None,
-            db=REDIS_DB,
-            decode_responses=True
-        )
-    return redis_client
+logger = logging.getLogger(__name__)
 
 
 def check_rate_limit(
@@ -46,11 +25,11 @@ def check_rate_limit(
     Returns:
         (是否允许请求, 剩余次数, 距离下次可用的秒数)
     """
-    r = get_redis_client()
-    current_time = int(time.time())
-    window_start = current_time - window_seconds
-
     try:
+        r = get_redis_client()
+        current_time = int(time.time())
+        window_start = current_time - window_seconds
+
         pipe = r.pipeline()
 
         pipe.zremrangebyscore(key, 0, window_start)
@@ -75,7 +54,7 @@ def check_rate_limit(
         return True, limit - count, 0
 
     except Exception as e:
-        print(f"速率限制检查失败: {e}")
+        logger.error(f"速率限制检查失败: {e}")
         return True, limit, 0
 
 
@@ -169,7 +148,7 @@ def record_failed_login(ip: str, username: Optional[str] = None):
         pipe.expire(key, 300)
         pipe.execute()
     except Exception as e:
-        print(f"记录失败登录尝试失败: {e}")
+        logger.error(f"记录失败登录尝试失败: {e}")
 
 
 def get_login_attempts(ip: str, username: Optional[str] = None) -> int:
@@ -196,5 +175,6 @@ def get_login_attempts(ip: str, username: Optional[str] = None) -> int:
         r.zremrangebyscore(key, 0, window_start)
         return r.zcard(key)
     except Exception as e:
-        print(f"获取登录尝试次数失败: {e}")
+        logger.error(f"获取登录尝试次数失败: {e}")
         return 0
+

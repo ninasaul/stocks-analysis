@@ -67,6 +67,7 @@ def test_stream_api(message, session_id):
 
                 # 处理SSE流
                 full_response = ""
+                extension_questions = []
                 for line in response.iter_lines():
                     if line:
                         # 解码响应行
@@ -78,11 +79,24 @@ def test_stream_api(message, session_id):
                             data = json.loads(json_data)
                             chunk = data.get('chunk', '')
                             full_response += chunk
-                            print(f"收到数据: {chunk}")
-                            print("-" * 80)
+                            
+                            # 检查是否有延伸问题
+                            if 'extension_questions' in data and data['extension_questions']:
+                                extension_questions = data['extension_questions']
+                                print("\n延伸问题:")
+                                for i, question in enumerate(extension_questions, 1):
+                                    print(f"{i}. {question}")
+                                print("-" * 80)
+                            elif chunk:
+                                print(f"收到数据: {chunk}")
+                                print("-" * 80)
 
                 print("\n完整响应:")
                 print(full_response)
+                if extension_questions:
+                    print("\n延伸问题:")
+                    for i, question in enumerate(extension_questions, 1):
+                        print(f"{i}. {question}")
                 print("=" * 80)
             else:
                 print(f"请求失败，状态码: {response.status_code}")
