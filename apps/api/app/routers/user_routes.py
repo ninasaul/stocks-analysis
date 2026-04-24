@@ -227,7 +227,7 @@ async def get_user_membership(
     """
     # 这里可以添加权限检查
     logger.info(f"用户 {current_user.id} ({current_user.username}) 获取用户 {user_id} 会员信息")
-    membership = MembershipService.get_user_membership(user_id)
+    membership = MembershipService.get_membership_by_user_id(user_id)
     if not membership:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

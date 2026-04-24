@@ -253,6 +253,77 @@ class UserManagementTest:
             print("重新登录成功！")
         else:
             print(f"重新登录失败: {login_response.text}")
+    
+    def test_update_current_user(self):
+        """测试更新当前用户信息"""
+        print("\n=== 测试更新当前用户信息 ===")
+        if not self.access_token:
+            print("请先登录获取访问令牌")
+            return
+        
+        url = f"{self.base_url}/api/users/me"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "display_name": "测试用户",
+            "avatar_url": "https://example.com/avatar.jpg"
+        }
+        
+        response = requests.put(url, json=data, headers=headers)
+        print(f"状态码: {response.status_code}")
+        
+        if response.status_code == 200:
+            user_data = response.json()
+            print("更新成功！")
+            print(f"用户信息: {json.dumps(user_data, ensure_ascii=False, indent=2)}")
+        else:
+            print(f"更新失败: {response.text}")
+    
+    def test_get_user_by_id(self):
+        """测试根据用户ID获取用户信息"""
+        print("\n=== 测试根据用户ID获取用户信息 ===")
+        if not self.access_token:
+            print("请先登录获取访问令牌")
+            return
+        
+        url = f"{self.base_url}/api/users/{self.user_id}"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}"
+        }
+        
+        response = requests.get(url, headers=headers)
+        print(f"状态码: {response.status_code}")
+        
+        if response.status_code == 200:
+            user_data = response.json()
+            print("获取成功！")
+            print(f"用户信息: {json.dumps(user_data, ensure_ascii=False, indent=2)}")
+        else:
+            print(f"获取失败: {response.text}")
+    
+    def test_get_user_membership_by_id(self):
+        """测试根据用户ID获取会员信息"""
+        print("\n=== 测试根据用户ID获取会员信息 ===")
+        if not self.access_token:
+            print("请先登录获取访问令牌")
+            return
+        
+        url = f"{self.base_url}/api/users/{self.user_id}/membership"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}"
+        }
+        
+        response = requests.get(url, headers=headers)
+        print(f"状态码: {response.status_code}")
+        
+        if response.status_code == 200:
+            membership_data = response.json()
+            print("获取成功！")
+            print(f"会员信息: {json.dumps(membership_data, ensure_ascii=False, indent=2)}")
+        else:
+            print(f"获取失败: {response.text}")
 
 class MembershipManagementTest:
     """会员管理测试类"""
@@ -429,6 +500,12 @@ def main():
     user_test.test_register()
     user_test.test_login()
     user_test.test_get_current_user()
+    # 测试更新用户信息
+    user_test.test_update_current_user()
+    # 测试根据用户ID获取用户信息
+    user_test.test_get_user_by_id()
+    # 测试根据用户ID获取会员信息
+    user_test.test_get_user_membership_by_id()
     # 测试刷新令牌功能
     user_test.test_refresh_token()
     
