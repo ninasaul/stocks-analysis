@@ -11,9 +11,8 @@ from datetime import datetime, timedelta
 import akshare as ak
 import baostock as bs
 import pandas as pd
-import logging
 
-logger = logging.getLogger(__name__)
+from .logging import logger
 
 class StockService:
     _instance = None
@@ -47,10 +46,11 @@ class StockService:
             if file_exists and file_is_today:
                 # 从文件中读取数据
                 try:
-                    stock_info_a_code_name_df = pd.read_csv(csv_file)
-                    stock_info_a_code_name_df['code'] = stock_info_a_code_name_df['code'].astype(str)
+                    stock_info_a_code_name_df = pd.read_csv(csv_file, dtype={'code': str})
+                    # 确保股票代码保持6位格式，补前导零
+                    stock_info_a_code_name_df['code'] = stock_info_a_code_name_df['code'].str.zfill(6)
                     self.stock_code_name_map = dict(zip(stock_info_a_code_name_df["code"], stock_info_a_code_name_df["name"]))
-                    logger.debug(f"从文件读取股票数据，共 {len(self.stock_code_name_map)} 条")
+                    logger.info(f"加载股票数据，共 {len(self.stock_code_name_map)} 条")
                 except Exception as e:
                     logger.error(f"从文件读取股票数据失败: {e}")
                     # 如果文件读取失败，尝试从网络获取
@@ -105,23 +105,31 @@ class StockService:
         """从网络获取股票数据并保存到文件"""
         try:
             stock_info_a_code_name_df = ak.stock_info_a_code_name()
+            # 确保股票代码保持6位格式，补前导零
+            stock_info_a_code_name_df['code'] = stock_info_a_code_name_df['code'].astype(str).str.zfill(6)
             self.stock_code_name_map = dict(zip(stock_info_a_code_name_df["code"], stock_info_a_code_name_df["name"]))
             # 保存到文件
             stock_info_a_code_name_df.to_csv(csv_file, index=False)
-            logger.debug(f"从网络获取股票数据并保存到文件，共 {len(self.stock_code_name_map)} 条")
+            logger.info(f"从网络获取股票数据并保存到文件，共 {len(self.stock_code_name_map)} 条")
         except Exception as e:
             logger.error(f"从网络获取股票数据失败: {e}")
             # 如果网络获取失败，尝试从文件读取（如果文件存在）
             if os.path.exists(csv_file):
                 try:
-                    stock_info_a_code_name_df = pd.read_csv(csv_file)
+                    stock_info_a_code_name_df = pd.read_csv(csv_file, dtype={'code': str})
+                    # 确保股票代码保持6位格式，补前导零
+                    stock_info_a_code_name_df['code'] = stock_info_a_code_name_df['code'].str.zfill(6)
                     self.stock_code_name_map = dict(zip(stock_info_a_code_name_df["code"], stock_info_a_code_name_df["name"]))
-                    logger.debug(f"从文件读取股票数据（网络获取失败），共 {len(self.stock_code_name_map)} 条")
+                    if '000858' in self.stock_code_name_map:
+                        logger.debug(f"文件读取后，self.stock_code_name_map['000858'] = {self.stock_code_name_map['000858']}")
+                    logger.info(f"从文件读取股票数据（网络获取失败），共 {len(self.stock_code_name_map)} 条")
                 except Exception as e:
                     logger.error(f"从文件读取股票数据失败: {e}")
                     self.stock_code_name_map = {}
+                    logger.info("股票数据映射为空")
             else:
                 self.stock_code_name_map = {}
+                logger.info("股票数据映射为空")
 
     def _fetch_and_save_industry_data(self, industry_file):
         """从网络获取行业数据并保存到文件"""
@@ -139,7 +147,17 @@ class StockService:
                 logger.warning("获取行业数据为空")
         except Exception as e:
             logger.error(f"从网络获取行业数据失败: {e}")
-            self.industry_list = []
+            # 如果网络获取失败，尝试从文件读取（如果文件存在）
+            if os.path.exists(industry_file):
+                try:
+                    industry_df = pd.read_csv(industry_file)
+                    self.industry_list = industry_df['industry'].tolist()
+                    logger.debug(f"从文件读取行业数据（网络获取失败），共 {len(self.industry_list)} 条")
+                except Exception as e:
+                    logger.error(f"从文件读取行业数据失败: {e}")
+                    self.industry_list = []
+            else:
+                self.industry_list = []
 
     def _fetch_and_save_concept_data(self, concept_file):
         """从网络获取题材数据并保存到文件"""
@@ -157,7 +175,17 @@ class StockService:
                 logger.warning("获取题材数据为空")
         except Exception as e:
             logger.error(f"从网络获取题材数据失败: {e}")
-            self.concept_list = []
+            # 如果网络获取失败，尝试从文件读取（如果文件存在）
+            if os.path.exists(concept_file):
+                try:
+                    concept_df = pd.read_csv(concept_file)
+                    self.concept_list = concept_df['concept'].tolist()
+                    logger.debug(f"从文件读取题材数据（网络获取失败），共 {len(self.concept_list)} 条")
+                except Exception as e:
+                    logger.error(f"从文件读取题材数据失败: {e}")
+                    self.concept_list = []
+            else:
+                self.concept_list = []
 
     def get_stock_quote(self, stock_code: str) -> Dict:
         stock_individual_spot_em_df = ak.stock_individual_spot_xq(symbol=self.get_full_uppercase_stock_code(stock_code))
