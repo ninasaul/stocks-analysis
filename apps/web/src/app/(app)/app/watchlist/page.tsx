@@ -12,6 +12,7 @@ import {
   parseAnalyzeSearchInput,
   type AnalyzeSymbolSearchItem,
 } from "@/lib/analyze-symbol-search";
+import { requestStockSearch } from "@/lib/api/stocks";
 import { buildMockBaseQuote } from "@/lib/mock-base-quote";
 import { AppPageLayout } from "@/components/features/app-page-layout";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/stores/use-auth-store";
 
 const WATCHLIST_STORAGE_KEY_V2 = "app-watchlist-v2";
 const WATCHLIST_STORAGE_KEY_V1 = "app-watchlist-symbols";
@@ -52,16 +54,24 @@ function universeItemToEntry(item: AnalyzeSymbolSearchItem): WatchlistEntry {
 }
 
 function tryResolveEntryFromRaw(raw: string, fallbackMarket: AnalysisInput["market"]): WatchlistEntry | null {
+  return tryResolveEntryFromPool(raw, fallbackMarket, ANALYZE_SYMBOL_MOCK_UNIVERSE);
+}
+
+function tryResolveEntryFromPool(
+  raw: string,
+  fallbackMarket: AnalysisInput["market"],
+  pool: readonly AnalyzeSymbolSearchItem[],
+): WatchlistEntry | null {
   const parsed = parseAnalyzeSearchInput(raw, fallbackMarket);
   if (!parsed?.symbol) return null;
   const sym = parsed.symbol.trim();
   if (!sym) return null;
   const market = parsed.market;
-  const hitPreferred = ANALYZE_SYMBOL_MOCK_UNIVERSE.find(
+  const hitPreferred = pool.find(
     (u) => u.symbol.toLowerCase() === sym.toLowerCase() && u.market === market,
   );
   if (hitPreferred) return universeItemToEntry(hitPreferred);
-  const hitAny = ANALYZE_SYMBOL_MOCK_UNIVERSE.find((u) => u.symbol.toLowerCase() === sym.toLowerCase());
+  const hitAny = pool.find((u) => u.symbol.toLowerCase() === sym.toLowerCase());
   if (hitAny) return universeItemToEntry(hitAny);
   return { market, symbol: normalizeSymbol(sym), name: normalizeSymbol(sym) };
 }
@@ -96,8 +106,10 @@ function quoteToneClass(changePct: number) {
 
 export default function WatchlistPage() {
   const router = useRouter();
+  const authSession = useAuthStore((s) => s.session);
   const [query, setQuery] = useState("");
   const [entries, setEntries] = useState<WatchlistEntry[]>([]);
+  const [remoteSearchItems, setRemoteSearchItems] = useState<AnalyzeSymbolSearchItem[]>([]);
 
   const keySet = useMemo(() => new Set(entries.map((e) => entryKey(e))), [entries]);
 
@@ -162,6 +174,50 @@ export default function WatchlistPage() {
     }
   }, [entries]);
 
+  const searchItems = useMemo(() => {
+    const byKey = new Map<string, AnalyzeSymbolSearchItem>();
+    for (const m of ANALYZE_SYMBOL_MOCK_UNIVERSE) byKey.set(m.key, m);
+    for (const item of remoteSearchItems) byKey.set(item.key, item);
+    for (const e of entries) {
+      const k = entryKey(e);
+      if (!byKey.has(k)) {
+        byKey.set(k, {
+          key: `${e.market}.${e.symbol}`,
+          market: e.market,
+          symbol: e.symbol.trim(),
+          name: e.name.trim() || e.symbol.trim(),
+        });
+      }
+    }
+    return Array.from(byKey.values());
+  }, [entries, remoteSearchItems]);
+
+  useEffect(() => {
+    const keyword = query.trim();
+    const parsed = parseAnalyzeSearchInput(keyword, "CN");
+    const searchTerm = parsed?.symbol?.trim() || keyword;
+    if (authSession !== "user" || !searchTerm || (parsed && parsed.market !== "CN")) {
+      setRemoteSearchItems([]);
+      return;
+    }
+
+    let canceled = false;
+    const timer = window.setTimeout(() => {
+      void requestStockSearch(searchTerm, 6)
+        .then((items) => {
+          if (!canceled) setRemoteSearchItems(items);
+        })
+        .catch(() => {
+          if (!canceled) setRemoteSearchItems([]);
+        });
+    }, 200);
+
+    return () => {
+      canceled = true;
+      window.clearTimeout(timer);
+    };
+  }, [authSession, query]);
+
   const q = query.trim();
 
   const filteredEntries = useMemo(() => {
@@ -175,13 +231,22 @@ export default function WatchlistPage() {
 
   const addSuggestions = useMemo(() => {
     if (!q) return [];
-    return ANALYZE_SYMBOL_MOCK_UNIVERSE.filter((u) => !keySet.has(entryKey(u)))
-      .map((u) => ({ u, score: fuzzyAnalyzeSymbolScore(u, q) }))
+    const needle = q.toLowerCase();
+    return searchItems
+      .filter((u) => !keySet.has(entryKey(u)))
+      .map((u, index) => ({
+        u,
+        recentRank: index,
+        score: fuzzyAnalyzeSymbolScore(u, needle),
+      }))
       .filter((row) => row.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 8)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.recentRank - b.recentRank;
+      })
+      .slice(0, 12)
       .map((row) => row.u);
-  }, [keySet, q]);
+  }, [keySet, q, searchItems]);
 
   const addEntry = useCallback((entry: WatchlistEntry) => {
     const k = entryKey(entry);
@@ -200,7 +265,7 @@ export default function WatchlistPage() {
     if (e.key !== "Enter") return;
     e.preventDefault();
     if (!q) return;
-    const resolved = tryResolveEntryFromRaw(q, "CN");
+    const resolved = tryResolveEntryFromPool(q, "CN", searchItems);
     if (resolved) addEntry(resolved);
   };
 

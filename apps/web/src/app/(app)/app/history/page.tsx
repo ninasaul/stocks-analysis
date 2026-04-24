@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { historyCopy } from "@/lib/copy";
 import { useArchiveStore } from "@/stores/use-archive-store";
 import { useAuthStore } from "@/stores/use-auth-store";
@@ -20,19 +20,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Progress } from "@/components/ui/progress";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { AppPageLayout } from "@/components/features/app-page-layout";
 import { PageLoadingState } from "@/components/features/page-state";
+import type { ArchiveEntry } from "@/lib/contracts/domain";
+import { cn } from "@/lib/utils";
 
 const reviewChartConfig = {
   value: { label: "占比", color: "var(--chart-1)" },
@@ -57,26 +50,27 @@ const timeframeLabels: Record<string, string> = {
   weekly: "周线",
 };
 
-type SortMode = "latest" | "confidence_desc" | "confidence_asc";
-
-const sortModeLabels: Record<SortMode, string> = {
-  latest: "按时间倒序",
-  confidence_desc: "按置信度从高到低",
-  confidence_asc: "按置信度从低到高",
-};
-
 function formatDate(timestamp: number) {
   return new Date(timestamp).toLocaleString();
+}
+
+function expectedReturnClassName(pct: number) {
+  if (pct > 0) return "text-emerald-600 dark:text-emerald-400";
+  if (pct < 0) return "text-red-600 dark:text-red-400";
+  return "text-muted-foreground";
+}
+
+function formatExpectedReturnPct(archive: ArchiveEntry) {
+  const pct = archive.plan_metrics?.expected_return_pct;
+  if (pct === undefined || !Number.isFinite(pct)) return null;
+  const body = `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`;
+  return { text: body, pct };
 }
 
 export default function HistoryPage() {
   const authHydrated = useStoreHydrated(useAuthStore);
   const archiveHydrated = useStoreHydrated(useArchiveStore);
   const archives = useArchiveStore((s) => s.archives);
-  const [keyword, setKeyword] = useState("");
-  const [actionFilter, setActionFilter] = useState("all");
-  const [riskFilter, setRiskFilter] = useState("all");
-  const [sortMode, setSortMode] = useState<SortMode>("latest");
   const hydrated = authHydrated && archiveHydrated;
 
   const stats = useMemo(() => {
@@ -85,19 +79,34 @@ export default function HistoryPage() {
     const avgConfidence = archives.reduce((sum, archive) => sum + archive.confidence, 0) / total;
     const downgradedCount = archives.filter((archive) => archive.gate_downgraded).length;
     const highRiskCount = archives.filter((archive) => archive.risk_level === "high").length;
+    const mediumRiskCount = archives.filter((archive) => archive.risk_level === "medium").length;
+    const lowRiskCount = archives.filter((archive) => archive.risk_level === "low").length;
     const weeklyCount = archives.filter((archive) => archive.timeframe === "weekly").length;
     const actionCounts = archives.reduce<Record<string, number>>((result, archive) => {
       const key = archive.action;
       result[key] = (result[key] ?? 0) + 1;
       return result;
     }, {});
+    const returnSamples = archives
+      .map((a) => a.plan_metrics?.expected_return_pct)
+      .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    const avgExpectedReturnPct =
+      returnSamples.length > 0 ? returnSamples.reduce((s, v) => s + v, 0) / returnSamples.length : null;
+    const positiveReturnCount = returnSamples.filter((v) => v > 0).length;
+    const positiveReturnShare = returnSamples.length > 0 ? positiveReturnCount / returnSamples.length : null;
 
     return {
       total,
       avgConfidence,
       downgradedRate: downgradedCount / total,
+      gatePassRate: (total - downgradedCount) / total,
       highRiskRate: highRiskCount / total,
+      mediumRiskRate: mediumRiskCount / total,
+      lowRiskRate: lowRiskCount / total,
       weeklyShare: weeklyCount / total,
+      returnSampleCount: returnSamples.length,
+      avgExpectedReturnPct,
+      positiveReturnShare,
       actionChartData: Object.entries(actionCounts)
         .map(([action, count]) => ({
           name: actionLabels[action] ?? action,
@@ -108,29 +117,6 @@ export default function HistoryPage() {
     };
   }, [archives]);
 
-  const filteredArchives = useMemo(() => {
-    const normalizedKeyword = keyword.trim().toLowerCase();
-    const result = archives.filter((archive) => {
-      const matchesKeyword =
-        normalizedKeyword.length === 0 ||
-        `${archive.market}.${archive.symbol}`.toLowerCase().includes(normalizedKeyword) ||
-        archive.title.toLowerCase().includes(normalizedKeyword);
-      const matchesAction = actionFilter === "all" || archive.action === actionFilter;
-      const matchesRisk = riskFilter === "all" || archive.risk_level === riskFilter;
-      return matchesKeyword && matchesAction && matchesRisk;
-    });
-
-    result.sort((left, right) => {
-      if (sortMode === "confidence_desc") return right.confidence - left.confidence;
-      if (sortMode === "confidence_asc") return left.confidence - right.confidence;
-      return right.created_at - left.created_at;
-    });
-    return result;
-  }, [archives, keyword, actionFilter, riskFilter, sortMode]);
-
-  const hasActiveFilters =
-    keyword.trim().length > 0 || actionFilter !== "all" || riskFilter !== "all" || sortMode !== "latest";
-
   return (
     <AppPageLayout title="历史与复盘" description={historyCopy.pageSubtitle} contentClassName="gap-6">
       {!hydrated ? (
@@ -138,28 +124,56 @@ export default function HistoryPage() {
       ) : (
         <Tabs defaultValue="list">
           <TabsList>
-            <TabsTrigger value="list">历史列表</TabsTrigger>
-            <TabsTrigger value="stats">复盘看板</TabsTrigger>
+            <TabsTrigger value="list" className="w-32">
+              历史列表
+            </TabsTrigger>
+            <TabsTrigger value="stats" className="w-32">
+              复盘看板
+            </TabsTrigger>
           </TabsList>
-          <TabsContent value="list" className="mt-4">
+          <TabsContent value="list" className="mt-4 flex flex-col gap-6">
               {stats ? (
-                <div className="grid gap-3 md:grid-cols-3">
-                  <Card>
-                    <CardHeader>
+                <div className="grid items-stretch gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
+                  <Card className="h-full shadow-none">
+                    <CardHeader className="pb-3">
                       <CardDescription>总记录数</CardDescription>
-                      <CardTitle className="text-2xl">{stats.total}</CardTitle>
+                      <CardTitle className="text-2xl tabular-nums">{stats.total}</CardTitle>
                     </CardHeader>
                   </Card>
-                  <Card>
-                    <CardHeader>
+                  <Card className="h-full shadow-none">
+                    <CardHeader className="pb-3">
                       <CardDescription>平均置信度</CardDescription>
-                      <CardTitle className="text-2xl">{stats.avgConfidence.toFixed(1)}</CardTitle>
+                      <CardTitle className="text-2xl tabular-nums">{stats.avgConfidence.toFixed(1)}</CardTitle>
                     </CardHeader>
                   </Card>
-                  <Card>
-                    <CardHeader>
+                  <Card className="h-full shadow-none">
+                    <CardHeader className="pb-3">
+                      <CardDescription>{historyCopy.avgExpectedReturn}</CardDescription>
+                      <CardTitle
+                        className={cn(
+                          "text-2xl tabular-nums",
+                          stats.avgExpectedReturnPct !== null && expectedReturnClassName(stats.avgExpectedReturnPct),
+                        )}
+                      >
+                        {stats.avgExpectedReturnPct !== null
+                          ? `${stats.avgExpectedReturnPct > 0 ? "+" : ""}${stats.avgExpectedReturnPct.toFixed(1)}%`
+                          : "—"}
+                      </CardTitle>
+                      {stats.returnSampleCount > 0 ? (
+                        <CardDescription className="text-xs leading-snug">
+                          基于 {stats.returnSampleCount} 条含测算字段的存档
+                        </CardDescription>
+                      ) : (
+                        <CardDescription className="text-xs leading-snug">旧存档无测算字段时显示为「—」</CardDescription>
+                      )}
+                    </CardHeader>
+                  </Card>
+                  <Card className="h-full shadow-none">
+                    <CardHeader className="pb-3">
                       <CardDescription>最近更新</CardDescription>
-                      <CardTitle className="text-base">{stats.latestTimestamp ? formatDate(stats.latestTimestamp) : "--"}</CardTitle>
+                      <CardTitle className="text-sm font-semibold leading-snug sm:text-base">
+                        {stats.latestTimestamp ? formatDate(stats.latestTimestamp) : "--"}
+                      </CardTitle>
                     </CardHeader>
                   </Card>
                 </div>
@@ -173,108 +187,27 @@ export default function HistoryPage() {
                 <Button render={<Link href="/app/analyze" />}>去分析</Button>
               </Empty>
             ) : (
-                <>
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>筛选与排序</CardTitle>
-                      <CardDescription>按标的、动作和风险等级快速定位历史条目。</CardDescription>
+                  <Card className="shadow-none">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">建议存档</CardTitle>
+                      <CardDescription>按生成时间倒序展示，与复盘统计使用同一批存档数据。</CardDescription>
                     </CardHeader>
-                    <CardContent className="flex flex-col gap-3">
-                      <div className="grid gap-3 lg:grid-cols-4">
-                        <Input
-                          value={keyword}
-                          onChange={(event) => setKeyword(event.target.value)}
-                          placeholder="搜索标的或标题"
-                          aria-label="搜索标的或标题"
-                        />
-                        <Select value={actionFilter} onValueChange={(value) => setActionFilter(value ?? "all")}>
-                          <SelectTrigger className="w-full">
-                            <SelectValue>{actionLabels[actionFilter] ?? "全部动作"}</SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              <SelectItem value="all">全部动作</SelectItem>
-                              <SelectItem value="wait">观望</SelectItem>
-                              <SelectItem value="trial">试仓</SelectItem>
-                              <SelectItem value="add">加仓</SelectItem>
-                              <SelectItem value="reduce">减仓</SelectItem>
-                              <SelectItem value="exit">离场</SelectItem>
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
-                        <Select value={riskFilter} onValueChange={(value) => setRiskFilter(value ?? "all")}>
-                          <SelectTrigger className="w-full">
-                            <SelectValue>{riskLabels[riskFilter] ?? "全部风险"}</SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              <SelectItem value="all">全部风险</SelectItem>
-                              <SelectItem value="low">低风险</SelectItem>
-                              <SelectItem value="medium">中风险</SelectItem>
-                              <SelectItem value="high">高风险</SelectItem>
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
-                        <Select value={sortMode} onValueChange={(value) => setSortMode((value as SortMode | null) ?? "latest")}>
-                          <SelectTrigger className="w-full">
-                            <SelectValue>{sortModeLabels[sortMode]}</SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              <SelectItem value="latest">按时间倒序</SelectItem>
-                              <SelectItem value="confidence_desc">按置信度从高到低</SelectItem>
-                              <SelectItem value="confidence_asc">按置信度从低到高</SelectItem>
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                        <p className="text-muted-foreground">当前显示 {filteredArchives.length} 条记录</p>
-                        {hasActiveFilters ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setKeyword("");
-                              setActionFilter("all");
-                              setRiskFilter("all");
-                              setSortMode("latest");
-                            }}
-                          >
-                            清空筛选
-                          </Button>
-                        ) : null}
-                      </div>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>建议存档</CardTitle>
-                      <CardDescription>条目默认按时间倒序，可在上方切换排序策略。</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {filteredArchives.length === 0 ? (
-                        <Empty className="border-0">
-                          <EmptyHeader>
-                            <EmptyTitle>未匹配到记录</EmptyTitle>
-                            <EmptyDescription>当前筛选条件下没有结果，请调整筛选项后重试。</EmptyDescription>
-                          </EmptyHeader>
-                        </Empty>
-                      ) : (
-                        <Table>
+                    <CardContent className="pt-0">
+                        <Table className="min-w-176">
                           <TableHeader>
                             <TableRow>
-                              <TableHead>标的</TableHead>
-                              <TableHead className="hidden xl:table-cell">时间</TableHead>
-                              <TableHead>动作</TableHead>
-                              <TableHead className="hidden lg:table-cell">周期</TableHead>
-                              <TableHead className="hidden lg:table-cell">风险</TableHead>
-                              <TableHead>置信度</TableHead>
-                              <TableHead className="text-right">操作</TableHead>
+                              <TableHead className="min-w-36">标的</TableHead>
+                              <TableHead className="hidden min-w-40 xl:table-cell">时间</TableHead>
+                              <TableHead className="whitespace-nowrap">动作</TableHead>
+                              <TableHead className="hidden whitespace-nowrap lg:table-cell">周期</TableHead>
+                              <TableHead className="hidden whitespace-nowrap lg:table-cell">风险</TableHead>
+                              <TableHead className="w-16 text-right tabular-nums">置信度</TableHead>
+                              <TableHead className="hidden w-26 text-right md:table-cell">预期盈利率</TableHead>
+                              <TableHead className="w-18 text-right">操作</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {filteredArchives.map((archive) => (
+                            {archives.map((archive) => (
                               <TableRow key={archive.id}>
                                 <TableCell className="font-medium">
                                   <div className="flex flex-col gap-1">
@@ -285,6 +218,16 @@ export default function HistoryPage() {
                                     <span className="text-muted-foreground text-xs xl:hidden">
                                       {formatDate(archive.created_at)}
                                     </span>
+                                    {(() => {
+                                      const fr = formatExpectedReturnPct(archive);
+                                      return fr ? (
+                                        <span className={cn("text-xs tabular-nums md:hidden", expectedReturnClassName(fr.pct))}>
+                                          预期 {fr.text}
+                                        </span>
+                                      ) : (
+                                        <span className="text-muted-foreground text-xs md:hidden">预期 —</span>
+                                      );
+                                    })()}
                                   </div>
                                 </TableCell>
                                 <TableCell className="text-muted-foreground hidden text-sm xl:table-cell">
@@ -299,7 +242,17 @@ export default function HistoryPage() {
                                 <TableCell className="hidden lg:table-cell">
                                   <Badge variant="secondary">{riskLabels[archive.risk_level] ?? archive.risk_level}</Badge>
                                 </TableCell>
-                                <TableCell>{archive.confidence}</TableCell>
+                                <TableCell className="text-right tabular-nums">{archive.confidence}</TableCell>
+                                <TableCell className="hidden text-right text-sm tabular-nums md:table-cell">
+                                  {(() => {
+                                    const fr = formatExpectedReturnPct(archive);
+                                    return fr ? (
+                                      <span className={cn("font-medium", expectedReturnClassName(fr.pct))}>{fr.text}</span>
+                                    ) : (
+                                      <span className="text-muted-foreground">—</span>
+                                    );
+                                  })()}
+                                </TableCell>
                                 <TableCell className="text-right">
                                   <Button size="sm" variant="ghost" render={<Link href={`/app/history/${archive.id}`} />}>
                                     详情
@@ -309,77 +262,162 @@ export default function HistoryPage() {
                             ))}
                           </TableBody>
                         </Table>
-                      )}
                     </CardContent>
                   </Card>
-                </>
             )}
           </TabsContent>
-          <TabsContent value="stats" className="mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>{historyCopy.recapTitle}</CardTitle>
-                <CardDescription>{historyCopy.recapDesc}</CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-4">
-                {!stats ? (
+          <TabsContent value="stats" className="mt-4 flex flex-col gap-6">
+            {!stats ? (
+              <Card className="shadow-none">
+                <CardHeader>
+                  <CardTitle>{historyCopy.recapTitle}</CardTitle>
+                  <CardDescription>{historyCopy.recapDesc}</CardDescription>
+                </CardHeader>
+                <CardContent>
                   <Empty className="min-h-[120px] border-0">
                     <EmptyHeader>
                       <EmptyTitle>{historyCopy.recapInsufficientTitle}</EmptyTitle>
                       <EmptyDescription>{historyCopy.recapInsufficientDesc}</EmptyDescription>
                     </EmptyHeader>
                   </Empty>
-                ) : (
-                  <>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <Card className="border-dashed">
-                        <CardHeader>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                <Card className="shadow-none">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">{historyCopy.recapSnapshotTitle}</CardTitle>
+                    <CardDescription>{historyCopy.recapSnapshotDesc}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4 pt-0">
+                    <p className="text-muted-foreground max-w-3xl text-sm leading-relaxed">{historyCopy.expectedReturnHelp}</p>
+                    <div className="grid items-stretch gap-3 sm:grid-cols-3 sm:gap-4">
+                      <Card className="border-dashed shadow-none">
+                        <CardHeader className="pb-2">
                           <CardDescription>{historyCopy.avgConfidence}</CardDescription>
-                          <CardTitle>{stats.avgConfidence.toFixed(1)}</CardTitle>
+                          <CardTitle className="text-2xl tabular-nums">{stats.avgConfidence.toFixed(1)}</CardTitle>
                         </CardHeader>
                       </Card>
-                      <Card className="border-dashed">
-                        <CardHeader>
+                      <Card className="border-dashed shadow-none">
+                        <CardHeader className="pb-2">
+                          <CardDescription>{historyCopy.avgExpectedReturn}</CardDescription>
+                          <CardTitle
+                            className={cn(
+                              "text-2xl tabular-nums",
+                              stats.avgExpectedReturnPct !== null && expectedReturnClassName(stats.avgExpectedReturnPct),
+                            )}
+                          >
+                            {stats.avgExpectedReturnPct !== null
+                              ? `${stats.avgExpectedReturnPct > 0 ? "+" : ""}${stats.avgExpectedReturnPct.toFixed(1)}%`
+                              : "—"}
+                          </CardTitle>
+                          {stats.returnSampleCount > 0 ? (
+                            <CardDescription className="text-xs">样本 {stats.returnSampleCount} 条</CardDescription>
+                          ) : null}
+                        </CardHeader>
+                      </Card>
+                      <Card className="border-dashed shadow-none">
+                        <CardHeader className="pb-2">
                           <CardDescription>总样本</CardDescription>
-                          <CardTitle>{stats.total}</CardTitle>
+                          <CardTitle className="text-2xl tabular-nums">{stats.total}</CardTitle>
                         </CardHeader>
                       </Card>
                     </div>
-                    <ChartContainer config={reviewChartConfig} className="h-[240px] w-full max-w-xl">
-                      <BarChart
-                        data={stats.actionChartData}
-                        accessibilityLayer
-                      >
-                        <CartesianGrid vertical={false} />
-                        <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} />
-                        <YAxis tickLine={false} axisLine={false} width={32} domain={[0, 100]} />
-                        <ChartTooltip content={<ChartTooltipContent />} />
-                        <Bar dataKey="value" fill="var(--color-value)" radius={4} />
-                      </BarChart>
-                    </ChartContainer>
-                    <div className="flex flex-col gap-2 text-sm">
-                      <span>{historyCopy.actionDistribution}</span>
-                      <span className="text-muted-foreground">用于观察当前动作偏好是否过于集中。</span>
+                  </CardContent>
+                </Card>
+
+                <Card className="shadow-none">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">{historyCopy.recapDistributionTitle}</CardTitle>
+                    <CardDescription>{historyCopy.recapDistributionDesc}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6 pt-0">
+                    <div className="flex flex-col gap-6 xl:grid xl:grid-cols-12 xl:items-start xl:gap-8">
+                      <div className="space-y-4 xl:col-span-7">
+                        <div>
+                          <p className="text-foreground text-sm font-medium">{historyCopy.actionDistribution}</p>
+                          <p className="text-muted-foreground mt-1 text-xs leading-relaxed">{historyCopy.actionDistributionHint}</p>
+                        </div>
+                        <ChartContainer config={reviewChartConfig} className="h-56 w-full sm:h-64">
+                          <BarChart
+                            data={stats.actionChartData}
+                            accessibilityLayer
+                            margin={{ left: 4, right: 8, top: 8, bottom: 4 }}
+                          >
+                            <CartesianGrid vertical={false} />
+                            <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} interval={0} />
+                            <YAxis tickLine={false} axisLine={false} width={36} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                            <ChartTooltip content={<ChartTooltipContent />} />
+                            <Bar dataKey="value" fill="var(--color-value)" radius={4} />
+                          </BarChart>
+                        </ChartContainer>
+                        <div className="rounded-xl border bg-muted/20 p-4">
+                          <p className="text-foreground text-sm font-medium">{historyCopy.recapRiskMixTitle}</p>
+                          <p className="text-muted-foreground mt-1 text-xs">{historyCopy.recapRiskMixHint}</p>
+                          <div className="mt-4 space-y-4">
+                            <div className="space-y-2 text-sm">
+                              <div className="flex items-baseline justify-between gap-2">
+                                <span className="text-muted-foreground">{historyCopy.riskTierLow}</span>
+                                <span className="tabular-nums text-foreground">{(stats.lowRiskRate * 100).toFixed(1)}%</span>
+                              </div>
+                              <Progress value={stats.lowRiskRate * 100} />
+                            </div>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex items-baseline justify-between gap-2">
+                                <span className="text-muted-foreground">{historyCopy.riskTierMedium}</span>
+                                <span className="tabular-nums text-foreground">{(stats.mediumRiskRate * 100).toFixed(1)}%</span>
+                              </div>
+                              <Progress value={stats.mediumRiskRate * 100} />
+                            </div>
+                            <div className="space-y-2 text-sm">
+                              <div className="flex items-baseline justify-between gap-2">
+                                <span className="text-muted-foreground">{historyCopy.riskTierHigh}</span>
+                                <span className="tabular-nums text-foreground">{(stats.highRiskRate * 100).toFixed(1)}%</span>
+                              </div>
+                              <Progress value={stats.highRiskRate * 100} />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="bg-muted/30 flex flex-col divide-y rounded-xl border xl:col-span-5">
+                        <div className="space-y-2 p-4 text-sm">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="font-medium">{historyCopy.gatePassRate}</span>
+                            <span className="text-muted-foreground tabular-nums">{(stats.gatePassRate * 100).toFixed(1)}%</span>
+                          </div>
+                          <Progress value={stats.gatePassRate * 100} />
+                        </div>
+                        {stats.positiveReturnShare !== null ? (
+                          <div className="space-y-2 p-4 text-sm">
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span className="font-medium">{historyCopy.positiveExpectedShare}</span>
+                              <span className="text-muted-foreground tabular-nums">
+                                {(stats.positiveReturnShare * 100).toFixed(1)}%
+                              </span>
+                            </div>
+                            <Progress value={stats.positiveReturnShare * 100} />
+                          </div>
+                        ) : null}
+                        <div className="space-y-2 p-4 text-sm">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="font-medium">{historyCopy.downgradedRate}</span>
+                            <span className="text-muted-foreground tabular-nums">{(stats.downgradedRate * 100).toFixed(1)}%</span>
+                          </div>
+                          <Progress value={stats.downgradedRate * 100} />
+                        </div>
+                        <div className="space-y-2 p-4 text-sm">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="font-medium">{historyCopy.weeklyShare}</span>
+                            <span className="text-muted-foreground tabular-nums">{(stats.weeklyShare * 100).toFixed(1)}%</span>
+                          </div>
+                          <Progress value={stats.weeklyShare * 100} />
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex flex-col gap-2 text-sm">
-                      <span>{historyCopy.downgradedRate}</span>
-                      <Progress value={stats.downgradedRate * 100} />
-                      <span className="text-muted-foreground">{(stats.downgradedRate * 100).toFixed(1)}%</span>
-                    </div>
-                    <div className="flex flex-col gap-2 text-sm">
-                      <span>{historyCopy.highRiskRate}</span>
-                      <Progress value={stats.highRiskRate * 100} />
-                      <span className="text-muted-foreground">{(stats.highRiskRate * 100).toFixed(1)}%</span>
-                    </div>
-                    <div className="flex flex-col gap-2 text-sm">
-                      <span>{historyCopy.weeklyShare}</span>
-                      <Progress value={stats.weeklyShare * 100} />
-                      <span className="text-muted-foreground">{(stats.weeklyShare * 100).toFixed(1)}%</span>
-                    </div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
+              </>
+            )}
           </TabsContent>
         </Tabs>
       )}

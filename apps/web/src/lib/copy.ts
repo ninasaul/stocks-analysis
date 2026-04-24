@@ -70,10 +70,26 @@ export const historyCopy = {
   recapInsufficientTitle: "数据不足",
   recapInsufficientDesc: "请先完成至少一次股票预测，再查看复盘统计。",
   avgConfidence: "平均置信度",
+  avgExpectedReturn: "平均预期盈利率",
+  expectedReturnHelp:
+    "以报告生成时的参考价与模型目标价为基准测算的相对变动百分比；仅供复盘对照，不代表真实成交或已实现损益。",
+  positiveExpectedShare: "正预期盈利率占比",
   downgradedRate: "门控降级占比",
+  gatePassRate: "门控通过率",
   highRiskRate: "高风险占比",
   weeklyShare: "周线分析占比",
   actionDistribution: "动作分布",
+  actionDistributionHint:
+    "各动作条数占全部存档的百分比；若某一柱过高，说明结论类型过于集中。",
+  recapSnapshotTitle: "数据摘要",
+  recapSnapshotDesc: "汇总样本规模、置信与预期收益测算，便于快速把握整体倾向。",
+  recapDistributionTitle: "动作与分布",
+  recapDistributionDesc: "柱状图为各动作条数占比；右侧为门控、风险与周期维度的结构指标。",
+  recapRiskMixTitle: "风险等级构成",
+  recapRiskMixHint: "三条合计为 100%，对应各条存档的风险标签。",
+  riskTierLow: "低风险",
+  riskTierMedium: "中风险",
+  riskTierHigh: "高风险",
 } as const;
 
 export const subscriptionCopy = {

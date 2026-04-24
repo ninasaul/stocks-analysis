@@ -13,6 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { AppPageLayout } from "@/components/features/app-page-layout";
 import { PageLoadingState } from "@/components/features/page-state";
+import { cn } from "@/lib/utils";
 
 const actionLabels: Record<string, string> = {
   wait: "观望",
@@ -35,6 +36,11 @@ const timeframeLabels: Record<string, string> = {
 
 function formatDate(timestamp: number) {
   return new Date(timestamp).toLocaleString();
+}
+
+function formatPricePlain(n: number) {
+  if (!Number.isFinite(n)) return "—";
+  return n.toFixed(2);
 }
 
 export default function HistoryDetailPage() {
@@ -87,22 +93,40 @@ export default function HistoryDetailPage() {
           <Button render={<Link href="/app/history" />}>返回列表</Button>
         </Empty>
       ) : (
-        <>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">
-              {entry.market}.{entry.symbol}
-            </Badge>
-            <Badge variant="secondary">{timeframeLabels[entry.timeframe] ?? entry.timeframe}</Badge>
-            <Badge variant="secondary">{riskLabels[entry.risk_level] ?? entry.risk_level}</Badge>
-            <Badge variant="outline">置信 {entry.confidence}</Badge>
-            <span className="text-muted-foreground text-xs">数据版本 {entry.data_version}</span>
+        <div className="flex flex-col gap-5">
+          <div className="bg-muted/25 rounded-xl border px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="font-mono text-xs sm:text-sm">
+                {entry.market}.{entry.symbol}
+              </Badge>
+              <Badge variant="secondary">{timeframeLabels[entry.timeframe] ?? entry.timeframe}</Badge>
+              <Badge variant="secondary">{riskLabels[entry.risk_level] ?? entry.risk_level}</Badge>
+              <Badge variant="outline" className="tabular-nums">
+                置信 {entry.confidence}
+              </Badge>
+              {entry.plan_metrics ? (
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "tabular-nums",
+                    entry.plan_metrics.expected_return_pct > 0 && "border-emerald-500/50 text-emerald-700 dark:text-emerald-400",
+                    entry.plan_metrics.expected_return_pct < 0 && "border-red-500/50 text-red-700 dark:text-red-400",
+                  )}
+                >
+                  预期盈利率{" "}
+                  {entry.plan_metrics.expected_return_pct > 0 ? "+" : ""}
+                  {entry.plan_metrics.expected_return_pct.toFixed(1)}%
+                </Badge>
+              ) : null}
+            </div>
+            <p className="text-muted-foreground mt-2 text-xs">数据版本 {entry.data_version}</p>
           </div>
-          <Card>
-            <CardHeader>
-              <CardTitle>{entry.title}</CardTitle>
+          <Card className="shadow-none">
+            <CardHeader className="space-y-1 pb-3">
+              <CardTitle className="text-lg leading-snug sm:text-xl">{entry.title}</CardTitle>
               <CardDescription>{formatDate(entry.created_at)}</CardDescription>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4 text-sm">
+            <CardContent className="flex flex-col gap-5 text-sm">
               <div className="flex flex-wrap gap-2">
                 <Badge>{actionLabels[entry.action] ?? entry.action}</Badge>
                 <Badge variant="outline">风险层级 {riskLabels[entry.risk_level] ?? entry.risk_level}</Badge>
@@ -119,13 +143,41 @@ export default function HistoryDetailPage() {
               ) : null}
               <Separator />
               <section className="flex flex-col gap-2">
-                <h2 className="font-medium">结论说明</h2>
-                <p className="text-muted-foreground">{entry.action_reason}</p>
+                <h2 className="text-foreground text-sm font-semibold tracking-tight">结论说明</h2>
+                <p className="text-muted-foreground leading-relaxed">{entry.action_reason}</p>
               </section>
               <Separator />
-              <section className="flex flex-col gap-2">
-                <h2 className="font-medium">执行计划</h2>
-                <dl className="text-muted-foreground grid gap-2 sm:grid-cols-2">
+              <section className="flex flex-col gap-3">
+                <h2 className="text-foreground text-sm font-semibold tracking-tight">执行计划</h2>
+                {entry.plan_metrics ? (
+                  <div className="bg-muted/35 rounded-lg border p-4 text-sm">
+                    <p className="text-muted-foreground text-xs leading-relaxed">测算基准（与列表「预期盈利率」同源）</p>
+                    <dl className="mt-3 grid gap-4 sm:grid-cols-3">
+                      <div className="space-y-1">
+                        <dt className="text-muted-foreground text-xs font-medium">参考价</dt>
+                        <dd className="text-foreground tabular-nums text-base font-medium">{formatPricePlain(entry.plan_metrics.reference_price)}</dd>
+                      </div>
+                      <div className="space-y-1">
+                        <dt className="text-muted-foreground text-xs font-medium">目标价</dt>
+                        <dd className="text-foreground tabular-nums text-base font-medium">{formatPricePlain(entry.plan_metrics.target_price)}</dd>
+                      </div>
+                      <div className="space-y-1">
+                        <dt className="text-muted-foreground text-xs font-medium">预期盈利率</dt>
+                        <dd
+                          className={cn(
+                            "tabular-nums text-base font-semibold",
+                            entry.plan_metrics.expected_return_pct > 0 && "text-emerald-600 dark:text-emerald-400",
+                            entry.plan_metrics.expected_return_pct < 0 && "text-red-600 dark:text-red-400",
+                          )}
+                        >
+                          {entry.plan_metrics.expected_return_pct > 0 ? "+" : ""}
+                          {entry.plan_metrics.expected_return_pct.toFixed(1)}%
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+                ) : null}
+                <dl className="text-muted-foreground grid gap-x-4 gap-y-4 sm:grid-cols-2">
                   <div>
                     <dt className="text-foreground text-xs">关注区间</dt>
                     <dd>{entry.plan.focus_range}</dd>
@@ -153,9 +205,9 @@ export default function HistoryDetailPage() {
                 </dl>
               </section>
               <Separator />
-              <section className="grid gap-4 lg:grid-cols-3">
-                <div className="flex flex-col gap-2">
-                  <h2 className="font-medium">正向证据</h2>
+              <section className="grid gap-6 lg:grid-cols-3">
+                <div className="flex min-w-0 flex-col gap-2">
+                  <h2 className="text-foreground text-sm font-semibold tracking-tight">正向证据</h2>
                   {entry.evidence_positive.length === 0 ? (
                     <p className="text-muted-foreground text-sm">未记录正向证据。</p>
                   ) : (
@@ -166,8 +218,8 @@ export default function HistoryDetailPage() {
                     </ul>
                   )}
                 </div>
-                <div className="flex flex-col gap-2">
-                  <h2 className="font-medium">负向证据</h2>
+                <div className="flex min-w-0 flex-col gap-2">
+                  <h2 className="text-foreground text-sm font-semibold tracking-tight">负向证据</h2>
                   {entry.evidence_negative.length === 0 ? (
                     <p className="text-muted-foreground text-sm">未记录负向证据。</p>
                   ) : (
@@ -178,8 +230,8 @@ export default function HistoryDetailPage() {
                     </ul>
                   )}
                 </div>
-                <div className="flex flex-col gap-2">
-                  <h2 className="font-medium">冲突与分歧</h2>
+                <div className="flex min-w-0 flex-col gap-2">
+                  <h2 className="text-foreground text-sm font-semibold tracking-tight">冲突与分歧</h2>
                   {(entry.evidence_conflicts?.length ?? 0) === 0 ? (
                     <p className="text-muted-foreground text-sm">当前无显著冲突信号。</p>
                   ) : (
@@ -193,7 +245,7 @@ export default function HistoryDetailPage() {
               </section>
               <Separator />
               <section className="flex flex-col gap-2">
-                <h2 className="font-medium">复盘检查清单</h2>
+                <h2 className="text-foreground text-sm font-semibold tracking-tight">复盘检查清单</h2>
                 {entry.reminders.length === 0 ? (
                   <p className="text-muted-foreground text-sm">当前记录未包含复盘提醒。</p>
                 ) : (
@@ -206,7 +258,7 @@ export default function HistoryDetailPage() {
               </section>
             </CardContent>
           </Card>
-        </>
+        </div>
       )}
     </AppPageLayout>
   );

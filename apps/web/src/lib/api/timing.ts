@@ -1,6 +1,6 @@
 import type { AnalysisInput, TimingReport } from "@/lib/contracts/domain";
 import { timingReportSchema } from "@/lib/contracts/domain";
-import { getPublicApiBaseUrl } from "@/lib/env";
+import { getPublicApiBaseUrl, isMockFlowEnabled } from "@/lib/env";
 import { buildSyntheticTimingReport } from "@/lib/synthetic/timing-report";
 import { useAuthStore } from "@/stores/use-auth-store";
 
@@ -63,6 +63,15 @@ function extractNumber(value: unknown, fallback = 0): number {
   return fallback;
 }
 
+function buildPlanMetrics(referencePrice: number, targetPrice: number) {
+  if (!(referencePrice > 0) || !Number.isFinite(targetPrice)) return undefined;
+  return {
+    reference_price: referencePrice,
+    target_price: targetPrice,
+    expected_return_pct: ((targetPrice - referencePrice) / referencePrice) * 100,
+  };
+}
+
 function mapAnalyzeToTimingReport(input: AnalysisInput, payload: ApiAnalyzeResponse): TimingReport {
   const timing = payload.timing ?? {};
   const debate = payload.debate ?? {};
@@ -85,6 +94,8 @@ function mapAnalyzeToTimingReport(input: AnalysisInput, payload: ApiAnalyzeRespo
   const focusHigh = signal === "SELL" ? sellHigh : buyHigh;
   const riskPrice = signal === "SELL" ? sellHigh : buyLow;
   const targetPrice = signal === "SELL" ? sellLow : sellHigh;
+  const referenceForMetrics = currentPrice > 0 ? currentPrice : (focusLow + focusHigh) / 2;
+  const plan_metrics = buildPlanMetrics(referenceForMetrics, targetPrice);
 
   const bullArguments = Array.isArray(debate.bull?.arguments) ? debate.bull.arguments : [];
   const bearRebuttals = Array.isArray(debate.bear?.rebuttals) ? debate.bear.rebuttals : [];
@@ -135,30 +146,37 @@ function mapAnalyzeToTimingReport(input: AnalysisInput, payload: ApiAnalyzeRespo
     reminders: ["仅供研究参考，不构成投资建议。", "本产品不提供下单、委托或任何交易执行能力。"],
     data_version: "api-v1",
     created_at: Date.now(),
+    plan_metrics,
   });
+}
+
+async function syntheticTimingReportWithDelay(input: AnalysisInput): Promise<TimingReport> {
+  const delayMs = 600 + (hashSymbolKey(input.symbol) % 800);
+  await new Promise((r) => setTimeout(r, delayMs));
+  return buildSyntheticTimingReport(input);
 }
 
 export async function requestTimingReport(input: AnalysisInput): Promise<TimingReport> {
   const state = useAuthStore.getState();
-  if (state.session === "user" && state.accessToken) {
-    const url = new URL("/api/analyze", getPublicApiBaseUrl());
-    url.searchParams.set("ticker", input.symbol);
-    url.searchParams.set("mode", "full");
-
-    const response = await state.authenticatedFetch(url.toString(), {
-      method: "GET",
-    });
-    if (!response.ok) {
-      throw new Error(`请求失败（${response.status}）`);
-    }
-    const payload = (await response.json()) as ApiAnalyzeResponse;
-    if (typeof payload.error === "string" && payload.error.trim().length > 0) {
-      throw new Error(payload.error);
-    }
-    return mapAnalyzeToTimingReport(input, payload);
+  const canCallLiveAnalyze = state.session === "user" && Boolean(state.accessToken);
+  // 与额度 mock 一致：mock 流程下择时报告仍走本地合成数据，暂不调用后端 /api/analyze。
+  if (!canCallLiveAnalyze || isMockFlowEnabled()) {
+    return syntheticTimingReportWithDelay(input);
   }
 
-  const delayMs = 600 + (hashSymbolKey(input.symbol) % 800);
-  await new Promise((r) => setTimeout(r, delayMs));
-  return buildSyntheticTimingReport(input);
+  const url = new URL("/api/analyze", getPublicApiBaseUrl());
+  url.searchParams.set("ticker", input.symbol);
+  url.searchParams.set("mode", "full");
+
+  const response = await state.authenticatedFetch(url.toString(), {
+    method: "GET",
+  });
+  if (!response.ok) {
+    throw new Error(`请求失败（${response.status}）`);
+  }
+  const payload = (await response.json()) as ApiAnalyzeResponse;
+  if (typeof payload.error === "string" && payload.error.trim().length > 0) {
+    throw new Error(payload.error);
+  }
+  return mapAnalyzeToTimingReport(input, payload);
 }

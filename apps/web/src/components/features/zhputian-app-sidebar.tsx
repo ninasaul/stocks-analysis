@@ -10,6 +10,7 @@ import {
   MessageCircleIcon,
   SettingsIcon,
   StarIcon,
+  WalletIcon,
 } from "lucide-react";
 import {
   Sidebar,
@@ -29,6 +30,7 @@ const nav = [
   { href: "/app/analyze", label: "股票预测", icon: ChartLineIcon },
   { href: "/app/pick", label: "选股对话", icon: MessageCircleIcon },
   { href: "/app/watchlist", label: "自选", icon: StarIcon },
+  { href: "/app/paper-trading", label: "模拟交易", icon: WalletIcon },
   { href: "/app/history", label: "历史与复盘", icon: HistoryIcon },
   { href: "/app/account", label: "账号", icon: CircleUserIcon },
 ] as const;

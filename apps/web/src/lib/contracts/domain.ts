@@ -79,6 +79,15 @@ export const timingPlanSchema = z.object({
 });
 export type TimingPlan = z.infer<typeof timingPlanSchema>;
 
+/** Numeric snapshot for history / recap; optional for older persisted archives. */
+export const planMetricsSchema = z.object({
+  reference_price: z.number(),
+  target_price: z.number(),
+  /** Signed percent: (target - reference) / reference * 100. */
+  expected_return_pct: z.number(),
+});
+export type PlanMetrics = z.infer<typeof planMetricsSchema>;
+
 export const timingReportSchema = z.object({
   id: z.string(),
   symbol: z.string(),
@@ -100,6 +109,7 @@ export const timingReportSchema = z.object({
   reminders: z.array(z.string()),
   data_version: z.string(),
   created_at: z.number(),
+  plan_metrics: planMetricsSchema.optional(),
 });
 export type TimingReport = z.infer<typeof timingReportSchema>;
 
