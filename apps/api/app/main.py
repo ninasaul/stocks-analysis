@@ -28,6 +28,7 @@ from .core.scheduler import scheduler_manager
 from .core.auth_routes import router as auth_router
 from .core.wechat_routes import router as wechat_router
 from .core.auth import get_current_user
+from .backtrader import backtrader_router
 # 添加SSE端点用于流式响应
 from fastapi.responses import StreamingResponse
 
@@ -62,6 +63,7 @@ async def shutdown_event():
 app.include_router(auth_router)
 app.include_router(wechat_router)
 app.include_router(user_management_router)
+app.include_router(backtrader_router)
 
 # 全局实例
 timer_agent = TimerAgent()
