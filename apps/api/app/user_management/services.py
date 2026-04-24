@@ -1744,3 +1744,62 @@ class WechatUserService:
         except Exception as e:
             logger.error(f"微信小程序登录创建用户失败: {e}")
             return None, False, f"微信小程序登录创建用户失败: {e}"
+
+
+class TokenBlacklistService:
+    """令牌黑名单服务"""
+
+    @staticmethod
+    def blacklist_token(token: str, user_id: int = 0, token_type: str = 'access', expires_at: datetime = None) -> bool:
+        """
+        将令牌加入黑名单
+
+        Args:
+            token: 要加入黑名单的令牌
+            user_id: 用户ID
+            token_type: 令牌类型 (access 或 refresh)
+            expires_at: 令牌过期时间
+
+        Returns:
+            是否成功加入黑名单
+        """
+        try:
+            if expires_at is None:
+                # 默认过期时间为7天
+                expires_at = datetime.now() + timedelta(days=7)
+            
+            query = """
+                INSERT INTO token_blacklist (token, token_type, user_id, expires_at, added_at)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (token) DO NOTHING
+            """
+            params = (token, token_type, user_id, expires_at, datetime.now())
+            execute_insert(query, params)
+            logger.info(f"令牌已加入黑名单: {token[:20]}...")
+            return True
+        except Exception as e:
+            logger.error(f"将令牌加入黑名单失败: {e}")
+            return False
+
+    @staticmethod
+    def is_token_blacklisted(token: str) -> bool:
+        """
+        检查令牌是否在黑名单中
+
+        Args:
+            token: 要检查的令牌
+
+        Returns:
+            是否在黑名单中
+        """
+        try:
+            query = """
+                SELECT COUNT(*) FROM token_blacklist
+                WHERE token = %s
+            """
+            result = execute_query(query, (token,))
+            count = result[0][0]
+            return count > 0
+        except Exception as e:
+            logger.error(f"检查令牌黑名单失败: {e}")
+            return False

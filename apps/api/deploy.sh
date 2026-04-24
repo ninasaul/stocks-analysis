@@ -5,7 +5,7 @@ IMAGE_NAME="stock-end-app"
 CONTAINER_NAME="stock-end"
 HOST_PORT="8011"
 CONTAINER_PORT="8011"
-DOCKERFILE="stock-end.dockerfile"
+DOCKERFILE="$HOME/stocks-analysis/apps/api/Dockerfile"
 # 本地代码目录挂载到容器
 LOCAL_CODE_DIR="$HOME/stocks-analysis"
 
@@ -30,6 +30,8 @@ docker run -d \
   -p $HOST_PORT:$CONTAINER_PORT \
   --restart always \
   -v $LOCAL_CODE_DIR:/app \
+  -v /etc/localtime:/etc/localtime:ro \
+  -v /etc/timezone:/etc/timezone:ro \
   $IMAGE_NAME
 
 echo -e "\n===== 部署完成！====="
@@ -37,5 +39,7 @@ echo -e "容器名称：$CONTAINER_NAME"
 echo -e "访问端口：$HOST_PORT"
 echo -e "本地代码：$LOCAL_CODE_DIR <-> 容器 /app"
 echo -e "进入容器命令：docker exec -it $CONTAINER_NAME bash"
+echo -e "启动服务命令：bash run.sh"
+echo -e "查看日志命令：docker logs -f $CONTAINER_NAME"
 
 docker ps --filter "name=$CONTAINER_NAME"
