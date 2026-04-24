@@ -67,11 +67,20 @@ class TimingScorer:
             scores["composite"] = round(composite, 4)
             scores["signal"] = self._composite_to_signal(composite)
             
+            # 根据布林带位置计算趋势
+            bollinger_pos = scores.get("bollinger_position", 0)
+            if bollinger_pos > 0.5:
+                scores["bollinger_status"] = "超卖"
+            elif bollinger_pos < -0.5:
+                scores["bollinger_status"] = "超买"
+            else:
+                scores["bollinger_status"] = "中性"
+            
             # 只有当信号不是 HOLD 时才添加买卖区间建议
             if scores["signal"] != "HOLD":
                 scores["price_range"] = self._calculate_price_range(scores["signal"])
 
-            logger.info(f"技术指标计算完成，信号: {scores['signal']}, 综合得分: {scores['composite']}")
+            logger.info(f"技术指标计算完成，信号: {scores['signal']}, 综合得分: {scores['composite']}, 布林带状态: {scores['bollinger_status']}")
             return scores
         except Exception as e:
             logger.error(f"计算技术指标失败: {e}")
@@ -142,14 +151,24 @@ class TimingScorer:
         # 根据信号添加相应的区间
         if signal == "BUY":
             # 计算买点
-            # 最佳买点：布林带下轨附近
-            best_buy_price = round(lower, 2)
-            # 次优买点：布林带下轨与中轨之间的中间位置
-            secondary_buy_price = round((lower + middle) / 2, 2)
-            
-            # 确定买入区间
-            buy_low = round(min(best_buy_price, secondary_buy_price) * 0.99, 2)
-            buy_high = round(max(best_buy_price, secondary_buy_price) * 1.01, 2)
+            if current_price <= lower:
+                # 股价跌破下轨
+                best_buy_price = round(current_price * 0.98, 2)  # 最佳买点：股价下方2%
+                secondary_buy_price = round(lower, 2)  # 次优买点：下轨
+                buy_low = round(current_price * 0.97, 2)  # 买入区间：股价下方3%
+                buy_high = round(current_price * 1.03, 2)  # 买入区间：股价上方3%
+            elif current_price <= middle:
+                # 股价在下轨和中轨之间
+                best_buy_price = round(current_price * 0.98, 2)  # 最佳买点：股价下方2%
+                secondary_buy_price = round(middle, 2)  # 次优买点：中轨
+                buy_low = round(lower, 2)  # 买入区间：下轨
+                buy_high = round(middle, 2)  # 买入区间：中轨
+            else:
+                # 股价在中轨和上轨之间
+                best_buy_price = round(middle, 2)  # 最佳买点：中轨
+                secondary_buy_price = round(current_price * 1.02, 2)  # 次优买点：股价上方2%
+                buy_low = round(middle, 2)  # 买入区间：中轨
+                buy_high = round(upper, 2)  # 买入区间：上轨
             
             # 生成买入建议
             suggestion = ""
@@ -169,27 +188,51 @@ class TimingScorer:
                 # 股价在中轨上方
                 suggestion = "股价在布林带中轨上方，建议等待回调至次优买点附近买入"
             
+            # 根据股价位置计算止损止盈
+            if current_price <= lower:
+                # 股价跌破下轨
+                buy_stop_loss = round(current_price * 0.95, 2)  # 止损：当前股价下方5%
+                buy_take_profit = round(current_price * 0.95, 2)  # 止盈：当前股价下方5%
+            elif current_price <= middle:
+                # 股价在下轨和中轨之间
+                buy_stop_loss = round(lower * 0.95, 2)  # 止损：下轨下方5%
+                buy_take_profit = round(lower, 2)  # 止盈：下轨
+            else:
+                # 股价在中轨和上轨之间
+                buy_stop_loss = round(middle * 0.95, 2)  # 止损：中轨下方5%
+                buy_take_profit = round(middle, 2)  # 止盈：中轨
+            
             buy_range = {
                 "best_buy_price": best_buy_price,
                 "secondary_buy_price": secondary_buy_price,
                 "low": buy_low,
                 "high": buy_high,
                 "suggestion": suggestion,
-                "stop_loss": round(lower * 0.95, 2),  # 止损：下轨下方5%
-                "take_profit": round(middle * 1.1, 2)  # 止盈：中轨上方10%
+                "stop_loss": buy_stop_loss,
+                "take_profit": buy_take_profit
             }
             price_range["buy_range"] = buy_range
             logger.debug(f"买入区间计算结果 - 最佳买入价: {best_buy_price}, 次优买入价: {secondary_buy_price}, 止损位: {buy_range['stop_loss']}, 止盈位: {buy_range['take_profit']}")
         elif signal == "SELL":
             # 计算卖点
-            # 最佳卖点：布林带上轨附近
-            best_sell_price = round(upper, 2)
-            # 次优卖点：布林带上轨与中轨之间的中间位置
-            secondary_sell_price = round((upper + middle) / 2, 2)
-            
-            # 确定卖出区间
-            sell_low = round(min(best_sell_price, secondary_sell_price) * 0.99, 2)
-            sell_high = round(max(best_sell_price, secondary_sell_price) * 1.01, 2)
+            if current_price <= lower:
+                # 股价跌破下轨
+                best_sell_price = round(lower, 2)  # 最佳卖点：下轨
+                secondary_sell_price = round(current_price * 0.98, 2)  # 次优卖点：股价下方2%
+                sell_low = round(current_price * 0.97, 2)  # 卖出区间：股价下方3%
+                sell_high = round(current_price * 1.03, 2)  # 卖出区间：股价上方3%
+            elif current_price <= middle:
+                # 股价在下轨和中轨之间
+                best_sell_price = round(middle, 2)  # 最佳卖点：中轨
+                secondary_sell_price = round(current_price * 0.98, 2)  # 次优卖点：股价下方2%
+                sell_low = round(lower, 2)  # 卖出区间：下轨
+                sell_high = round(middle, 2)  # 卖出区间：中轨
+            else:
+                # 股价在中轨和上轨之间
+                best_sell_price = round(upper, 2)  # 最佳卖点：上轨
+                secondary_sell_price = round(current_price * 0.98, 2)  # 次优卖点：股价下方2%
+                sell_low = round(middle, 2)  # 卖出区间：中轨
+                sell_high = round(upper, 2)  # 卖出区间：上轨
             
             # 生成卖出建议
             suggestion = ""
@@ -205,9 +248,26 @@ class TimingScorer:
                     suggestion = "股价在布林带中轨上方，MA5死叉MA10，次优卖点出现，建议分批卖出"
                 else:
                     suggestion = "股价在布林带中轨上方，建议在次优卖点附近分批卖出"
-            else:
-                # 股价在中轨下方
+            elif current_price >= lower:
+                # 股价在下轨和中轨之间
                 suggestion = "股价在布林带中轨下方，建议等待反弹至次优卖点附近卖出"
+            else:
+                # 股价跌破下轨
+                suggestion = "股价跌破布林带下轨，建议等待反弹至次优卖点附近卖出"
+            
+            # 根据股价位置计算止损止盈
+            if current_price <= lower:
+                # 股价跌破下轨
+                sell_stop_loss = round(current_price * 1.05, 2)  # 止损：当前股价上方5%
+                sell_take_profit = round(current_price * 1.05, 2)  # 止盈：当前股价上方5%
+            elif current_price <= middle:
+                # 股价在下轨和中轨之间
+                sell_stop_loss = round(lower * 1.05, 2)  # 止损：下轨上方5%
+                sell_take_profit = round(lower, 2)  # 止盈：下轨
+            else:
+                # 股价在中轨和上轨之间
+                sell_stop_loss = round(middle * 1.05, 2)  # 止损：中轨上方5%
+                sell_take_profit = round(middle, 2)  # 止盈：中轨
             
             sell_range = {
                 "best_sell_price": best_sell_price,
@@ -215,8 +275,8 @@ class TimingScorer:
                 "low": sell_low,
                 "high": sell_high,
                 "suggestion": suggestion,
-                "stop_loss": round(upper * 1.05, 2),  # 止损：上轨上方5%
-                "take_profit": round(middle * 0.9, 2)  # 止盈：中轨下方10%
+                "stop_loss": sell_stop_loss,
+                "take_profit": sell_take_profit
             }
             price_range["sell_range"] = sell_range
             logger.debug(f"卖出区间计算结果 - 最佳卖出价: {best_sell_price}, 次优卖出价: {secondary_sell_price}, 止损位: {sell_range['stop_loss']}, 止盈位: {sell_range['take_profit']}")
@@ -267,22 +327,22 @@ class TimingScorer:
         
         return float(normalized_deviation)
 
-    def _new_high_low_ratio(self, window: int = 20) -> float:
+    def _new_high_low_ratio(self, window: int = 5) -> float:
         """
         指标 2：N 日创新高天数占比
 
-        近 20 日中收盘价创近 60 日新高的天数占比
+        近 5 日中收盘价创近 30 日新高的天数占比
         占比高 → 趋势强 → 看多
         """
-        if len(self.closes) < 60:
+        if len(self.closes) < 30:
             return 0.0
 
         recent = self.closes[-window:]
         count = 0
         for i in range(len(recent)):
             idx = len(self.closes) - window + i
-            past_60 = self.closes[max(0, idx - 60):idx]
-            if len(past_60) > 0 and recent[i] >= max(past_60):
+            past_30 = self.closes[max(0, idx - 30):idx]
+            if len(past_30) > 0 and recent[i] >= max(past_30):
                 count += 1
 
         ratio = count / window
@@ -507,9 +567,9 @@ class TimingScorer:
     @staticmethod
     def _composite_to_signal(score: float) -> str:
         """综合得分转为交易信号"""
-        if score >= 0.2:
+        if score >= 0.15:
             return "BUY"
-        elif score <= -0.2:
+        elif score <= -0.15:
             return "SELL"
         else:
             return "HOLD"

@@ -329,10 +329,10 @@ async def analyze_stock(
             "market": "A股"
         },
         "ratings": {
-            "overall": score,
-            "growth": fundamental_result.get("score", 0),
-            "technical": timing_result.get("composite", 0),
-            "trend": timing_result.get("trend", "中性")
+            "overall": round((score + 1) * 50, 2),  # 转换为0-100分制
+            "growth": round((fundamental_result.get("score", 0) - 1) * (100/9), 2),  # 转换为0-100分制
+            "technical": round((timing_result.get("composite", 0) + 1) * 50, 2),  # 转换为0-100分制
+            "bollinger_status": timing_result.get("bollinger_status", "中性")
         },
         "strategy_position": {
             "best_buy_price": price_range.get("buy_range", {}).get("best_buy_price") if signal == "BUY" and not price_range_error else None,
@@ -677,7 +677,9 @@ async def dialogue_sync(
     logger.info(f"用户 {current_user.id} ({current_user.username}) 发送同步对话请求: {message[:50]}..., session_id: {session_id}")
     
     # 获取 LLM 响应（对话历史已在 DialogueManager 中存储）
-    response = await dialogue_manager.get_response(message, None, session_id)
+    result = await dialogue_manager.get_response(message, None, session_id)
+    response = result.get("response", "")
+    extension_questions = result.get("extension_questions", [])
     
     # 获取对话历史
     history = dialogue_manager.get_history(session_id)
@@ -687,6 +689,7 @@ async def dialogue_sync(
     
     return {
         "response": response,
+        "extension_questions": extension_questions,
         "session_id": session_id or dialogue_manager.current_session_id,
         "history": history,
         "criteria": criteria
@@ -755,9 +758,9 @@ async def dialogue_stream(
     logger.info(f"用户 {current_user.id} ({current_user.username}) 发送流式对话请求: {message[:50]}..., session_id: {session_id}")
     
     async def stream_generator():
-        async for chunk in dialogue_manager.get_streaming_response(message, None, session_id):
+        async for item in dialogue_manager.get_streaming_response(message, None, session_id):
             # 以SSE格式发送数据
-            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+            yield f"data: {json.dumps({'chunk': item.get('chunk', ''), 'extension_questions': item.get('extension_questions', [])})}\n\n"
     
     return StreamingResponse(
         stream_generator(),

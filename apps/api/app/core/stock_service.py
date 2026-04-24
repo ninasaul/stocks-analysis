@@ -110,8 +110,6 @@ class StockService:
             self.stock_code_name_map = dict(zip(stock_info_a_code_name_df["code"], stock_info_a_code_name_df["name"]))
             # 保存到文件
             stock_info_a_code_name_df.to_csv(csv_file, index=False)
-            if '000858' in self.stock_code_name_map:
-                logger.debug(f"网络获取数据后，self.stock_code_name_map['000858'] = {self.stock_code_name_map['000858']}")
             logger.info(f"从网络获取股票数据并保存到文件，共 {len(self.stock_code_name_map)} 条")
         except Exception as e:
             logger.error(f"从网络获取股票数据失败: {e}")

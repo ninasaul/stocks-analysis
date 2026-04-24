@@ -168,10 +168,17 @@ class DialogueManager:
         prompt_parts.append("1. [建议内容]\n")
         prompt_parts.append("2. [建议内容]\n")
         prompt_parts.append("3. [建议内容]\n")
+        prompt_parts.append("6. 在回答结尾提供3-5个关于此类问题的延伸问题，格式如下：\n")
+        prompt_parts.append("【延伸问题】\n")
+        prompt_parts.append("1. [问题1]\n")
+        prompt_parts.append("2. [问题2]\n")
+        prompt_parts.append("3. [问题3]\n")
+        prompt_parts.append("4. [问题4]\n")
+        prompt_parts.append("5. [问题5]\n")
 
         return "".join(prompt_parts)
 
-    async def get_response(self, user_message: str, context: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None) -> str:
+    async def get_response(self, user_message: str, context: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None) -> Dict[str, Any]:
         """获取 LLM 响应"""
         self.add_user_message(user_message, session_id)
 
@@ -188,12 +195,34 @@ class DialogueManager:
             response = await llm_client.chat(prompt)
             self.add_assistant_message(response)
             logger.info(f"LLM 响应成功")
-            return response
+            
+            # 提取延伸问题
+            extension_questions = self._extract_extension_questions(response)
+            
+            return {
+                "response": response,
+                "extension_questions": extension_questions
+            }
         except Exception as e:
             logger.error(f"LLM 调用失败: {e}")
-            return "抱歉，我现在无法回答您的问题，请稍后再试。"
+            return {
+                "response": "抱歉，我现在无法回答您的问题，请稍后再试。",
+                "extension_questions": []
+            }
+            
+    def _extract_extension_questions(self, response: str) -> List[str]:
+        """从响应中提取延伸问题"""
+        import re
+        # 匹配【延伸问题】部分
+        match = re.search(r'【延伸问题】\n(.*?)(?=\n\n|$)', response, re.DOTALL)
+        if match:
+            questions_text = match.group(1)
+            # 提取每个问题
+            questions = re.findall(r'\d+\.\s*(.+?)\n', questions_text)
+            return questions[:5]  # 最多返回5个问题
+        return []
 
-    async def get_streaming_response(self, user_message: str, context: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None) -> AsyncGenerator[str, None]:
+    async def get_streaming_response(self, user_message: str, context: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None) -> AsyncGenerator[Dict[str, Any], None]:
         """获取 LLM 流式响应"""
         self.add_user_message(user_message, session_id)
 
@@ -209,26 +238,31 @@ class DialogueManager:
             llm_client = get_llm_client()
             
             # 发送一些提示信息
-            yield "正在分析您的选股条件..."
+            yield {"chunk": "正在分析您的选股条件...", "extension_questions": []}
             await asyncio.sleep(0.2)
-            yield "\n\n"
+            yield {"chunk": "\n\n", "extension_questions": []}
             await asyncio.sleep(0.2)
-            yield "我需要思考一下..."
+            yield {"chunk": "我需要思考一下...", "extension_questions": []}
             await asyncio.sleep(0.2)
-            yield "\n\n"
+            yield {"chunk": "\n\n", "extension_questions": []}
             
             # 使用真正的流式LLM调用
             full_response = ""
             async for chunk in llm_client.stream_chat(prompt):
                 if chunk:
-                    yield chunk
+                    yield {"chunk": chunk, "extension_questions": []}
                     full_response += chunk
             
             self.add_assistant_message(full_response)
             logger.info(f"LLM 流式响应成功")
+            
+            # 提取延伸问题
+            extension_questions = self._extract_extension_questions(full_response)
+            # 发送包含延伸问题的最终响应
+            yield {"chunk": "", "extension_questions": extension_questions}
         except Exception as e:
             logger.error(f"LLM 调用失败: {e}")
-            yield "抱歉，我现在无法回答您的问题，请稍后再试。"
+            yield {"chunk": "抱歉，我现在无法回答您的问题，请稍后再试。", "extension_questions": []}
 
     def get_history(self, session_id: Optional[str] = None) -> List[Dict[str, str]]:
         """获取对话历史"""
