@@ -88,7 +88,7 @@ def test_ip_rate_limit():
     login_url = f"{BASE_URL}/api/auth/login"
 
     success_count = 0
-    for i in range(6):
+    for i in range(21):
         try:
             response = requests.post(login_url, data={
                 "username": "nonexistent_user_123",
@@ -102,8 +102,8 @@ def test_ip_rate_limit():
                 return True
             elif response.status_code == 401:
                 success_count += 1
-                if success_count >= 5:
-                    print(f"已发送5次失败请求，但速率限制未触发")
+                if success_count >= 20:
+                    print(f"已发送20次失败请求，但速率限制未触发")
         except Exception as e:
             print(f"第{i+1}次请求异常: {e}")
 
@@ -119,7 +119,7 @@ def test_user_rate_limit():
     login_url = f"{BASE_URL}/api/auth/login"
 
     success_count = 0
-    for i in range(4):
+    for i in range(11):
         try:
             response = requests.post(login_url, data={
                 "username": TEST_USER["username"],
@@ -133,8 +133,8 @@ def test_user_rate_limit():
                 return True
             elif response.status_code == 401:
                 success_count += 1
-                if success_count >= 3:
-                    print(f"已发送3次失败请求，但速率限制未触发")
+                if success_count >= 10:
+                    print(f"已发送10次失败请求，但速率限制未触发")
         except Exception as e:
             print(f"第{i+1}次请求异常: {e}")
 

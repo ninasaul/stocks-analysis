@@ -25,8 +25,26 @@ TEST_USER = {
     "password": "Test123456"
 }
 
+def register_user():
+    """注册测试用户"""
+    url = f"{BASE_URL}/api/auth/register"
+    user_data = {
+        "username": TEST_USER["username"],
+        "password": TEST_USER["password"],
+        "email": f"{TEST_USER['username']}@example.com"
+    }
+    response = requests.post(url, json=user_data)
+    if response.status_code in [200, 201] or "已存在" in response.text:
+        return True
+    else:
+        print(f"注册失败: {response.text}")
+        return False
+
 def get_access_token():
     """获取访问令牌"""
+    # 先尝试注册用户
+    register_user()
+    
     url = f"{BASE_URL}/api/auth/login"
     response = requests.post(url, data=TEST_USER)
     if response.status_code == 200:
