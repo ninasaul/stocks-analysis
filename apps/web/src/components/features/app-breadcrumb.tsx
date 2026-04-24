@@ -15,9 +15,11 @@ const labels: Record<string, string> = {
   analyze: "股票预测",
   pick: "选股对话",
   watchlist: "自选",
+  "paper-trading": "模拟交易",
   history: "历史与复盘",
-  account: "账号",
+  account: "用户中心",
   settings: "设置",
+  messages: "消息",
 };
 
 export function AppBreadcrumb() {
@@ -43,6 +45,10 @@ export function AppBreadcrumb() {
     crumbs.push({ href: "/app", label: "工作台" });
     crumbs.push({ href: "/app/settings", label: "设置" });
     crumbs.push({ href: pathname, label: "通知设置", current: true });
+  } else if (segments[1] === "account" && segments[2] === "billing") {
+    crumbs.push({ href: "/app", label: "工作台" });
+    crumbs.push({ href: "/app/account", label: "用户中心" });
+    crumbs.push({ href: pathname, label: "账单", current: true });
   } else {
     crumbs.push({ href: "/app", label: "工作台" });
     const seg = segments[1] ?? "";

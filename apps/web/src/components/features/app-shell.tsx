@@ -12,6 +12,7 @@ import { ZhputianAppSidebar } from "@/components/features/zhputian-app-sidebar";
 import { ComplianceBanner } from "@/components/features/compliance-banner";
 import { AppBreadcrumb } from "@/components/features/app-breadcrumb";
 import { ThemeSwitcher } from "@/components/features/theme-switcher";
+import { AppMessageNotificationsTrigger } from "@/components/features/app-message-notifications-trigger";
 import { subscriptionTierPublicCopy } from "@/lib/copy";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
 import { useAuthStore } from "@/stores/use-auth-store";
@@ -69,6 +70,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <AppBreadcrumb />
             </div>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              <AppMessageNotificationsTrigger />
               <ThemeSwitcher />
               <Badge variant="outline" className="hidden text-xs sm:inline-flex">
                 {planName}

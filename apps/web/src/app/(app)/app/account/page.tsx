@@ -13,7 +13,6 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Spinner } from "@/components/ui/spinner";
-import { AppPageLayout } from "@/components/features/app-page-layout";
 import { PageLoadingState } from "@/components/features/page-state";
 
 export default function AccountPage() {
@@ -33,15 +32,12 @@ export default function AccountPage() {
 
   if (!authHydrated || !subscriptionReady) {
     return (
-      <AppPageLayout title="我的账号" description="管理登录状态、账号信息与账户权限。">
-        <PageLoadingState title="正在加载账号信息" description="请稍候，正在同步你的账号状态。" />
-      </AppPageLayout>
+      <PageLoadingState title="正在加载账号信息" description="请稍候，正在同步你的账号状态。" />
     );
   }
 
   return (
-    <AppPageLayout title="我的账号" description="管理登录状态、账号信息与账户权限。" contentClassName="gap-6">
-      <>
+    <>
         <Card>
           <CardHeader>
             <CardTitle>订阅与套餐</CardTitle>
@@ -121,18 +117,17 @@ export default function AccountPage() {
           <AlertTitle>账号注销</AlertTitle>
           <AlertDescription>{accountCopy.deactivateNote}</AlertDescription>
         </Alert>
-      </>
 
-      <Separator />
+        <Separator />
 
-      <div className="flex flex-wrap gap-2">
-        <Button variant="outline" render={<Link href="/privacy" />}>
-          隐私政策
-        </Button>
-        <Button variant="outline" render={<Link href="/terms" />}>
-          服务条款
-        </Button>
-      </div>
-    </AppPageLayout>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" render={<Link href="/privacy" />}>
+            隐私政策
+          </Button>
+          <Button variant="outline" render={<Link href="/terms" />}>
+            服务条款
+          </Button>
+        </div>
+    </>
   );
 }

@@ -32,8 +32,20 @@ export function buildSyntheticTimingReport(input: AnalysisInput): TimingReport {
   const low = anchor - band;
   const high = anchor + band;
   const riskPx = (low - 2 - (h % 3)).toFixed(1);
-  const tgtLo = (high + 2).toFixed(1);
-  const tgtHi = (high + 10 + (h % 6)).toFixed(1);
+  const tgtLoNum = high + 2;
+  const tgtHiNum = high + 10 + (h % 6);
+  const tgtLo = tgtLoNum.toFixed(1);
+  const tgtHi = tgtHiNum.toFixed(1);
+  const refMid = (low + high) / 2;
+  const targetMid = (tgtLoNum + tgtHiNum) / 2;
+  const plan_metrics =
+    refMid > 0
+      ? {
+          reference_price: refMid,
+          target_price: targetMid,
+          expected_return_pct: ((targetMid - refMid) / refMid) * 100,
+        }
+      : undefined;
 
   return timingReportSchema.parse({
     id: `r-${Date.now()}-${h % 1000}`,
@@ -88,5 +100,6 @@ export function buildSyntheticTimingReport(input: AnalysisInput): TimingReport {
     ],
     data_version: "synthetic-v1",
     created_at: Date.now(),
+    plan_metrics,
   });
 }
