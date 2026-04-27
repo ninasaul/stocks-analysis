@@ -13,12 +13,13 @@ import {
   MessageSquareIcon,
   PencilLineIcon,
   PlusIcon,
+  TagsIcon,
   TrendingUpIcon,
   SquarePenIcon,
   Trash2Icon,
   SearchIcon,
 } from "lucide-react";
-import { pickerCopy, subscriptionTierPublicCopy } from "@/lib/copy";
+import { analyzeCopy, pickerCopy, subscriptionTierPublicCopy } from "@/lib/copy";
 import { usePickerStore, type PickerDialogueMode, type PickerMessage } from "@/stores/use-picker-store";
 import { useAnalysisStore } from "@/stores/use-analysis-store";
 import type {
@@ -79,6 +80,10 @@ import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
+  ANALYZE_SYMBOL_MOCK_UNIVERSE,
+  type AnalyzeSymbolSearchItem,
+} from "@/lib/analyze-symbol-search";
+import {
   Item,
   ItemActions,
   ItemContent,
@@ -89,6 +94,7 @@ import {
 } from "@/components/ui/item";
 import { AppPageLayout } from "@/components/features/app-page-layout";
 import { PageErrorState } from "@/components/features/page-state";
+import { AnalyzeRunConfigDialog } from "@/components/features/analyze-run-config-dialog";
 import { PickerChatEmpty, PickerChatMessage } from "@/components/features/picker-chat-message";
 
 function isActionActive(actionId: string, s: PreferenceSnapshot) {
@@ -628,7 +634,7 @@ function ChatTimelineSection({
               paddingBottom: `${chatBottomInsetPx}px`,
             }}
           >
-            <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 px-2 md:px-3">
               {messages.length === 0 ? (
                 <PickerChatEmpty mode={conversationMode} />
               ) : (
@@ -678,6 +684,13 @@ function ChatTimelineSection({
                     ))}
                   </ul>
                 </section>
+              ) : null}
+
+              {sendPending && streamStatus !== "idle" ? (
+                <div className="text-muted-foreground flex items-center gap-2 px-1 py-1 text-xs" role="status">
+                  <Spinner />
+                  {streamStatus === "connecting" ? "正在连接对话服务..." : "正在生成回复..."}
+                </div>
               ) : null}
 
               {sendError ? (
@@ -740,6 +753,8 @@ export default function PickPage() {
   const setDialogueMode = usePickerStore((s) => s.setDialogueMode);
   const removeMessage = usePickerStore((s) => s.removeMessage);
   const confirmedPreferenceSlots = usePickerStore((s) => s.confirmedPreferenceSlots);
+  const analysisLoading = useAnalysisStore((s) => s.loading);
+  const generateAnalysisReport = useAnalysisStore((s) => s.generateReport);
   const [draftBySession, setDraftBySession] = useState<Record<string, string>>({});
   const draftTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const isImeComposingRef = useRef(false);
@@ -765,7 +780,10 @@ export default function PickPage() {
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
   const [deletingMessage, setDeletingMessage] = useState<PickerMessage | null>(null);
   const [selectedSuggestedActionIds, setSelectedSuggestedActionIds] = useState<string[]>([]);
-  const [extractedPanelOpen, setExtractedPanelOpen] = useState(true);
+  const [extractedPanelOpen, setExtractedPanelOpen] = useState(false);
+  const [analysisConfigOpen, setAnalysisConfigOpen] = useState(false);
+  const [analysisQuotaOpen, setAnalysisQuotaOpen] = useState(false);
+  const [analysisTargetStock, setAnalysisTargetStock] = useState<ExtractedStock | null>(null);
   const [optionsPanelVisible, setOptionsPanelVisible] = useState(true);
   const [watchlistKeys, setWatchlistKeys] = useState<Set<string>>(() => loadWatchlistKeysFromStorage());
   const activeSnapshotHydratedRef = useRef(false);
@@ -907,6 +925,25 @@ export default function PickPage() {
     () => extractUniqueStocksFromMessages(messages),
     [messages],
   );
+  const analysisSymbolSearchItems = useMemo<AnalyzeSymbolSearchItem[]>(() => {
+    const byKey = new Map<string, AnalyzeSymbolSearchItem>();
+    for (const item of ANALYZE_SYMBOL_MOCK_UNIVERSE) byKey.set(item.key, item);
+    const addStock = (stock: ExtractedStock) => {
+      const code = stock.code.trim().toUpperCase();
+      if (!code) return;
+      const market = inferMarketFromCode(code);
+      const key = `${market}.${code}`;
+      byKey.set(key, { key, market, symbol: code, name: stock.name || code });
+    };
+    for (const stock of currentConversationExtractedStocks) addStock(stock);
+    if (analysisTargetStock) addStock(analysisTargetStock);
+    return Array.from(byKey.values());
+  }, [analysisTargetStock, currentConversationExtractedStocks]);
+
+  const openAnalysisConfig = useCallback((stock: ExtractedStock) => {
+    setAnalysisTargetStock(stock);
+    setAnalysisConfigOpen(true);
+  }, []);
 
   const currentConversationItem = useMemo<ConversationListItem>(
     () =>
@@ -1334,13 +1371,11 @@ export default function PickPage() {
               conversation_phase={conversation_phase}
               candidate_stocks={candidate_stocks}
               onEnterAnalyze={(code) => {
-                const market = inferMarketFromCode(code);
-                useAnalysisStore.getState().setPendingHandoff({
-                  symbol: code,
-                  market,
-                  preference_snapshot,
-                });
-                router.push("/app/analyze");
+                const normalized = code.trim().toUpperCase();
+                const stock =
+                  currentConversationExtractedStocks.find((item) => item.code.trim().toUpperCase() === normalized) ??
+                  { name: normalized, code: normalized };
+                openAnalysisConfig(stock);
               }}
               onAddWatchlistStock={(stock) => {
                 upsertWatchlistStock(stock);
@@ -1370,40 +1405,35 @@ export default function PickPage() {
               left: composerDesktopBounds.left !== undefined ? `${composerDesktopBounds.left}px` : undefined,
               width: composerDesktopBounds.width !== undefined ? `${composerDesktopBounds.width}px` : undefined,
             }}
-            className="fixed inset-x-0 bottom-2 z-20 overflow-visible bg-background pt-1 pb-[calc(env(safe-area-inset-bottom)+0.375rem)] md:bottom-3"
+            className="fixed inset-x-0 bottom-2 z-20 overflow-visible bg-background pb-[calc(env(safe-area-inset-bottom)+0.375rem)] md:bottom-3"
             aria-label="消息输入区"
           >
           {currentConversationExtractedStocks.length > 0 ? (
-            <div className="pointer-events-none absolute inset-x-0 bottom-full mb-0.5">
-              <div className="pointer-events-auto mx-auto w-full max-w-4xl px-1 md:px-0">
+            <div className="pointer-events-none absolute inset-x-0 bottom-full">
+              <div className="pointer-events-auto mx-auto w-full max-w-4xl px-3 md:px-2">
                 <section aria-label="当前对话股票提取">
                   <Collapsible open={extractedPanelOpen} onOpenChange={setExtractedPanelOpen}>
-                    <div className="overflow-hidden rounded-lg border bg-background shadow-sm transition-colors hover:border-ring/40">
-                      <CollapsibleTrigger className="group/stock-trigger flex w-full items-center justify-between gap-2 px-2.5 py-2 text-left transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground transition-colors group-hover/stock-trigger:bg-background group-hover/stock-trigger:text-foreground">
-                            <TrendingUpIcon className="size-3.5" />
-                          </span>
+                    <div className="overflow-hidden rounded-t-md rounded-b-none border-x border-t bg-background">
+                      <CollapsibleTrigger className="group/stock-trigger flex w-full items-center justify-between gap-1.5 px-2 py-1 text-left transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none">
+                        <div className="flex min-w-0 items-center gap-1">
+                          <TagsIcon className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/stock-trigger:text-foreground" />
                           <div className="min-w-0">
-                            <p className="flex items-center gap-1.5 text-sm font-medium leading-tight">
+                            <p className="flex items-center gap-1 text-xs font-medium leading-tight">
                               <span>识别股票</span>
-                              <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                              <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
                                 {currentConversationExtractedStocks.length} 只
                               </Badge>
-                            </p>
-                            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                              从当前对话中提取，可直接分析或加入自选。
                             </p>
                           </div>
                         </div>
                         <ChevronDownIcon
                           className={cn(
-                            "size-4 shrink-0 text-muted-foreground transition group-hover/stock-trigger:text-foreground",
+                            "size-3.5 shrink-0 text-muted-foreground transition group-hover/stock-trigger:text-foreground",
                             extractedPanelOpen ? "rotate-180" : "",
                           )}
                         />
                       </CollapsibleTrigger>
-                      <CollapsibleContent className="border-t bg-muted/10 px-2 py-2">
+                      <CollapsibleContent className="bg-muted/10 px-2 py-2">
                         <ScrollArea className="h-52 min-h-0 pr-1">
                           <ItemGroup
                             className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4"
@@ -1419,7 +1449,7 @@ export default function PickPage() {
                                 key={stock.code}
                                 size="xs"
                                 variant="outline"
-                                className="bg-background/80 transition-all hover:border-ring/40 hover:bg-background hover:shadow-sm"
+                                className="group/stock-item bg-background/80 transition-all hover:border-ring/40 hover:bg-background hover:shadow-sm"
                               >
                                 <ItemHeader className="min-w-0">
                                   <ItemContent>
@@ -1433,23 +1463,24 @@ export default function PickPage() {
                                       <span>{stock.code}</span>
                                     </ItemDescription>
                                   </ItemContent>
-                                  <ItemActions className="gap-1">
-                                    <Button
-                                      type="button"
-                                      size="xs"
-                                      variant="secondary"
-                                      onClick={() => {
-                                        const market = inferMarketFromCode(stock.code);
-                                        useAnalysisStore.getState().setPendingHandoff({
-                                          symbol: stock.code,
-                                          market,
-                                          preference_snapshot,
-                                        });
-                                        router.push("/app/analyze");
-                                      }}
-                                    >
-                                      分析
-                                    </Button>
+                                  <ItemActions className="gap-1 opacity-0 transition-opacity group-hover/stock-item:opacity-100 group-focus-within/stock-item:opacity-100">
+                                    <Tooltip>
+                                      <TooltipTrigger
+                                        render={
+                                          <Button
+                                            type="button"
+                                            size="icon-xs"
+                                            variant="outline"
+                                            className="hover:bg-muted"
+                                            aria-label={`分析 ${stock.name}`}
+                                            onClick={() => openAnalysisConfig(stock)}
+                                          >
+                                            <TrendingUpIcon />
+                                          </Button>
+                                        }
+                                      />
+                                      <TooltipContent side="top" align="center">分析</TooltipContent>
+                                    </Tooltip>
                                     <Tooltip>
                                       <TooltipTrigger
                                         render={
@@ -1499,11 +1530,6 @@ export default function PickPage() {
                   <div className="text-muted-foreground flex items-center gap-2 text-sm">
                     <Spinner />
                     {pickerCopy.optionsLoading}
-                  </div>
-                ) : sendPending && streamStatus !== "idle" ? (
-                  <div className="text-muted-foreground flex items-center gap-2 text-xs">
-                    <Spinner />
-                    {streamStatus === "connecting" ? "正在连接对话服务..." : "正在生成回复..."}
                   </div>
                 ) : toolbar_actions.length > 0 && optionsPanelVisible ? (
                   <div className="rounded-lg border p-1">
@@ -1708,6 +1734,57 @@ export default function PickPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>关闭</AlertDialogCancel>
             <Button type="button" render={<Link href="/subscription" />}>
+              {subscriptionTierPublicCopy.ctaViewPlansShort}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AnalyzeRunConfigDialog
+        open={analysisConfigOpen}
+        onOpenChange={(open) => {
+          setAnalysisConfigOpen(open);
+          if (!open && !analysisLoading) setAnalysisTargetStock(null);
+        }}
+        loading={analysisLoading}
+        symbolSearchItems={analysisSymbolSearchItems}
+        searchKeyword={
+          analysisTargetStock
+            ? `${inferMarketFromCode(analysisTargetStock.code)}.${analysisTargetStock.code.trim().toUpperCase()}`
+            : ""
+        }
+        market={analysisTargetStock ? inferMarketFromCode(analysisTargetStock.code) : preference_snapshot.market}
+        riskTier={preference_snapshot.risk_tier}
+        holdingHorizon={preference_snapshot.holding_horizon}
+        linkedPreference={preference_snapshot}
+        onConfirm={async ({ input }) => {
+          const ok = await generateAnalysisReport(input);
+          if (ok) {
+            setAnalysisConfigOpen(false);
+            setAnalysisTargetStock(null);
+            router.push(`/app/analyze?stockCode=${encodeURIComponent(`${input.market}.${input.symbol}`)}`);
+            return true;
+          }
+          if (useAnalysisStore.getState().error === "quota") {
+            setAnalysisConfigOpen(false);
+            setAnalysisTargetStock(null);
+            setAnalysisQuotaOpen(true);
+          } else {
+            toast.error("分析生成失败，请调整参数后重试。");
+          }
+          return false;
+        }}
+      />
+
+      <AlertDialog open={analysisQuotaOpen} onOpenChange={setAnalysisQuotaOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>今日额度已用完</AlertDialogTitle>
+            <AlertDialogDescription>{analyzeCopy.quotaDialogBody}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>关闭</AlertDialogCancel>
+            <Button type="button" variant="secondary" onClick={() => router.push("/subscription")}>
               {subscriptionTierPublicCopy.ctaViewPlansShort}
             </Button>
           </AlertDialogFooter>
