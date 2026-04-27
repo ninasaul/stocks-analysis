@@ -54,7 +54,7 @@ class StockService:
                     stock_info_df['code'] = stock_info_df['code'].str.zfill(6)
                     # 构建股票代码到完整信息的映射
                     self.stock_basic_info_map = {}
-                    for _, row in stock_info_a_code_name_df.iterrows():
+                    for _, row in stock_info_df.iterrows():
                         code = row['code']
                         self.stock_basic_info_map[code] = row.to_dict()
                     logger.info(f"加载股票数据，共 {len(self.stock_basic_info_map)} 条")
@@ -148,7 +148,7 @@ class StockService:
                     stock_info_df['code'] = stock_info_df['code'].str.zfill(6)
                     # 构建股票代码到完整信息的映射
                     self.stock_basic_info_map = {}
-                    for _, row in stock_info_a_code_name_df.iterrows():
+                    for _, row in stock_info_df.iterrows():
                         code = row['code']
                         self.stock_basic_info_map[code] = row.to_dict()
 

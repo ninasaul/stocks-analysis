@@ -132,7 +132,7 @@ function HeroTypewriterTitle({
     <h1
       id={id}
       aria-label={`${line1} ${line2}`}
-      className={cn("landing-hero-in text-foreground text-balance text-4xl font-semibold tracking-tight sm:text-5xl md:text-[3.35rem] md:leading-[1.06]", className)}
+      className={cn("landing-hero-in text-foreground text-balance text-4xl leading-[1.18] font-semibold tracking-tight sm:text-5xl md:text-[3.35rem] md:leading-[1.2]", className)}
     >
       <span aria-hidden className="inline-block text-left">
         <span className="block">
@@ -213,74 +213,94 @@ function LandingReportPreview() {
       <h2 id="landing-report-preview-heading" className="sr-only">
         {landingCopy.previewTitle}
       </h2>
-      <div className="border-border/45 bg-card/80 overflow-hidden rounded-xl border text-left shadow-sm backdrop-blur-md supports-backdrop-filter:bg-card/58 motion-safe:transition-[transform,box-shadow,border-color,background-color] motion-safe:duration-450 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.005] motion-safe:hover:shadow-lg motion-safe:hover:border-primary/30 motion-safe:hover:bg-card/84 supports-backdrop-filter:motion-safe:hover:bg-card/60">
-        <div className="border-border/35 border-b bg-muted/45 px-3 py-2 backdrop-blur-sm supports-backdrop-filter:bg-muted/32">
+      <div className="group border-border/45 bg-card/80 overflow-hidden rounded-xl border text-left shadow-sm backdrop-blur-md supports-backdrop-filter:bg-card/58 motion-safe:transition-[transform,box-shadow,border-color,background-color] motion-safe:duration-450 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-safe:hover:-translate-y-1 motion-safe:hover:scale-[1.012] motion-safe:hover:shadow-xl motion-safe:hover:border-primary/40 motion-safe:hover:bg-card/86 supports-backdrop-filter:motion-safe:hover:bg-card/62">
+        <div className="border-border/35 border-b bg-muted/45 px-3 py-1.5 backdrop-blur-sm supports-backdrop-filter:bg-muted/32 motion-safe:transition-colors motion-safe:duration-300 group-hover:bg-primary/5">
           <div className="flex items-center gap-2">
             <span className="bg-red-500/80 inline-flex size-2 rounded-full" aria-hidden />
             <span className="bg-amber-500/80 inline-flex size-2 rounded-full" aria-hidden />
             <span className="bg-emerald-500/80 inline-flex size-2 rounded-full" aria-hidden />
             <span className="text-muted-foreground/90 ml-2 text-[11px] font-medium tracking-wide">
-              Report Preview
+              股票研究报告预览
             </span>
           </div>
         </div>
-        <div className="border-border/35 border-b bg-muted/30 px-3 py-2 text-center">
-          <p className="text-muted-foreground text-[11px] font-medium tracking-wide">
-            以下为示例数据，非实时行情
-          </p>
-        </div>
         <Card className="rounded-none border-0 bg-transparent shadow-none">
-          <CardHeader className="gap-2 border-b border-border/35 pb-4">
-            <CardTitle className="text-base">贵州茅台（600519.SH）</CardTitle>
-            <p className="text-muted-foreground text-xs font-mono">2026-04-20 14:30 · 日线 · CNY</p>
+          <CardHeader className="gap-1 border-b border-border/35 pb-2">
+            <div className="min-w-0">
+              <CardTitle className="truncate text-base">贵州茅台（600519.SH）</CardTitle>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
+                <span>A股 · 日线</span>
+                <span>收盘后数据</span>
+              </div>
+            </div>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4 py-5">
-            <div className="rounded-lg border border-border/40 bg-muted/25 px-3 py-2.5">
-              <p className="text-muted-foreground mb-2 text-xs font-medium">交易建议</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge>加仓</Badge>
-                <span className="text-muted-foreground text-xs">现价 1642.38（+1.76%）</span>
-                <span className="text-muted-foreground text-xs">风险：中等</span>
+          <CardContent className="flex flex-col gap-3 pt-1.5 pb-4">
+            <div className="rounded-lg border border-border/40 bg-muted/25 px-2.5 py-2 motion-safe:transition-[background-color,border-color] motion-safe:duration-300 group-hover:border-primary/30 group-hover:bg-primary/5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-muted-foreground text-xs font-medium">结论倾向</p>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    <Badge>偏多观察</Badge>
+                    <span className="text-muted-foreground text-xs">风险：中等</span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-muted-foreground text-[11px]">综合评分</p>
+                  <p className="text-foreground mt-0.5 font-mono text-lg font-semibold tabular-nums motion-safe:transition-colors motion-safe:duration-300 group-hover:text-primary">84</p>
+                </div>
               </div>
               <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
                 趋势向上，成交温和放大；回踩未破 10 日均线，偏多观点维持，回撤可分批介入。
               </p>
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="rounded-md border border-border/35 px-2.5 py-2">
-                <p className="text-muted-foreground text-[11px]">综合评分</p>
-                <p className="text-foreground mt-1 text-sm font-semibold tabular-nums">84 / 100</p>
+            <div className="grid grid-cols-3 gap-1.5">
+              <div className="rounded-md border border-border/35 px-2 py-1.5 motion-safe:transition-[background-color,border-color,transform] motion-safe:duration-300 group-hover:border-primary/20 group-hover:bg-muted/35 motion-safe:group-hover:-translate-y-0.5">
+                <p className="text-muted-foreground text-[11px]">参考价</p>
+                <p className="text-foreground mt-1 text-sm font-semibold tabular-nums">1642.38</p>
               </div>
-              <div className="rounded-md border border-border/35 px-2.5 py-2">
-                <p className="text-muted-foreground text-[11px]">市盈率(TTM)</p>
-                <p className="text-foreground mt-1 text-sm font-semibold tabular-nums">26.4x</p>
+              <div className="rounded-md border border-border/35 px-2 py-1.5 motion-safe:transition-[background-color,border-color,transform] motion-safe:duration-300 group-hover:border-primary/20 group-hover:bg-muted/35 motion-safe:group-hover:-translate-y-0.5">
+                <p className="text-muted-foreground text-[11px]">日涨跌</p>
+                <p className="text-foreground mt-1 text-sm font-semibold tabular-nums">+1.76%</p>
               </div>
-              <div className="rounded-md border border-border/35 px-2.5 py-2">
+              <div className="rounded-md border border-border/35 px-2 py-1.5 motion-safe:transition-[background-color,border-color,transform] motion-safe:duration-300 group-hover:border-primary/20 group-hover:bg-muted/35 motion-safe:group-hover:-translate-y-0.5">
                 <p className="text-muted-foreground text-[11px]">成交额</p>
                 <p className="text-foreground mt-1 text-sm font-semibold tabular-nums">42.7 亿</p>
               </div>
             </div>
-            <div className="border-border/35 border-t pt-3">
-              <dl className="flex flex-col gap-2.5">
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4">
-                  <dt className="text-muted-foreground text-xs">关注区间</dt>
-                  <dd className="text-foreground/90 font-mono text-xs tabular-nums">1628 - 1665</dd>
-                </div>
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4">
-                  <dt className="text-muted-foreground text-xs">风险位</dt>
-                  <dd className="text-foreground/90 font-mono text-xs tabular-nums">1598</dd>
-                </div>
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4">
-                  <dt className="text-muted-foreground text-xs">观察目标</dt>
-                  <dd className="text-foreground/90 font-mono text-xs tabular-nums">1688 / 1720</dd>
-                </div>
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4">
-                  <dt className="text-muted-foreground text-xs">失效条件</dt>
-                  <dd className="text-foreground/90 font-mono text-xs tabular-nums">日线收于 1598 下方</dd>
-                </div>
-              </dl>
+            <div className="grid grid-cols-3 gap-1.5">
+              <div className="rounded-md border border-border/35 bg-background/45 px-2 py-1.5 motion-safe:transition-[background-color,border-color,transform] motion-safe:duration-300 group-hover:border-primary/20 group-hover:bg-background/70 motion-safe:group-hover:-translate-y-0.5">
+                <p className="text-muted-foreground text-[11px]">关注区间</p>
+                <p className="text-foreground mt-1 font-mono text-xs font-semibold tabular-nums">1628 - 1665</p>
+              </div>
+              <div className="rounded-md border border-border/35 bg-background/45 px-2 py-1.5 motion-safe:transition-[background-color,border-color,transform] motion-safe:duration-300 group-hover:border-primary/20 group-hover:bg-background/70 motion-safe:group-hover:-translate-y-0.5">
+                <p className="text-muted-foreground text-[11px]">风险位</p>
+                <p className="text-foreground mt-1 font-mono text-xs font-semibold tabular-nums">1598</p>
+              </div>
+              <div className="rounded-md border border-border/35 bg-background/45 px-2 py-1.5 motion-safe:transition-[background-color,border-color,transform] motion-safe:duration-300 group-hover:border-primary/20 group-hover:bg-background/70 motion-safe:group-hover:-translate-y-0.5">
+                <p className="text-muted-foreground text-[11px]">观察目标</p>
+                <p className="text-foreground mt-1 font-mono text-xs font-semibold tabular-nums">1688 / 1720</p>
+              </div>
+            </div>
+            <div className="rounded-lg border border-border/35 px-2.5 py-2.5 motion-safe:transition-[background-color,border-color] motion-safe:duration-300 group-hover:border-primary/20 group-hover:bg-muted/20">
+              <p className="text-foreground text-xs font-medium">判断依据</p>
+              <ul className="mt-1.5 flex list-disc flex-col gap-1 pl-4 text-muted-foreground text-xs leading-relaxed marker:text-muted-foreground/50">
+                <li>均线结构维持多头排列，短线回踩未破关键支撑。</li>
+                <li>成交额较 5 日均值温和放大，价格上行动能仍在。</li>
+                <li>若跌破风险位，当前偏多假设失效，需要重新评估。</li>
+              </ul>
+            </div>
+            <div className="rounded-lg border border-border/35 bg-muted/20 px-2.5 py-2">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-3">
+                <p className="text-muted-foreground text-xs">失效条件</p>
+                <p className="text-foreground/90 font-mono text-xs tabular-nums">日线收于 1598 下方</p>
+              </div>
             </div>
           </CardContent>
+          <CardFooter className="border-t border-border/35 px-3 py-1.5">
+            <p className="w-full text-center text-muted-foreground text-[11px] font-medium tracking-wide">
+              以下为示例数据，非实时行情
+            </p>
+          </CardFooter>
         </Card>
       </div>
     </aside>

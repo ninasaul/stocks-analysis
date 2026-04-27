@@ -52,8 +52,8 @@ export const pickerCopy = {
   chatEmptyTitle: "你还没有发送消息",
   chatEmptyBody: "在底部选择对话模式后输入说明，Enter 发送；Shift+Enter 换行。",
   chatEmptyModeUnset: "请先在底部选择「随便问问」或「帮我选股」，再发送第一条消息。",
-  chatEmptyModeConsult: "「随便问问」用于解释市场、术语与使用方式，不写入偏好快照。",
-  chatEmptyModePick: "「帮我选股」按 D1～D8 收集已确认偏好，再生成候选列表。",
+  chatEmptyModeConsult: "「随便问问」使用直接对话模式，适合解释市场、术语与工具使用方式。",
+  chatEmptyModePick: "「帮我选股」使用选股提示词模式，适合描述偏好并获取筛股建议。",
   candidatesSyncNote: "下方候选与上一条助手说明一致，便于对照筛股依据。",
   copyMessageSuccess: "已复制该条内容",
   copyMessageError: "复制未成功，请手动选择文本后复制。",
@@ -145,9 +145,9 @@ export const accountCopy = {
 export const landingCopy = {
   heroEyebrow: "智谱投研 · 面向个人投资者的研究辅助",
   heroTitleLine1: "看清一只股票的进出逻辑",
-  heroTitleLine2: "从分析到复盘，AI 全程陪跑",
+  heroTitleLine2: "AI 陪你完成分析与复盘",
   heroLead:
-    "技术面、风险位、关键价格一页呈现；结论有逻辑、有依据，方便你自己判断和留档。",
+    "输入股票代码或名称，AI 会汇总趋势结构、关键价位、风险等级与失效条件，生成可导出、可复盘的研究报告，帮助你独立判断每一次进出逻辑。",
   heroSupport:
     "报告载明关注区间、风险位、观察目标位及失效条件，便于对照关键价位，并支持导出或打印以便自行留档。",
   heroBoundary:

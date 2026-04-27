@@ -13,8 +13,8 @@ set -euo pipefail
 #   scripts/deploy-web-vps.env   若存在则自动加载
 #   DEPLOY_ENV_FILE=/某路径/x.env  指定文件时必须存在
 #
-# 可选环境变量（远端代码目录默认 ~/stocks-analysis-simple）：
-#   REMOTE_REPO_SUBDIR   登录用户在 VPS 家目录下的子目录名（默认 stocks-analysis-simple）
+# 可选环境变量（远端代码目录默认 ~/TuringFin）：
+#   REMOTE_REPO_SUBDIR   登录用户在 VPS 家目录下的子目录名（默认 TuringFin）
 #   REMOTE_REPO_ABSPATH  若设置则改用该绝对路径（须以 / 开头）
 #   WEB_IMAGE            镜像名:标签（默认 stocks-web:latest）
 #   WEB_PORT             宿主机映射到容器 3000 的端口（默认 3000）
@@ -69,7 +69,7 @@ if [[ -n "${REMOTE_REPO_ABSPATH}" ]]; then
     exit 1
   fi
 elif [[ -z "${REMOTE_REPO_SUBDIR}" ]]; then
-  REMOTE_REPO_SUBDIR="stocks-analysis-simple"
+  REMOTE_REPO_SUBDIR="TuringFin"
 fi
 
 WEB_IMAGE="${WEB_IMAGE:-stocks-web:latest}"
@@ -125,7 +125,6 @@ RSYNC_EXCLUDES=(
   --exclude=apps/api/node_modules
   --exclude=apps/mp-weixin/node_modules
   --exclude=apps/web/.next
-  --exclude=apps/web/.wrangler
   --exclude=apps/api/.venv
   --exclude=.turbo
   --exclude=__pycache__
