@@ -1,9 +1,12 @@
 import { getPublicApiBaseUrl } from "@/lib/env";
 import { useAuthStore } from "@/stores/use-auth-store";
 
+export type DialogueMode = "prompt" | "direct";
+
 export type PickerTurnRequest = {
   session_id: string;
   text: string;
+  mode?: DialogueMode;
 };
 
 export type PickerTurnResponse = {
@@ -38,6 +41,7 @@ export async function requestPickerTurn(req: PickerTurnRequest): Promise<PickerT
 
   const url = new URL("/api/dialogue/sync", getPublicApiBaseUrl());
   url.searchParams.set("message", text);
+  url.searchParams.set("mode", req.mode ?? "prompt");
   if (req.session_id.trim()) {
     url.searchParams.set("session_id", req.session_id.trim());
   }
@@ -84,6 +88,7 @@ export async function requestPickerTurnStream(
 
   const url = new URL("/api/dialogue/stream", getPublicApiBaseUrl());
   url.searchParams.set("message", text);
+  url.searchParams.set("mode", req.mode ?? "prompt");
   if (req.session_id.trim()) {
     url.searchParams.set("session_id", req.session_id.trim());
   }

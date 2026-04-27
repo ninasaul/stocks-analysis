@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckIcon, CopyIcon, PencilLineIcon, PlusIcon, TrendingUpIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, PencilLineIcon, PlusIcon, Trash2Icon, TrendingUpIcon } from "lucide-react";
 import { ThumbsDownIcon, ThumbsUpIcon } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -132,6 +132,7 @@ export function PickerChatMessage({
   message,
   anchorId,
   onEditMessage,
+  onDeleteMessage,
   onAnalyzeStock,
   onAddWatchlistStock,
   isInWatchlist,
@@ -140,6 +141,7 @@ export function PickerChatMessage({
   message: PickerMessage;
   anchorId?: string;
   onEditMessage?: (message: PickerMessage) => void;
+  onDeleteMessage?: (message: PickerMessage) => void;
   onAnalyzeStock?: (code: string) => void;
   onAddWatchlistStock?: (stock: InlineStock) => void;
   isInWatchlist?: (code: string) => boolean;
@@ -317,6 +319,27 @@ export function PickerChatMessage({
               复制消息
             </TooltipContent>
           </Tooltip>
+          {onDeleteMessage ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => onDeleteMessage(message)}
+                    aria-label={isUser ? "删除用户消息" : "删除助手消息"}
+                  >
+                    <Trash2Icon />
+                  </Button>
+                }
+              />
+              <TooltipContent side="top" align="start">
+                删除消息
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
         </div>
       ) : null}
     </article>

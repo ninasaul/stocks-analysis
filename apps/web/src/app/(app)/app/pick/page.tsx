@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -18,7 +19,7 @@ import {
   SearchIcon,
 } from "lucide-react";
 import { pickerCopy, subscriptionTierPublicCopy } from "@/lib/copy";
-import { usePickerStore, type PickerMessage } from "@/stores/use-picker-store";
+import { usePickerStore, type PickerDialogueMode, type PickerMessage } from "@/stores/use-picker-store";
 import { useAnalysisStore } from "@/stores/use-analysis-store";
 import type {
   CandidateStock,
@@ -156,6 +157,7 @@ type ConversationListItem = {
     ReturnType<typeof usePickerStore.getState>,
     | "sessionId"
     | "script"
+    | "dialogueMode"
     | "messages"
     | "preference_snapshot"
     | "conversation_phase"
@@ -172,7 +174,6 @@ type ExtractedStock = {
 
 const MAX_DRAFT_CHARS = 600;
 const DRAFT_STORAGE_PREFIX = "pick-draft:";
-const PICKER_OPTIONS_PANEL_KEY = "pick-options-panel-open";
 const PICKER_ARCHIVE_STORAGE_KEY = "pick-conversation-archive-v1";
 const PICKER_TITLE_STORAGE_KEY = "pick-conversation-title-v1";
 const PICKER_ACTIVE_SESSION_STORAGE_KEY = "pick-active-session-id-v1";
@@ -215,6 +216,7 @@ function createConversationItem(args: {
   messages: PickerMessage[];
   updatedAt?: number;
   script?: ReturnType<typeof usePickerStore.getState>["script"];
+  dialogueMode?: PickerDialogueMode;
   preference_snapshot?: PreferenceSnapshot;
   conversation_phase?: ConversationPhase;
   candidate_stocks?: CandidateStock[];
@@ -230,6 +232,7 @@ function createConversationItem(args: {
     snapshot: {
       sessionId: args.id,
       script: args.script ?? "start",
+      dialogueMode: args.dialogueMode ?? "prompt",
       messages: args.messages,
       preference_snapshot: args.preference_snapshot ?? DEFAULT_PREFERENCE_SNAPSHOT,
       conversation_phase: args.conversation_phase ?? "clarifying",
@@ -247,57 +250,6 @@ function buildMockConversationSeeds(): ConversationListItem[] {
 function upsertConversationItem(items: ConversationListItem[], next: ConversationListItem) {
   const rest = items.filter((item) => item.id !== next.id);
   return [next, ...rest].sort((a, b) => b.updatedAt - a.updatedAt);
-}
-
-function pickConditionLines(snapshot: PreferenceSnapshot) {
-  const market = snapshot.market === "CN" ? "A 股" : snapshot.market === "HK" ? "港股" : "美股";
-  const horizon =
-    snapshot.holding_horizon === "intraday_to_days"
-      ? "日内至数日"
-      : snapshot.holding_horizon === "w1_to_w4"
-        ? "1～4 周"
-        : snapshot.holding_horizon === "m1_to_m3"
-          ? "1～3 个月"
-          : "3 个月以上";
-  const style =
-    snapshot.style === "value"
-      ? "价值"
-      : snapshot.style === "growth"
-        ? "成长"
-        : snapshot.style === "momentum"
-          ? "动量/趋势"
-          : "无明确风格偏好";
-  const risk =
-    snapshot.risk_tier === "conservative"
-      ? "保守"
-      : snapshot.risk_tier === "balanced"
-        ? "平衡"
-        : "进取";
-  const cap =
-    snapshot.cap_liquidity === "unrestricted"
-      ? "不限制"
-      : snapshot.cap_liquidity === "large_mid_liquid"
-        ? "偏大中盘与流动性"
-        : "接受小盘高波动";
-  const sectors =
-    snapshot.sector_mode === "specified"
-      ? snapshot.sectors.length
-        ? snapshot.sectors.join("、")
-        : "已选指定行业（待确认）"
-      : "行业不限制";
-  const themes = snapshot.themes.length ? snapshot.themes.join("、") : "无主题叠加";
-  const exclusions = snapshot.exclusions.length ? snapshot.exclusions.join("、") : "无排除规则";
-
-  return [
-    { label: "市场", value: market },
-    { label: "行业", value: sectors },
-    { label: "周期", value: horizon },
-    { label: "风格", value: style },
-    { label: "风险", value: risk },
-    { label: "流动性", value: cap },
-    { label: "主题", value: themes },
-    { label: "排除", value: exclusions },
-  ];
 }
 
 function deriveConversationTitle(messages: PickerMessage[], script: ReturnType<typeof usePickerStore.getState>["script"]) {
@@ -369,6 +321,12 @@ function inferMarketFromCode(code: string): "CN" | "HK" | "US" {
   return "US";
 }
 
+function formatMarketShortLabel(market: "CN" | "HK" | "US") {
+  if (market === "CN") return "A股";
+  if (market === "HK") return "港股";
+  return "美股";
+}
+
 function upsertWatchlistStock(stock: ExtractedStock) {
   if (typeof window === "undefined") return;
   const code = stock.code.trim().toUpperCase();
@@ -432,6 +390,7 @@ function loadConversationArchiveFromStorage() {
           messages: Array.isArray(item.snapshot?.messages) ? item.snapshot.messages : [],
           updatedAt: Number(item.updatedAt) || 0,
           script: item.snapshot?.script,
+          dialogueMode: item.snapshot?.dialogueMode === "direct" ? "direct" : "prompt",
           preference_snapshot: item.snapshot?.preference_snapshot,
           conversation_phase: item.snapshot?.conversation_phase,
           candidate_stocks: item.snapshot?.candidate_stocks,
@@ -613,6 +572,7 @@ function ChatTimelineSection({
   messages,
   conversationMode,
   onEditMessage,
+  onDeleteMessage,
   sendPending,
   streamStatus,
   conversation_phase,
@@ -634,6 +594,7 @@ function ChatTimelineSection({
   messages: PickerMessage[];
   conversationMode: "consult" | "pick" | null;
   onEditMessage: (message: PickerMessage) => void;
+  onDeleteMessage: (message: PickerMessage) => void;
   sendPending: boolean;
   streamStatus: "idle" | "connecting" | "streaming";
   conversation_phase: ConversationPhase;
@@ -677,6 +638,7 @@ function ChatTimelineSection({
                     message={m}
                     anchorId={`pick-msg-item-${m.id}`}
                     onEditMessage={onEditMessage}
+                    onDeleteMessage={onDeleteMessage}
                     onAnalyzeStock={onEnterAnalyze}
                     onAddWatchlistStock={onAddWatchlistStock}
                     isInWatchlist={isInWatchlist}
@@ -684,7 +646,7 @@ function ChatTimelineSection({
                   />
                 ))
               )}
-              {conversation_phase === "candidates_shown" && candidate_stocks.length > 0 ? (
+              {conversationMode === "pick" && conversation_phase === "candidates_shown" && candidate_stocks.length > 0 ? (
                 <section className="border-t border-border/40 pt-3" aria-label="候选结果">
                   <p className="text-muted-foreground mb-2 text-xs leading-relaxed">{pickerCopy.candidatesSyncNote}</p>
                   <header className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
@@ -760,6 +722,7 @@ export default function PickPage() {
   const router = useRouter();
   const sessionId = usePickerStore((s) => s.sessionId);
   const messages = usePickerStore((s) => s.messages);
+  const dialogueMode = usePickerStore((s) => s.dialogueMode);
   const preference_snapshot = usePickerStore((s) => s.preference_snapshot);
   const conversation_phase = usePickerStore((s) => s.conversation_phase);
   const candidate_stocks = usePickerStore((s) => s.candidate_stocks);
@@ -774,7 +737,8 @@ export default function PickPage() {
   const clearQuotaBlocked = usePickerStore((s) => s.clearQuotaBlocked);
   const resetConversation = usePickerStore((s) => s.resetConversation);
   const sendUserText = usePickerStore((s) => s.sendUserText);
-  const applyAction = usePickerStore((s) => s.applyAction);
+  const setDialogueMode = usePickerStore((s) => s.setDialogueMode);
+  const removeMessage = usePickerStore((s) => s.removeMessage);
   const confirmedPreferenceSlots = usePickerStore((s) => s.confirmedPreferenceSlots);
   const [draftBySession, setDraftBySession] = useState<Record<string, string>>({});
   const draftTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -799,13 +763,12 @@ export default function PickPage() {
   const [renameDraft, setRenameDraft] = useState("");
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
+  const [deletingMessage, setDeletingMessage] = useState<PickerMessage | null>(null);
   const [selectedSuggestedActionIds, setSelectedSuggestedActionIds] = useState<string[]>([]);
   const [extractedPanelOpen, setExtractedPanelOpen] = useState(true);
   const [optionsPanelVisible, setOptionsPanelVisible] = useState(true);
   const [watchlistKeys, setWatchlistKeys] = useState<Set<string>>(() => loadWatchlistKeysFromStorage());
-  const pickPanelRestoredRef = useRef(false);
   const activeSnapshotHydratedRef = useRef(false);
-  const [pickPanelOpen, setPickPanelOpen] = useState(true);
   const draft = draftBySession[sessionId] ?? "";
 
   const setDraftForSession = useCallback(
@@ -833,6 +796,21 @@ export default function PickPage() {
     },
     [clearSendError, sendError, setDraftForSession],
   );
+
+  const handleDeleteMessage = useCallback(
+    (message: PickerMessage) => {
+      setDeletingMessage(message);
+    },
+    [],
+  );
+
+  const confirmDeleteMessage = useCallback(() => {
+    if (!deletingMessage) return;
+    if (sendError) clearSendError();
+    removeMessage(deletingMessage.id);
+    setDeletingMessage(null);
+    toast.success("消息已删除");
+  }, [clearSendError, deletingMessage, removeMessage, sendError]);
 
   const scrollChatToBottom = useCallback((behavior: ScrollBehavior) => {
     const anchor = chatBottomAnchorRef.current;
@@ -904,25 +882,9 @@ export default function PickPage() {
   }, [scheduleAutoScrollToBottom]);
 
 
-  const conversationMode = useMemo<"consult" | "pick" | null>(() => {
-    if (script === "consult_reply") return "consult";
-    if (
-      script === "pick_d1" ||
-      script === "pick_d2" ||
-      script === "pick_d2_sectors" ||
-      script === "pick_d3" ||
-      script === "pick_d4" ||
-      script === "pick_d5" ||
-      script === "pick_d6" ||
-      script === "pick_d7" ||
-      script === "pick_d8" ||
-      script === "ready" ||
-      script === "candidates"
-    ) {
-      return "pick";
-    }
-    return null;
-  }, [script]);
+  const conversationMode = dialogueMode === "direct" ? "consult" : "pick";
+  const inputPlaceholder =
+    dialogueMode === "direct" ? "直接提问市场、术语或工具使用方式" : "描述选股条件、风险偏好或持有周期";
 
   const toolbar_actions = useMemo(
     () => suggested_actions.filter((a) => a.action_id !== "intent_consult" && a.action_id !== "intent_pick"),
@@ -954,6 +916,7 @@ export default function PickPage() {
         messages,
         updatedAt: messages.at(-1)?.createdAt ?? messages.at(0)?.createdAt ?? 0,
         script,
+        dialogueMode,
         preference_snapshot,
         conversation_phase,
         candidate_stocks,
@@ -965,6 +928,7 @@ export default function PickPage() {
       conversationTitleOverrides,
       confirmedPreferenceSlots,
       conversation_phase,
+      dialogueMode,
       messages,
       preference_snapshot,
       script,
@@ -986,7 +950,6 @@ export default function PickPage() {
     );
   }, [conversationListItems, conversationSearch]);
 
-  const pickConditionItems = useMemo(() => pickConditionLines(preference_snapshot), [preference_snapshot]);
   const deletingConversationItem = useMemo(
     () => conversationListItems.find((item) => item.id === deletingConversationId) ?? null,
     [conversationListItems, deletingConversationId],
@@ -1053,7 +1016,7 @@ export default function PickPage() {
     const ro = new ResizeObserver(() => measureHeight());
     ro.observe(composer);
     return () => ro.disconnect();
-  }, [pickPanelOpen, draft, sendPending, streamingOptionsPending, toolbar_actions.length]);
+  }, [draft, sendPending, streamingOptionsPending, toolbar_actions.length]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1133,6 +1096,7 @@ export default function PickPage() {
         JSON.stringify({
           sessionId: currentConversationItem.snapshot.sessionId,
           script: currentConversationItem.snapshot.script,
+          dialogueMode: currentConversationItem.snapshot.dialogueMode,
           messages: currentConversationItem.snapshot.messages,
           preference_snapshot: currentConversationItem.snapshot.preference_snapshot,
           conversation_phase: currentConversationItem.snapshot.conversation_phase,
@@ -1254,28 +1218,6 @@ export default function PickPage() {
     setDeletingConversationId(null);
   }, [conversationListItems, deletingConversationId, resetConversation, sessionId]);
 
-  useEffect(() => {
-    queueMicrotask(() => {
-      if (typeof window === "undefined") return;
-      try {
-        const closed = window.localStorage.getItem(PICKER_OPTIONS_PANEL_KEY) === "0";
-        setPickPanelOpen(!closed);
-      } catch {
-        // Ignore storage read failure.
-      }
-      pickPanelRestoredRef.current = true;
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!pickPanelRestoredRef.current || typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(PICKER_OPTIONS_PANEL_KEY, pickPanelOpen ? "1" : "0");
-    } catch {
-      // Ignore storage write failure.
-    }
-  }, [pickPanelOpen]);
-
   const resizeDraftTextarea = useCallback(() => {
     const el = draftTextareaRef.current;
     if (!el) return;
@@ -1322,7 +1264,6 @@ export default function PickPage() {
   }, [selectedSuggestedActionIds.length]);
 
   const handleCloseSuggestedPanel = useCallback(() => {
-    setPickPanelOpen(false);
     setOptionsPanelVisible(false);
   }, []);
 
@@ -1387,6 +1328,7 @@ export default function PickPage() {
               messages={messages}
               conversationMode={conversationMode}
               onEditMessage={handleEditMessage}
+              onDeleteMessage={handleDeleteMessage}
               sendPending={sendPending}
               streamStatus={streamStatus}
               conversation_phase={conversation_phase}
@@ -1436,22 +1378,35 @@ export default function PickPage() {
               <div className="pointer-events-auto mx-auto w-full max-w-4xl px-1 md:px-0">
                 <section aria-label="当前对话股票提取">
                   <Collapsible open={extractedPanelOpen} onOpenChange={setExtractedPanelOpen}>
-                    <div className="rounded-lg border bg-background">
-                      <CollapsibleTrigger className="hover:bg-muted/60 flex w-full items-center justify-between px-2 py-1 text-left transition-colors">
-                        <div className="min-w-0">
-                          <p className="flex items-center gap-1.5 text-sm font-medium leading-tight">
-                            <TrendingUpIcon className="text-muted-foreground size-3.5" />
-                            <span>识别股票</span>
-                          </p>
+                    <div className="overflow-hidden rounded-lg border bg-background shadow-sm transition-colors hover:border-ring/40">
+                      <CollapsibleTrigger className="group/stock-trigger flex w-full items-center justify-between gap-2 px-2.5 py-2 text-left transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground transition-colors group-hover/stock-trigger:bg-background group-hover/stock-trigger:text-foreground">
+                            <TrendingUpIcon className="size-3.5" />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="flex items-center gap-1.5 text-sm font-medium leading-tight">
+                              <span>识别股票</span>
+                              <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                                {currentConversationExtractedStocks.length} 只
+                              </Badge>
+                            </p>
+                            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                              从当前对话中提取，可直接分析或加入自选。
+                            </p>
+                          </div>
                         </div>
                         <ChevronDownIcon
-                          className={cn("size-4 shrink-0 transition-transform", extractedPanelOpen ? "rotate-180" : "")}
+                          className={cn(
+                            "size-4 shrink-0 text-muted-foreground transition group-hover/stock-trigger:text-foreground",
+                            extractedPanelOpen ? "rotate-180" : "",
+                          )}
                         />
                       </CollapsibleTrigger>
-                      <CollapsibleContent className="border-t px-2 py-1">
+                      <CollapsibleContent className="border-t bg-muted/10 px-2 py-2">
                         <ScrollArea className="h-52 min-h-0 pr-1">
                           <ItemGroup
-                            className="grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4"
+                            className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4"
                             aria-label="当前对话提取股票列表"
                           >
                             {currentConversationExtractedStocks.map((stock) => (
@@ -1460,17 +1415,29 @@ export default function PickPage() {
                                 const watchlistKey = `${market}.${stock.code.trim().toUpperCase()}`;
                                 const alreadyInWatchlist = watchlistKeys.has(watchlistKey);
                                 return (
-                              <Item key={stock.code} size="xs" variant="outline">
-                                <ItemHeader>
+                              <Item
+                                key={stock.code}
+                                size="xs"
+                                variant="outline"
+                                className="bg-background/80 transition-all hover:border-ring/40 hover:bg-background hover:shadow-sm"
+                              >
+                                <ItemHeader className="min-w-0">
                                   <ItemContent>
-                                    <ItemTitle className="text-xs">{stock.name}</ItemTitle>
-                                    <ItemDescription className="text-[11px] leading-tight">{stock.code}</ItemDescription>
+                                    <ItemTitle className="max-w-32 text-xs sm:max-w-28">
+                                      <span className="truncate">{stock.name}</span>
+                                    </ItemTitle>
+                                    <ItemDescription className="flex items-center gap-1.5 text-[11px] leading-tight">
+                                      <Badge variant="outline" className="h-4 px-1 text-[10px]">
+                                        {formatMarketShortLabel(market)}
+                                      </Badge>
+                                      <span>{stock.code}</span>
+                                    </ItemDescription>
                                   </ItemContent>
                                   <ItemActions className="gap-1">
                                     <Button
                                       type="button"
                                       size="xs"
-                                      variant="outline"
+                                      variant="secondary"
                                       onClick={() => {
                                         const market = inferMarketFromCode(stock.code);
                                         useAnalysisStore.getState().setPendingHandoff({
@@ -1490,6 +1457,7 @@ export default function PickPage() {
                                             type="button"
                                             size="icon-xs"
                                             variant={alreadyInWatchlist ? "secondary" : "outline"}
+                                            className="hover:bg-muted"
                                             disabled={alreadyInWatchlist}
                                             aria-label={alreadyInWatchlist ? "已在自选" : `将 ${stock.name} 加入自选`}
                                             onClick={() => {
@@ -1537,96 +1505,6 @@ export default function PickPage() {
                     <Spinner />
                     {streamStatus === "connecting" ? "正在连接对话服务..." : "正在生成回复..."}
                   </div>
-                ) : conversationMode === "pick" && optionsPanelVisible ? (
-                <Collapsible open={pickPanelOpen} onOpenChange={setPickPanelOpen}>
-                  <div className="rounded-lg border bg-card">
-                      <CollapsibleTrigger
-                        className="hover:bg-muted/60 flex w-full items-center justify-between px-2.5 py-1.5 text-left transition-colors"
-                        aria-label="展开或收起选股条件与选项"
-                      >
-                        <div className="min-w-0">
-                          <p className="flex items-center gap-1.5 text-sm font-medium leading-tight">
-                            <TrendingUpIcon className="text-muted-foreground size-3.5" />
-                            <span>选股条件与选项</span>
-                          </p>
-                          <div className="mt-1 flex flex-wrap items-center gap-1">
-                            <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                              条件 {pickConditionItems.length}
-                            </Badge>
-                            <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                              可选项 {toolbar_actions.length}
-                            </Badge>
-                          </div>
-                        </div>
-                        <ChevronDownIcon
-                          className={cn("size-4 shrink-0 transition-transform", pickPanelOpen ? "rotate-180" : "")}
-                        />
-                      </CollapsibleTrigger>
-                    <CollapsibleContent className="border-t px-2.5 py-2">
-                      <p className="text-muted-foreground mb-1 text-[11px]">条件快照</p>
-                      <dl className="grid gap-1 sm:grid-cols-2">
-                          {pickConditionItems.map((item) => (
-                          <div key={item.label} className="bg-muted/70 rounded-md px-1.5 py-1">
-                            <dt className="text-muted-foreground text-[11px] leading-none">{item.label}</dt>
-                            <dd className="truncate pt-0.5 text-xs leading-tight">{item.value}</dd>
-                          </div>
-                          ))}
-                      </dl>
-                        <p className="text-muted-foreground mt-2 mb-1 text-[11px]">可选动作</p>
-                        {toolbar_actions.length === 0 ? (
-                          <Empty className="mt-1 min-h-0 flex-none gap-1 rounded-md border border-dashed p-1.5">
-                            <EmptyDescription className="text-xs">当前步骤暂无可选项。</EmptyDescription>
-                          </Empty>
-                        ) : (
-                          <ul className="mt-1 flex max-h-28 flex-wrap gap-1 overflow-y-auto pr-1" aria-label="选股可选项">
-                            {orderedToolbarActions.map((a) => {
-                              const active = isActionActive(a.action_id, preference_snapshot);
-                              return (
-                              <li key={a.action_id}>
-                                <Button
-                                  type="button"
-                                  size="xs"
-                                  variant={
-                                    active
-                                      ? "default"
-                                      : a.kind === "primary"
-                                        ? "secondary"
-                                        : "outline"
-                                  }
-                                  aria-label={`选股选项：${a.label}`}
-                                  disabled={sendPending}
-                                  onClick={() => applyAction(a.action_id)}
-                                >
-                                  {active ? <CheckIcon data-icon="inline-start" /> : null}
-                                  {a.label}
-                                </Button>
-                              </li>
-                              );
-                            })}
-                          </ul>
-                        )}
-                        <div className="mt-1 ml-auto flex justify-end">
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <Button
-                                  type="button"
-                                  size="icon-xs"
-                                  variant="ghost"
-                                  disabled={sendPending}
-                                  onClick={handleCloseSuggestedPanel}
-                                  aria-label="关闭条件与选项面板"
-                                >
-                                  <ChevronDownIcon />
-                                </Button>
-                              }
-                            />
-                            <TooltipContent side="top" align="end">关闭</TooltipContent>
-                          </Tooltip>
-                        </div>
-                    </CollapsibleContent>
-                  </div>
-                </Collapsible>
                 ) : toolbar_actions.length > 0 && optionsPanelVisible ? (
                   <div className="rounded-lg border p-1">
                     <ul className="flex flex-col gap-0.5" aria-label="建议操作多选列表">
@@ -1707,7 +1585,7 @@ export default function PickPage() {
                     ref={draftTextareaRef}
                     id="pick-input"
                     value={draft}
-                    placeholder={pickerCopy.inputPlaceholder}
+                    placeholder={inputPlaceholder}
                     disabled={sendPending}
                     aria-invalid={sendError ? true : undefined}
                     className="max-h-[min(40svh,16rem)] min-h-14 px-2.5 py-2 md:min-h-16"
@@ -1736,11 +1614,11 @@ export default function PickPage() {
                     className="justify-between gap-1.5 group-data-[disabled=true]/input-group:opacity-100"
                   >
                     <Select
-                      value={conversationMode ?? "pick"}
+                      value={conversationMode}
                       onValueChange={(v) => {
                         if (!v || sendPending || streamingOptionsPending) return;
-                        if (v === "consult") applyAction("intent_consult");
-                        if (v === "pick") applyAction("intent_pick");
+                        if (v === "consult") setDialogueMode("direct");
+                        if (v === "pick") setDialogueMode("prompt");
                       }}
                     >
                       <SelectTrigger
@@ -1749,7 +1627,7 @@ export default function PickPage() {
                         disabled={sendPending || streamingOptionsPending}
                       >
                         {(() => {
-                          const mode = (conversationMode ?? "pick") as "consult" | "pick";
+                          const mode = conversationMode;
                           const Icon = conversationModeIcons[mode];
                           return (
                             <div className="flex items-center gap-1.5">
@@ -1881,6 +1759,28 @@ export default function PickPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={Boolean(deletingMessage)}
+        onOpenChange={(open) => {
+          if (!open) setDeletingMessage(null);
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除这条消息？</AlertDialogTitle>
+            <AlertDialogDescription>
+              删除后会从当前对话中移除，并同步更新本地会话记录。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDeleteMessage}>
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={Boolean(deletingConversationId)}

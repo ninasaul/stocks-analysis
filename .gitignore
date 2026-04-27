@@ -10,10 +10,6 @@ node_modules
 .next
 out
 
-# Cloudflare / OpenNext build output
-.open-next
-.wrangler
-
 # Python
 __pycache__
 *.py[cod]
@@ -46,6 +42,10 @@ scripts/deploy-web-vps.env
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Tauri
+apps/desktop/src-tauri/target
+apps/desktop/src-tauri/tauri.generated.conf.json
 
 docs/TradingAgents-CN-main
 apps/api/logs

@@ -9,7 +9,7 @@ import type {
   SuggestedAction,
 } from "@/lib/contracts/domain";
 import { preferenceSnapshotSchema } from "@/lib/contracts/domain";
-import { requestPickerTurnStream } from "@/lib/api/picker";
+import { requestPickerTurnStream, type DialogueMode } from "@/lib/api/picker";
 import { isMockFlowEnabled } from "@/lib/env";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useSubscriptionStore } from "@/stores/use-subscription-store";
@@ -20,6 +20,8 @@ export type PickerMessage = {
   content: string;
   createdAt: number;
 };
+
+export type PickerDialogueMode = DialogueMode;
 
 type PickerScript =
   | "start"
@@ -40,6 +42,7 @@ type PickerScript =
 type PickerState = {
   sessionId: string;
   script: PickerScript;
+  dialogueMode: PickerDialogueMode;
   messages: PickerMessage[];
   preference_snapshot: PreferenceSnapshot;
   conversation_phase: ConversationPhase;
@@ -55,6 +58,8 @@ type PickerState = {
   clearQuotaBlocked: () => void;
   resetConversation: () => void;
   continueSession: () => void;
+  removeMessage: (messageId: string) => void;
+  setDialogueMode: (mode: PickerDialogueMode) => void;
   sendUserText: (text: string) => Promise<boolean>;
   applyAction: (action_id: string) => void;
   /** 仅修改交易市场（D1） */
@@ -300,6 +305,7 @@ function buildExtensionQuestionActions(extensionQuestions: string[]): SuggestedA
 export const usePickerStore = create<PickerState>((set, get) => ({
   sessionId: INITIAL_SESSION_ID,
   script: "start",
+  dialogueMode: "prompt",
   messages: [
     {
       id: INITIAL_MESSAGE_ID,
@@ -327,6 +333,7 @@ export const usePickerStore = create<PickerState>((set, get) => ({
     set({
       sessionId: id(),
       script: "start",
+      dialogueMode: "prompt",
       messages: [{ id: id(), role: "assistant", content: starterAssistantMessage, createdAt: Date.now() }],
       preference_snapshot: defaultSnapshot,
       conversation_phase: "clarifying",
@@ -345,6 +352,20 @@ export const usePickerStore = create<PickerState>((set, get) => ({
   continueSession: () => {
     set({ resumePrompt: false });
     pushAssistant(set, "已载入上次会话。请选择下一步。", startActions, "clarifying");
+  },
+
+  removeMessage: (messageId) => {
+    set((s) => ({
+      messages: s.messages.filter((message) => message.id !== messageId),
+    }));
+  },
+
+  setDialogueMode: (mode) => {
+    set({
+      dialogueMode: mode,
+      suggested_actions: mode === "direct" ? [] : get().suggested_actions,
+      streamingOptionsPending: false,
+    });
   },
 
   editMarket: () => {
@@ -397,8 +418,9 @@ export const usePickerStore = create<PickerState>((set, get) => ({
         ],
       }));
 
+      const requestMode = get().dialogueMode;
       const turn = await requestPickerTurnStream(
-        { session_id: currentSessionId, text: t },
+        { session_id: currentSessionId, text: t, mode: requestMode },
         {
           onChunk: (chunk) => {
             if (get().streamStatus === "connecting") {
@@ -428,7 +450,7 @@ export const usePickerStore = create<PickerState>((set, get) => ({
       }
       const actions = buildExtensionQuestionActions(turn.extension_questions);
       set({
-        suggested_actions: actions,
+        suggested_actions: requestMode === "prompt" ? actions : [],
         conversation_phase: "clarifying",
         script: "backend_dialogue",
         sessionId: turn.session_id || currentSessionId,
@@ -469,7 +491,7 @@ export const usePickerStore = create<PickerState>((set, get) => ({
 
     if (action_id === "intent_consult") {
       pushUser(set, "随便问问");
-      set({ script: "consult_reply" });
+      set({ script: "consult_reply", dialogueMode: "direct" });
       pushAssistant(
         set,
           "择时研究强调在风险可控前提下观察价格结构与波动边界；本工具不提供收益承诺。若需要候选列表，请选择「帮我选股」。",
@@ -489,7 +511,7 @@ export const usePickerStore = create<PickerState>((set, get) => ({
         return;
       }
       pushUser(set, "帮我选股");
-      set({ script: "pick_d1", streamingOptionsPending: true, suggested_actions: [] });
+      set({ script: "pick_d1", dialogueMode: "prompt", streamingOptionsPending: true, suggested_actions: [] });
       window.setTimeout(() => {
         pushAssistant(
           set,

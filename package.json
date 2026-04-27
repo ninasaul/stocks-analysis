@@ -1,12 +1,15 @@
 {
-  "name": "stocks-analysis-simple",
+  "name": "TuringFin",
   "version": "0.0.0",
   "private": true,
   "packageManager": "npm@11.6.1",
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint"
+    "lint": "turbo run lint",
+    "desktop:dev": "npm --workspace desktop run desktop:dev",
+    "desktop:build": "npm --workspace desktop run desktop:build",
+    "desktop:build:debug": "npm --workspace desktop run desktop:build:debug"
   },
   "devDependencies": {
     "turbo": "^2.5.4"
