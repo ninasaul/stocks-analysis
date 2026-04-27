@@ -35,7 +35,8 @@ class DatabaseManager:
                 port=int(os.getenv("DB_PORT", "5432")),
                 database=os.getenv("DB_NAME", "stocks_analysis"),
                 user=os.getenv("DB_USER", "postgres"),
-                password=os.getenv("DB_PASSWORD", "")
+                password=os.getenv("DB_PASSWORD", ""),
+                options="-c timezone=Asia/Shanghai"
             )
             logger.info("数据库连接池初始化成功")
         except Exception as e:

@@ -241,16 +241,36 @@ class DatabaseInitializer:
             stock_code VARCHAR(20) NOT NULL,
             analysis_date DATE NOT NULL,
             analysis_result JSONB NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            CONSTRAINT fk_stock_analysis_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-            UNIQUE(user_id, stock_code, analysis_date)
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_stock_analysis_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
         CREATE INDEX IF NOT EXISTS idx_stock_analysis_user_date ON stock_analysis_results(user_id, analysis_date);
         CREATE INDEX IF NOT EXISTS idx_stock_analysis_stock_date ON stock_analysis_results(stock_code, analysis_date);
         """
         self.execute_sql(sql, "创建股票分析结果表")
+
+    def create_user_stock_watchlist_table(self):
+        """创建用户股票跟踪池表"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS user_stock_watchlist (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            stock_code VARCHAR(20) NOT NULL,
+            stock_name VARCHAR(100) NOT NULL,
+            exchange VARCHAR(20),
+            market VARCHAR(20),
+            added_date DATE NOT NULL DEFAULT CURRENT_DATE,
+            ended_date DATE NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_watchlist_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            CONSTRAINT uq_watchlist_user_stock UNIQUE (user_id, stock_code)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_watchlist_user_id ON user_stock_watchlist(user_id);
+        CREATE INDEX IF NOT EXISTS idx_watchlist_stock_code ON user_stock_watchlist(stock_code);
+        """
+        self.execute_sql(sql, "创建用户股票跟踪池表")
 
     def create_all_tables(self):
         """创建所有表"""
@@ -263,6 +283,8 @@ class DatabaseInitializer:
         self.create_refresh_tokens_table()
         self.create_token_blacklist_table()
         self.create_wechat_users_table()
+        self.create_stock_analysis_results_table()
+        self.create_user_stock_watchlist_table()
         self.apply_schema_patches()
 
         print("=" * 50)
@@ -276,6 +298,12 @@ class DatabaseInitializer:
         ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(100);
         ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(255);
         CREATE INDEX IF NOT EXISTS idx_users_display_name ON users(display_name);
+
+        -- 删除stock_analysis_results表中的唯一约束（如果存在）
+        ALTER TABLE stock_analysis_results DROP CONSTRAINT IF EXISTS stock_analysis_results_user_id_stock_code_analysis_date_key;
+        
+        -- 修改created_at字段为带时区的TIMESTAMP WITH TIME ZONE
+        ALTER TABLE stock_analysis_results ALTER COLUMN created_at TYPE TIMESTAMP WITH TIME ZONE USING created_at AT TIME ZONE 'Asia/Shanghai';
         """
         self.execute_sql(sql, "应用数据库结构补丁（仅加列/索引，不做历史数据回填）")
 
@@ -288,6 +316,7 @@ class DatabaseInitializer:
             return
 
         sql = """
+        DROP TABLE IF EXISTS user_stock_watchlist CASCADE;
         DROP TABLE IF EXISTS stock_analysis_results CASCADE;
         DROP TABLE IF EXISTS wechat_users CASCADE;
         DROP TABLE IF EXISTS token_blacklist CASCADE;

@@ -564,8 +564,7 @@ class TimingScorer:
             ema = (float(val) - ema) * multiplier + ema
         return ema
 
-    @staticmethod
-    def _composite_to_signal(score: float) -> str:
+    def _composite_to_signal(self, score: float) -> str:
         """综合得分转为交易信号"""
         if score >= 0.15:
             return "BUY"
