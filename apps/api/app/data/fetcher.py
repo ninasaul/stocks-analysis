@@ -3,6 +3,7 @@ import akshare as ak
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 from ..core.logging import logger
+from ..core.stock_service import StockService
 
 
 def fetch_stock_data(ticker: str, days: int = 60, buffer_days: int = 30) -> List[Dict]:
@@ -83,32 +84,11 @@ def fetch_fundamental(ticker: str) -> Dict:
     # TODO 当天获取的数据进行缓存，避免重复获取
     logger.info(f"开始获取股票 {ticker} 的基本面数据")
     try:
-        # 确定股票类型
-        if ticker.startswith('6'):
-            # 沪市
-            symbol = f"SH{ticker}"
-        elif ticker.startswith('0') or ticker.startswith('3'):
-            # 深市
-            symbol = f"SZ{ticker}"
-        elif ticker.startswith('8') or ticker.startswith('920'):
-            # 北交所
-            symbol = f"BJ{ticker}"
-        else:
-            # TODO 其他市场目前不支持获取数据，返回空列表
-            symbol = ticker
-            logger.warning(f"不支持的股票市场: {ticker}")
-            return {}
-
-        # 获取股票基本信息
-        stock_individual_basic_info_xq_df = ak.stock_individual_basic_info_xq(symbol=symbol)
-        # 筛选出item为affiliate_industry的行
-        industry_row = stock_individual_basic_info_xq_df[stock_individual_basic_info_xq_df["item"] == "affiliate_industry"]
-        # 获取字典值
-        industry_dict = industry_row["value"].values[0]
-        # 提取行业名称
-        industry_name = industry_dict.get("ind_name")
-        # 提取股票名称
-        org_short_name_cn = stock_individual_basic_info_xq_df[stock_individual_basic_info_xq_df["item"] == "org_short_name_cn"].iloc[0]["value"]
+        # 获取股票基本信息（从 StockService 获取，避免使用有问题的接口）
+        stock_service = StockService()
+        stock_basic_info = stock_service.get_stock_basic_info(ticker)
+        org_short_name_cn = stock_basic_info.get('name', '')
+        industry_name = stock_basic_info.get('industry', '')
 
         # 获取股票估值信息
         stock_info = ak.stock_value_em(symbol=ticker)
