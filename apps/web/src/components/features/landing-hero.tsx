@@ -28,23 +28,23 @@ const featureIcons = [FileTextIcon, MessagesSquareIcon, HistoryIcon, SparklesIco
 const howItWorksSteps = [
   {
     icon: SparklesIcon,
-    title: "AI Agent 解析任务",
-    description: "先识别你是单票深度研判，还是先选股再下钻，并自动匹配最佳工作流。",
+    title: "Step 01 · 识别意图",
+    description: "自动判断你是要研判个股，还是先筛后研，匹配最佳流程。",
   },
   {
     icon: MessagesSquareIcon,
-    title: "AI Agent 交互收敛",
-    description: "在对话中补齐风险偏好、持有周期与条件，持续澄清问题直到可执行。",
+    title: "Step 02 · 对话收敛",
+    description: "补齐风险偏好、持有周期等关键条件，直到方向清晰可执行。",
   },
   {
     icon: FileTextIcon,
-    title: "AI Agent 生成输出",
-    description: "产出结构化报告：评分、风险等级、关键价位、失效条件，支持导出与打印。",
+    title: "Step 03 · 生成报告",
+    description: "输出结构化内容：评分、风险等级、关键价位、失效条件。",
   },
   {
     icon: HistoryIcon,
-    title: "AI Agent 记录复盘",
-    description: "登录后自动沉淀建议到历史与复盘，便于按同一口径回看与校验判断质量。",
+    title: "Step 04 · 存入复盘",
+    description: "建议自动沉淀到历史记录，随时按同一口径回看与验证。",
   },
 ] as const;
 
@@ -224,14 +224,14 @@ function LandingReportPreview() {
             </span>
           </div>
         </div>
+        <div className="border-border/35 border-b bg-muted/30 px-3 py-2 text-center">
+          <p className="text-muted-foreground text-[11px] font-medium tracking-wide">
+            以下为示例数据，非实时行情
+          </p>
+        </div>
         <Card className="rounded-none border-0 bg-transparent shadow-none">
           <CardHeader className="gap-2 border-b border-border/35 pb-4">
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-base">贵州茅台（600519.SH）</CardTitle>
-              <Badge variant="outline" className="text-[10px]">
-                示例数据
-              </Badge>
-            </div>
+            <CardTitle className="text-base">贵州茅台（600519.SH）</CardTitle>
             <p className="text-muted-foreground text-xs font-mono">2026-04-20 14:30 · 日线 · CNY</p>
           </CardHeader>
           <CardContent className="flex flex-col gap-4 py-5">
@@ -243,7 +243,7 @@ function LandingReportPreview() {
                 <span className="text-muted-foreground text-xs">风险：中等</span>
               </div>
               <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
-                趋势向上且成交额温和放大，回踩未破 10 日均线，维持偏多观点，回撤可分批吸纳。
+                趋势向上，成交温和放大；回踩未破 10 日均线，偏多观点维持，回撤可分批介入。
               </p>
             </div>
             <div className="grid grid-cols-3 gap-2">
@@ -306,7 +306,20 @@ function LandingFeaturesSection() {
             <h2 id="landing-features-heading" className="text-foreground text-3xl font-semibold tracking-tight md:text-4xl">
               {landingCopy.featuresHeading}
             </h2>
+            <p className="text-foreground mt-3 text-xl font-semibold tracking-tight md:text-2xl">
+              {landingCopy.featuresTitle}
+            </p>
             <p className="text-muted-foreground mt-4 text-sm leading-relaxed md:text-base">{landingCopy.featuresSectionLead}</p>
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              {landingCopy.featuresTags.map((tag) => (
+                <Badge key={tag} variant="outline" className="bg-background/60">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+            <p className="text-muted-foreground mx-auto mt-5 max-w-2xl text-xs leading-relaxed">
+              {landingCopy.featuresDisclaimer}
+            </p>
           </div>
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
             <Card
@@ -329,7 +342,7 @@ function LandingFeaturesSection() {
               </CardHeader>
               <CardContent className="space-y-3 pt-0">
                 <p className="text-muted-foreground text-xs leading-relaxed">
-                  <span className="text-foreground font-medium">主要交付：</span>
+                  <span className="text-foreground font-medium">交付：</span>
                   {analysisFeature.deliverable}
                 </p>
                 <p className="text-muted-foreground text-xs leading-relaxed">
@@ -338,9 +351,14 @@ function LandingFeaturesSection() {
                 </p>
               </CardContent>
               <CardFooter className="mt-auto">
-                <Button size="sm" className="w-full" render={<Link href="/app/analyze" />}>
-                  {landingCopy.featuresAnalyzeCta}
-                </Button>
+                <div className="w-full space-y-2">
+                  <Button size="sm" className="w-full" render={<Link href="/app/analyze" />}>
+                    {landingCopy.featuresAnalyzeCta}
+                  </Button>
+                  <p className="text-muted-foreground text-center text-xs leading-relaxed">
+                    {landingCopy.featuresCtaHint}
+                  </p>
+                </div>
               </CardFooter>
             </Card>
 
@@ -351,7 +369,7 @@ function LandingFeaturesSection() {
                   <span className="bg-background text-muted-foreground inline-flex size-8 items-center justify-center rounded-lg border border-border/40">
                     <StrategyIcon className="size-4" aria-hidden />
                   </span>
-                  <span className="text-muted-foreground/80 font-mono text-xs">02</span>
+                  <span className="text-muted-foreground/80 font-mono text-xs">02 ·</span>
                 </div>
                 <CardTitle className="text-foreground text-lg">{strategyFeature.title}</CardTitle>
                 <CardDescription className="text-muted-foreground text-sm leading-relaxed">
@@ -360,7 +378,7 @@ function LandingFeaturesSection() {
               </CardHeader>
               <CardContent className="pt-0">
                 <p className="text-muted-foreground text-xs leading-relaxed">
-                  <span className="text-foreground font-medium">主要交付：</span>
+                  <span className="text-foreground font-medium">交付：</span>
                   {strategyFeature.deliverable}
                 </p>
               </CardContent>
@@ -382,7 +400,7 @@ function LandingFeaturesSection() {
                   <span className="bg-background text-muted-foreground inline-flex size-8 items-center justify-center rounded-lg border border-border/40">
                     <ReviewIcon className="size-4" aria-hidden />
                   </span>
-                  <span className="text-muted-foreground/80 font-mono text-xs">03</span>
+                  <span className="text-muted-foreground/80 font-mono text-xs">03 ·</span>
                 </div>
                 <CardTitle className="text-foreground text-lg">{reviewFeature.title}</CardTitle>
                 <CardDescription className="text-muted-foreground text-sm leading-relaxed">
@@ -391,7 +409,7 @@ function LandingFeaturesSection() {
               </CardHeader>
               <CardContent className="pt-0">
                 <p className="text-muted-foreground text-xs leading-relaxed">
-                  <span className="text-foreground font-medium">主要交付：</span>
+                  <span className="text-foreground font-medium">交付：</span>
                   {reviewFeature.deliverable}
                 </p>
               </CardContent>
@@ -403,7 +421,7 @@ function LandingFeaturesSection() {
                   <span className="bg-background text-muted-foreground inline-flex size-8 items-center justify-center rounded-lg border border-border/40">
                     <GovernanceIcon className="size-4" aria-hidden />
                   </span>
-                  <span className="text-muted-foreground/80 font-mono text-xs">04</span>
+                  <span className="text-muted-foreground/80 font-mono text-xs">04 ·</span>
                 </div>
                 <CardTitle className="text-foreground text-lg">{governanceFeature.title}</CardTitle>
                 <CardDescription className="text-muted-foreground text-sm leading-relaxed">
@@ -412,7 +430,7 @@ function LandingFeaturesSection() {
               </CardHeader>
               <CardContent className="pt-0">
                 <p className="text-muted-foreground text-xs leading-relaxed">
-                  <span className="text-foreground font-medium">主要交付：</span>
+                  <span className="text-foreground font-medium">交付：</span>
                   {governanceFeature.deliverable}
                 </p>
               </CardContent>

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   ANALYZE_DEPTH_SUMMARY,
   ANALYZE_MODEL_OPTIONS,
@@ -74,7 +73,7 @@ export function AnalyzePreferencesSettings() {
       <Card role="region" aria-labelledby="settings-subsection-analysis-prefs">
         <CardHeader>
           <CardTitle id="settings-subsection-analysis-prefs">分析偏好</CardTitle>
-          <CardDescription>默认分析深度、团队与模型；在未关联选股偏好时用于股票预测。</CardDescription>
+          <CardDescription>默认分析深度、团队与模型配置。</CardDescription>
         </CardHeader>
         <CardContent>
           <PageLoadingState title="正在加载分析偏好" description="正在读取本机保存的默认配置。" />
@@ -90,9 +89,7 @@ export function AnalyzePreferencesSettings() {
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1 space-y-1">
           <CardTitle id="settings-subsection-analysis-prefs">分析偏好</CardTitle>
-          <CardDescription>
-            配置股票预测的默认分析深度、分析师团队、模型与报告语言。未关联选股偏好时，「分析配置」弹窗会以此为准；每次成功生成报告后也会用当次配置覆盖此处，便于下次沿用。
-          </CardDescription>
+          <CardDescription>用于设置股票预测的默认参数。</CardDescription>
         </div>
         <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => resetToDefaults()}>
           恢复默认
@@ -112,14 +109,14 @@ export function AnalyzePreferencesSettings() {
               }
             }}
             aria-labelledby="settings-depth-legend"
-            className="max-w-xl gap-1 lg:max-w-2xl"
+            className="grid gap-2 sm:grid-cols-2"
           >
             {([1, 2, 3, 4, 5] as const).map((d) => {
               const meta = ANALYZE_DEPTH_SUMMARY[d];
               return (
                 <label
                   key={d}
-                  className="hover:bg-muted/50 -mx-1 flex cursor-pointer items-start gap-3 rounded-md px-1 py-2"
+                  className="hover:bg-muted/50 bg-background flex cursor-pointer items-start gap-3 rounded-lg border p-3"
                 >
                   <RadioGroupItem value={String(d)} className="mt-0.5" />
                   <span className="min-w-0 flex-1 space-y-1">
@@ -145,17 +142,21 @@ export function AnalyzePreferencesSettings() {
               const checked = analystSet.has(row.id);
               const boxId = `settings-analyst-${row.id}`;
               return (
-                <Field key={row.id} orientation="horizontal" className="items-start gap-3 rounded-lg border p-3">
+                <Field
+                  key={row.id}
+                  orientation="horizontal"
+                  className="hover:bg-muted/50 bg-background items-start gap-3 rounded-lg border p-3"
+                >
                   <Checkbox
                     id={boxId}
                     checked={checked}
                     onCheckedChange={() => toggleAnalystRole(row.id)}
                   />
                   <div className="min-w-0 flex-1 space-y-1">
-                    <FieldLabel htmlFor={boxId} className="cursor-pointer leading-snug">
-                      <span className="font-medium">{row.title}</span>
+                    <FieldLabel htmlFor={boxId} className="cursor-pointer">
+                      <span className="text-foreground block text-sm leading-snug font-medium">{row.title}</span>
                     </FieldLabel>
-                    <FieldDescription>{row.description}</FieldDescription>
+                    <FieldDescription className="text-xs leading-relaxed">{row.description}</FieldDescription>
                   </div>
                 </Field>
               );
@@ -208,14 +209,14 @@ export function AnalyzePreferencesSettings() {
           <Field orientation="responsive">
             <FieldContent>
               <FieldTitle>情绪分析</FieldTitle>
-              <FieldDescription>开启后报告纳入情绪与风险偏好相关结论。</FieldDescription>
+              <FieldDescription>在报告中加入情绪维度。</FieldDescription>
             </FieldContent>
             <Switch checked={sentiment} onCheckedChange={(v) => setSentiment(Boolean(v))} />
           </Field>
           <Field orientation="responsive">
             <FieldContent>
               <FieldTitle>风险评估</FieldTitle>
-              <FieldDescription>开启后输出波动、仓位与失效条件等风险提示。</FieldDescription>
+              <FieldDescription>输出风险与仓位提示。</FieldDescription>
             </FieldContent>
             <Switch checked={riskAssessment} onCheckedChange={(v) => setRiskAssessment(Boolean(v))} />
           </Field>
@@ -240,15 +241,6 @@ export function AnalyzePreferencesSettings() {
           </Field>
         </FieldGroup>
 
-        <Separator />
-
-        <p className="text-muted-foreground text-sm">
-          前往{" "}
-          <Link href="/app/analyze" className="text-foreground font-medium underline-offset-4 hover:underline">
-            股票预测
-          </Link>{" "}
-          使用「分析配置」可临时调整单次运行参数；关联选股偏好后，弹窗会优先采用该偏好中的团队与模型标记。
-        </p>
       </CardContent>
     </Card>
   );

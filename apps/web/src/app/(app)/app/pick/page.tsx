@@ -6,9 +6,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  CheckIcon,
   ChevronDownIcon,
   EllipsisVerticalIcon,
+  MessageSquareIcon,
   PencilLineIcon,
+  PlusIcon,
+  TrendingUpIcon,
   SquarePenIcon,
   Trash2Icon,
   SearchIcon,
@@ -73,6 +77,15 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemHeader,
+  ItemTitle,
+} from "@/components/ui/item";
 import { AppPageLayout } from "@/components/features/app-page-layout";
 import { PageErrorState } from "@/components/features/page-state";
 import { PickerChatEmpty, PickerChatMessage } from "@/components/features/picker-chat-message";
@@ -152,11 +165,19 @@ type ConversationListItem = {
   >;
 };
 
+type ExtractedStock = {
+  name: string;
+  code: string;
+};
+
 const MAX_DRAFT_CHARS = 600;
 const DRAFT_STORAGE_PREFIX = "pick-draft:";
 const PICKER_OPTIONS_PANEL_KEY = "pick-options-panel-open";
-const MOCK_CONVERSATION_SEED_BASE_TS = 1713326400000;
-const COMPOSER_EDGE_OFFSET_PX = 10;
+const PICKER_ARCHIVE_STORAGE_KEY = "pick-conversation-archive-v1";
+const PICKER_TITLE_STORAGE_KEY = "pick-conversation-title-v1";
+const PICKER_ACTIVE_SESSION_STORAGE_KEY = "pick-active-session-id-v1";
+const PICKER_ACTIVE_SNAPSHOT_STORAGE_KEY = "pick-active-snapshot-v1";
+const WATCHLIST_STORAGE_KEY_V2 = "app-watchlist-v2";
 
 const DEFAULT_PREFERENCE_SNAPSHOT: PreferenceSnapshot = {
   market: "CN",
@@ -180,6 +201,12 @@ const conversationModeLabels: Record<"consult" | "pick" | "unset", string> = {
   consult: "随便问问",
   pick: "帮我选股",
   unset: "选择模式",
+};
+
+const conversationModeIcons: Record<"consult" | "pick" | "unset", React.ComponentType<{ className?: string }>> = {
+  consult: MessageSquareIcon,
+  pick: TrendingUpIcon,
+  unset: ChevronDownIcon,
 };
 
 function createConversationItem(args: {
@@ -214,79 +241,7 @@ function createConversationItem(args: {
 }
 
 function buildMockConversationSeeds(): ConversationListItem[] {
-  const now = MOCK_CONVERSATION_SEED_BASE_TS;
-  return [
-    createConversationItem({
-      id: "mock-consult-seed",
-      title: "随便问问 · 风险控制",
-      updatedAt: now - 1000 * 60 * 90,
-      script: "consult_reply",
-      messages: [
-        {
-          id: "mock-consult-seed-assistant-1",
-          role: "assistant",
-          content: "你好，我是选股对话助手。可以先随便问问，也可以直接进入帮我选股流程。",
-          createdAt: now - 1000 * 60 * 96,
-        },
-        {
-          id: "mock-consult-seed-user-1",
-          role: "user",
-          content: "波动变大时怎么控制回撤？",
-          createdAt: now - 1000 * 60 * 93,
-        },
-        {
-          id: "mock-consult-seed-assistant-2",
-          role: "assistant",
-          content:
-            "先定义单笔最大亏损，再用风险位反推仓位；若量价结构恶化，优先降杠杆而非死扛。",
-          createdAt: now - 1000 * 60 * 90,
-        },
-      ],
-      suggested_actions: [
-        { action_id: "intent_pick", label: "帮我选股", kind: "primary" },
-        { action_id: "intent_consult", label: "继续咨询", kind: "secondary" },
-      ],
-    }),
-    createConversationItem({
-      id: "mock-pick-seed",
-      title: "帮我选股 · A股平衡",
-      updatedAt: now - 1000 * 60 * 30,
-      script: "candidates",
-      conversation_phase: "candidates_shown",
-      confirmedPreferenceSlots: 8,
-      preference_snapshot: {
-        ...DEFAULT_PREFERENCE_SNAPSHOT,
-        market: "CN",
-        style: "growth",
-        risk_tier: "balanced",
-        cap_liquidity: "large_mid_liquid",
-      },
-      messages: [
-        {
-          id: "mock-pick-seed-assistant-1",
-          role: "assistant",
-          content: "请先确认 D1 交易市场。",
-          createdAt: now - 1000 * 60 * 40,
-        },
-        {
-          id: "mock-pick-seed-user-1",
-          role: "user",
-          content: "A 股，平衡风险，偏成长。",
-          createdAt: now - 1000 * 60 * 37,
-        },
-        {
-          id: "mock-pick-seed-assistant-2",
-          role: "assistant",
-          content: "已生成候选。请在下方候选结果区选择标的进入择时分析。",
-          createdAt: now - 1000 * 60 * 30,
-        },
-      ],
-      suggested_actions: [
-        { action_id: "restart", label: "重新开始对话", kind: "secondary" },
-        { action_id: "resume_later", label: "稍后继续", kind: "secondary" },
-      ],
-    }),
-  ];
+  return [];
 }
 
 function upsertConversationItem(items: ConversationListItem[], next: ConversationListItem) {
@@ -351,6 +306,155 @@ function deriveConversationTitle(messages: PickerMessage[], script: ReturnType<t
   if (script === "consult_reply") return "随便问问";
   if (script.startsWith("pick_") || script === "ready" || script === "candidates") return "帮我选股";
   return "新对话";
+}
+
+function toMessageTime(timestamp?: string) {
+  if (!timestamp) return Date.now();
+  const ms = Date.parse(timestamp);
+  return Number.isNaN(ms) ? Date.now() : ms;
+}
+
+function extractStocksFromText(content: string): ExtractedStock[] {
+  const result: ExtractedStock[] = [];
+  const pattern =
+    /([A-Za-z\u4E00-\u9FFF][A-Za-z0-9\u4E00-\u9FFF·\- ]{0,30})\s*[（(]\s*([A-Za-z]{1,5}(?:\.[A-Za-z]{1,2})?|\d{5,6})\s*[)）]/g;
+  let match: RegExpExecArray | null = pattern.exec(content);
+  while (match) {
+    const name = String(match[1] ?? "").trim();
+    const code = String(match[2] ?? "").trim().toUpperCase();
+    if (name && code) {
+      result.push({ name, code });
+    }
+    match = pattern.exec(content);
+  }
+  return result;
+}
+
+function extractUniqueStocksFromConversations(items: ConversationListItem[]): ExtractedStock[] {
+  const byCode = new Map<string, ExtractedStock>();
+  for (const item of items) {
+    for (const candidate of item.snapshot.candidate_stocks) {
+      const code = String(candidate.code ?? "").trim().toUpperCase();
+      const name = String(candidate.name ?? "").trim();
+      if (!code) continue;
+      if (!byCode.has(code)) {
+        byCode.set(code, { name: name || code, code });
+      }
+    }
+    for (const message of item.snapshot.messages) {
+      for (const stock of extractStocksFromText(message.content)) {
+        if (!byCode.has(stock.code)) {
+          byCode.set(stock.code, stock);
+        }
+      }
+    }
+  }
+  return Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code, "en"));
+}
+
+function extractUniqueStocksFromMessages(messages: PickerMessage[]): ExtractedStock[] {
+  const byCode = new Map<string, ExtractedStock>();
+  for (const message of messages) {
+    for (const stock of extractStocksFromText(message.content)) {
+      if (!byCode.has(stock.code)) byCode.set(stock.code, stock);
+    }
+  }
+  return Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code, "en"));
+}
+
+function inferMarketFromCode(code: string): "CN" | "HK" | "US" {
+  const normalized = code.trim().toUpperCase();
+  if (/^\d{5}$/.test(normalized)) return "HK";
+  if (/^\d{6}$/.test(normalized)) return "CN";
+  return "US";
+}
+
+function upsertWatchlistStock(stock: ExtractedStock) {
+  if (typeof window === "undefined") return;
+  const code = stock.code.trim().toUpperCase();
+  if (!code) return;
+  const market = inferMarketFromCode(code);
+  try {
+    const raw = window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V2);
+    const list = raw ? (JSON.parse(raw) as Array<{ market: string; symbol: string; name: string }>) : [];
+    const key = `${market}.${code}`;
+    const map = new Map<string, { market: string; symbol: string; name: string }>();
+    for (const item of list) {
+      if (!item || typeof item.symbol !== "string" || typeof item.market !== "string") continue;
+      map.set(`${String(item.market).toUpperCase()}.${String(item.symbol).toUpperCase()}`, {
+        market: String(item.market).toUpperCase(),
+        symbol: String(item.symbol).toUpperCase(),
+        name: String(item.name ?? item.symbol ?? "").trim() || String(item.symbol).toUpperCase(),
+      });
+    }
+    map.set(key, { market, symbol: code, name: stock.name || code });
+    window.localStorage.setItem(WATCHLIST_STORAGE_KEY_V2, JSON.stringify(Array.from(map.values())));
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
+
+function loadWatchlistKeysFromStorage(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V2);
+    const list = raw ? (JSON.parse(raw) as Array<{ market?: string; symbol?: string }>) : [];
+    const keys = new Set<string>();
+    for (const item of list) {
+      const market = String(item?.market ?? "").trim().toUpperCase();
+      const symbol = String(item?.symbol ?? "").trim().toUpperCase();
+      if (!market || !symbol) continue;
+      keys.add(`${market}.${symbol}`);
+    }
+    return keys;
+  } catch {
+    return new Set();
+  }
+}
+
+function shouldArchiveConversation(item: ConversationListItem) {
+  return item.snapshot.messages.some((msg) => msg.role === "user");
+}
+
+function loadConversationArchiveFromStorage() {
+  if (typeof window === "undefined") return [] as ConversationListItem[];
+  try {
+    const raw = window.localStorage.getItem(PICKER_ARCHIVE_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as ConversationListItem[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => item && typeof item.id === "string" && typeof item.title === "string")
+      .map((item) =>
+        createConversationItem({
+          id: item.id,
+          title: item.title,
+          messages: Array.isArray(item.snapshot?.messages) ? item.snapshot.messages : [],
+          updatedAt: Number(item.updatedAt) || 0,
+          script: item.snapshot?.script,
+          preference_snapshot: item.snapshot?.preference_snapshot,
+          conversation_phase: item.snapshot?.conversation_phase,
+          candidate_stocks: item.snapshot?.candidate_stocks,
+          suggested_actions: item.snapshot?.suggested_actions,
+          confirmedPreferenceSlots: item.snapshot?.confirmedPreferenceSlots,
+        }),
+      );
+  } catch {
+    return [];
+  }
+}
+
+function loadTitleOverridesFromStorage() {
+  if (typeof window === "undefined") return {} as Record<string, string>;
+  try {
+    const raw = window.localStorage.getItem(PICKER_TITLE_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, string>;
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed;
+  } catch {
+    return {};
+  }
 }
 
 function ConversationListItemRow({
@@ -427,6 +531,7 @@ function ConversationListSection({
   onEditConversation,
   onDeleteConversation,
   className,
+  bottomInsetPx = 0,
 }: {
   items: ConversationListItem[];
   activeId: string | null;
@@ -437,12 +542,23 @@ function ConversationListSection({
   onEditConversation: (item: ConversationListItem) => void;
   onDeleteConversation: (item: ConversationListItem) => void;
   className?: string;
+  bottomInsetPx?: number;
 }) {
   const hasSearch = searchValue.trim().length > 0;
   return (
     <section className={cn("flex min-h-0 flex-1 flex-col gap-2", className)} aria-label="对话历史列表">
-      <header className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-medium">对话列表</h2>
+      <div className="flex items-center gap-2">
+        <InputGroup className="flex-1">
+          <InputGroupAddon>
+            <SearchIcon />
+          </InputGroupAddon>
+          <InputGroupInput
+            value={searchValue}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="搜索对话"
+            aria-label="搜索对话列表"
+          />
+        </InputGroup>
         <Button
           type="button"
           size="icon-sm"
@@ -453,18 +569,7 @@ function ConversationListSection({
         >
           <SquarePenIcon />
         </Button>
-      </header>
-      <InputGroup>
-        <InputGroupAddon>
-          <SearchIcon />
-        </InputGroupAddon>
-        <InputGroupInput
-          value={searchValue}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="搜索对话"
-          aria-label="搜索对话列表"
-        />
-      </InputGroup>
+      </div>
       {items.length === 0 ? (
         <Empty className="min-h-0 flex-none gap-2 rounded-lg border border-dashed p-4">
           <EmptyHeader className="max-w-none items-start gap-1 text-left">
@@ -475,8 +580,15 @@ function ConversationListSection({
           </EmptyHeader>
         </Empty>
       ) : (
-        <ScrollArea className="min-h-0 flex-1 pr-1">
-          <ul className="flex flex-col gap-1" aria-label="会话条目">
+        <ScrollArea className="min-h-0 flex-1 overscroll-contain pr-1">
+          <ul
+            className="flex flex-col gap-1"
+            style={{
+              paddingBottom:
+                bottomInsetPx > 0 ? `calc(${Math.max(0, Math.round(bottomInsetPx))}px + env(safe-area-inset-bottom))` : 0,
+            }}
+            aria-label="会话条目"
+          >
             {items.map((item) => (
               <ConversationListItemRow
                 key={item.id}
@@ -494,6 +606,156 @@ function ConversationListSection({
   );
 }
 
+function ChatTimelineSection({
+  chatViewportRef,
+  chatScrollContentRef,
+  chatBottomInsetPx,
+  messages,
+  conversationMode,
+  onEditMessage,
+  sendPending,
+  streamStatus,
+  conversation_phase,
+  candidate_stocks,
+  onEnterAnalyze,
+  onAddWatchlistStock,
+  isInWatchlist,
+  sendError,
+  onRetrySend,
+  onClearSendError,
+  chatPinnedToBottom,
+  onScrollToBottom,
+  bottomAnchorRef,
+  bottomAnchorOffsetPx,
+}: {
+  chatViewportRef: React.RefObject<HTMLDivElement | null>;
+  chatScrollContentRef: React.RefObject<HTMLDivElement | null>;
+  chatBottomInsetPx: number;
+  messages: PickerMessage[];
+  conversationMode: "consult" | "pick" | null;
+  onEditMessage: (message: PickerMessage) => void;
+  sendPending: boolean;
+  streamStatus: "idle" | "connecting" | "streaming";
+  conversation_phase: ConversationPhase;
+  candidate_stocks: CandidateStock[];
+  onEnterAnalyze: (code: string) => void;
+  onAddWatchlistStock: (stock: { name: string; code: string }) => void;
+  isInWatchlist: (code: string) => boolean;
+  sendError: string | null;
+  onRetrySend: () => void;
+  onClearSendError: () => void;
+  chatPinnedToBottom: boolean;
+  onScrollToBottom: () => void;
+  bottomAnchorRef: React.RefObject<HTMLDivElement | null>;
+  bottomAnchorOffsetPx: number;
+}) {
+  return (
+    <section className="flex h-full min-h-0 flex-1 flex-col gap-3 px-1 pb-2 md:px-0 md:pb-0" aria-label="对话消息区域">
+      <div className="relative h-full min-h-0 flex-1">
+        <ScrollArea
+          className="size-full overscroll-contain"
+          viewportRef={chatViewportRef}
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+          aria-label="选股对话消息"
+        >
+          <div
+            ref={chatScrollContentRef}
+            className="flex flex-col pr-1"
+            style={{
+              paddingBottom: `${chatBottomInsetPx}px`,
+            }}
+          >
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
+              {messages.length === 0 ? (
+                <PickerChatEmpty mode={conversationMode} />
+              ) : (
+                messages.map((m) => (
+                  <PickerChatMessage
+                    key={m.id}
+                    message={m}
+                    anchorId={`pick-msg-item-${m.id}`}
+                    onEditMessage={onEditMessage}
+                    onAnalyzeStock={onEnterAnalyze}
+                    onAddWatchlistStock={onAddWatchlistStock}
+                    isInWatchlist={isInWatchlist}
+                    showPostStreamUi={!sendPending && streamStatus === "idle"}
+                  />
+                ))
+              )}
+              {conversation_phase === "candidates_shown" && candidate_stocks.length > 0 ? (
+                <section className="border-t border-border/40 pt-3" aria-label="候选结果">
+                  <p className="text-muted-foreground mb-2 text-xs leading-relaxed">{pickerCopy.candidatesSyncNote}</p>
+                  <header className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                    <p className="text-sm font-medium">候选结果</p>
+                    <p className="text-muted-foreground text-xs">{pickerCopy.candidatesCardDesc}</p>
+                  </header>
+                  <ul className="max-h-[min(40svh,18rem)] overflow-y-auto pr-1">
+                    {candidate_stocks.map((c) => (
+                      <li key={c.code} className="border-b border-border/40 py-3 last:border-b-0">
+                        <p className="text-sm font-medium">
+                          {c.name} <span className="text-muted-foreground font-normal">({c.code})</span>
+                        </p>
+                        <p className="text-muted-foreground mt-1 text-sm leading-relaxed whitespace-pre-wrap">{c.reason}</p>
+                        {c.snapshot_keys.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {c.snapshot_keys.map((k) => (
+                              <Badge key={k} variant="outline">
+                                {k}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : null}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button type="button" onClick={() => onEnterAnalyze(c.code)}>
+                            进入择时
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
+              {sendError ? (
+                <PageErrorState
+                  title="消息发送失败"
+                  description={sendError}
+                  actions={
+                    <>
+                      <Button type="button" size="sm" variant="secondary" onClick={onRetrySend}>
+                        重试发送
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" onClick={onClearSendError}>
+                        关闭提示
+                      </Button>
+                    </>
+                  }
+                />
+              ) : null}
+              <div
+                ref={bottomAnchorRef}
+                aria-hidden
+                className="h-px w-full"
+                style={{ scrollMarginBottom: `${Math.max(0, Math.round(bottomAnchorOffsetPx))}px` }}
+              />
+            </div>
+          </div>
+        </ScrollArea>
+        {!chatPinnedToBottom ? (
+          <div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-end">
+            <Button type="button" size="sm" variant="secondary" className="pointer-events-auto shadow-sm" onClick={onScrollToBottom}>
+              <ArrowDownIcon data-icon="inline-start" />
+              {sendPending ? "已暂停自动滚动，回到底部" : "回到底部"}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 export default function PickPage() {
   const router = useRouter();
   const sessionId = usePickerStore((s) => s.sessionId);
@@ -505,6 +767,7 @@ export default function PickPage() {
   const script = usePickerStore((s) => s.script);
   const streamingOptionsPending = usePickerStore((s) => s.streamingOptionsPending);
   const sendPending = usePickerStore((s) => s.sendPending);
+  const streamStatus = usePickerStore((s) => s.streamStatus);
   const sendError = usePickerStore((s) => s.sendError);
   const clearSendError = usePickerStore((s) => s.clearSendError);
   const quotaBlocked = usePickerStore((s) => s.quotaBlocked);
@@ -517,26 +780,31 @@ export default function PickPage() {
   const draftTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const isImeComposingRef = useRef(false);
   const mainAreaRef = useRef<HTMLElement | null>(null);
+  const composerBarRef = useRef<HTMLElement | null>(null);
   const chatViewportRef = useRef<HTMLDivElement | null>(null);
   const chatScrollContentRef = useRef<HTMLDivElement | null>(null);
+  const chatBottomAnchorRef = useRef<HTMLDivElement | null>(null);
   const chatPinnedToBottomRef = useRef(true);
-  const composerBarRef = useRef<HTMLDivElement | null>(null);
+  const autoScrollRafRef = useRef<number | null>(null);
   const [chatPinnedToBottom, setChatPinnedToBottom] = useState(true);
-  const [composerLiftPx, setComposerLiftPx] = useState(0);
-  const [composerBottomGapPx, setComposerBottomGapPx] = useState(112);
-  const [composerIsMobileFixed, setComposerIsMobileFixed] = useState(true);
-  const [composerDesktopBounds, setComposerDesktopBounds] = useState<{ left?: number; width?: number }>(
-    {},
-  );
+  const [composerDesktopBounds, setComposerDesktopBounds] = useState<{ left?: number; width?: number }>({});
+  const [composerHeight, setComposerHeight] = useState(132);
   const [conversationArchive, setConversationArchive] = useState<ConversationListItem[]>(
-    buildMockConversationSeeds,
+    loadConversationArchiveFromStorage,
   );
   const [conversationSearch, setConversationSearch] = useState("");
-  const [conversationTitleOverrides, setConversationTitleOverrides] = useState<Record<string, string>>({});
+  const [conversationTitleOverrides, setConversationTitleOverrides] = useState<Record<string, string>>(
+    loadTitleOverridesFromStorage,
+  );
   const [renameDraft, setRenameDraft] = useState("");
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
+  const [selectedSuggestedActionIds, setSelectedSuggestedActionIds] = useState<string[]>([]);
+  const [extractedPanelOpen, setExtractedPanelOpen] = useState(true);
+  const [optionsPanelVisible, setOptionsPanelVisible] = useState(true);
+  const [watchlistKeys, setWatchlistKeys] = useState<Set<string>>(() => loadWatchlistKeysFromStorage());
   const pickPanelRestoredRef = useRef(false);
+  const activeSnapshotHydratedRef = useRef(false);
   const [pickPanelOpen, setPickPanelOpen] = useState(true);
   const draft = draftBySession[sessionId] ?? "";
 
@@ -567,15 +835,41 @@ export default function PickPage() {
   );
 
   const scrollChatToBottom = useCallback((behavior: ScrollBehavior) => {
+    const anchor = chatBottomAnchorRef.current;
+    if (anchor) {
+      anchor.scrollIntoView({ block: "end", behavior });
+      return;
+    }
     const viewport = chatViewportRef.current;
     if (!viewport) return;
-    const top = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
-    if (behavior === "smooth") {
-      viewport.scrollTo({ top, behavior: "smooth" });
-    } else {
-      viewport.scrollTop = top;
+    viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+  }, []);
+
+  const updatePinnedFromViewport = useCallback(() => {
+    const viewport = chatViewportRef.current;
+    if (!viewport) return;
+    const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    const distanceFromBottom = maxScroll - viewport.scrollTop;
+    const threshold = 80;
+    const pinned = distanceFromBottom <= threshold;
+    if (chatPinnedToBottomRef.current !== pinned) {
+      chatPinnedToBottomRef.current = pinned;
+      setChatPinnedToBottom(pinned);
     }
   }, []);
+
+  const scheduleAutoScrollToBottom = useCallback(
+    (behavior: ScrollBehavior = "auto") => {
+      if (!chatPinnedToBottomRef.current) return;
+      if (autoScrollRafRef.current !== null) return;
+      autoScrollRafRef.current = requestAnimationFrame(() => {
+        autoScrollRafRef.current = null;
+        scrollChatToBottom(behavior);
+        updatePinnedFromViewport();
+      });
+    },
+    [scrollChatToBottom, updatePinnedFromViewport],
+  );
 
   useLayoutEffect(() => {
     chatPinnedToBottomRef.current = chatPinnedToBottom;
@@ -584,151 +878,31 @@ export default function PickPage() {
   useLayoutEffect(() => {
     const viewport = chatViewportRef.current;
     if (!viewport) return;
-
-    const syncPinnedFromViewport = () => {
-      const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
-      const distanceFromBottom = maxScroll - viewport.scrollTop;
-      const threshold = 80;
-      const pinned = distanceFromBottom <= threshold;
-      chatPinnedToBottomRef.current = pinned;
-      setChatPinnedToBottom(pinned);
-    };
-
-    viewport.addEventListener("scroll", syncPinnedFromViewport, { passive: true });
-
-    if (chatPinnedToBottomRef.current) {
-      viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
-    }
-    syncPinnedFromViewport();
-
-    let raf0 = 0;
-    let raf1 = 0;
-    raf0 = requestAnimationFrame(() => {
-      if (chatPinnedToBottomRef.current) {
-        viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
-      }
-      raf1 = requestAnimationFrame(() => {
-        if (chatPinnedToBottomRef.current) {
-          viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
-        }
-        syncPinnedFromViewport();
-      });
-    });
-
+    viewport.addEventListener("scroll", updatePinnedFromViewport, { passive: true });
+    scheduleAutoScrollToBottom("auto");
+    updatePinnedFromViewport();
     return () => {
-      cancelAnimationFrame(raf0);
-      cancelAnimationFrame(raf1);
-      viewport.removeEventListener("scroll", syncPinnedFromViewport);
+      viewport.removeEventListener("scroll", updatePinnedFromViewport);
     };
-  }, [messages, streamingOptionsPending]);
+  }, [scheduleAutoScrollToBottom, updatePinnedFromViewport]);
+
+  useLayoutEffect(() => {
+    if (!sendPending || streamStatus !== "streaming") return;
+    chatPinnedToBottomRef.current = true;
+    setChatPinnedToBottom(true);
+    scheduleAutoScrollToBottom("auto");
+  }, [messages, scheduleAutoScrollToBottom, sendPending, streamStatus]);
 
   useLayoutEffect(() => {
     const el = chatScrollContentRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-
-    let raf = 0;
     const ro = new ResizeObserver(() => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        if (!chatPinnedToBottomRef.current) return;
-        const viewport = chatViewportRef.current;
-        if (!viewport) return;
-        viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
-        const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
-        const distanceFromBottom = maxScroll - viewport.scrollTop;
-        const threshold = 80;
-        const pinned = distanceFromBottom <= threshold;
-        chatPinnedToBottomRef.current = pinned;
-        setChatPinnedToBottom(pinned);
-      });
+      scheduleAutoScrollToBottom("auto");
     });
     ro.observe(el);
-    return () => {
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-    };
-  }, [messages]);
+    return () => ro.disconnect();
+  }, [scheduleAutoScrollToBottom]);
 
-  useEffect(() => {
-    const vv = window.visualViewport;
-
-    const update = () => {
-      const isDesktop = window.matchMedia("(min-width: 768px)").matches;
-      setComposerIsMobileFixed(!isDesktop);
-
-      if (isDesktop) {
-        setComposerLiftPx(0);
-        return;
-      }
-
-      if (!vv) {
-        setComposerLiftPx(0);
-        return;
-      }
-
-      const el = composerBarRef.current;
-      if (!el) {
-        setComposerLiftPx(0);
-        return;
-      }
-
-      const barRect = el.getBoundingClientRect();
-      const covered = barRect.bottom - vv.height - vv.offsetTop;
-      setComposerLiftPx(covered > 0 ? Math.ceil(covered) : 0);
-    };
-
-    const mq = window.matchMedia("(min-width: 768px)");
-    const onMq = () => update();
-
-    update();
-    vv?.addEventListener("resize", update);
-    vv?.addEventListener("scroll", update);
-    window.addEventListener("orientationchange", update);
-    window.addEventListener("resize", update);
-    mq.addEventListener("change", onMq);
-    return () => {
-      vv?.removeEventListener("resize", update);
-      vv?.removeEventListener("scroll", update);
-      window.removeEventListener("orientationchange", update);
-      window.removeEventListener("resize", update);
-      mq.removeEventListener("change", onMq);
-    };
-  }, []);
-
-  useEffect(() => {
-    const updateBounds = () => {
-      const main = mainAreaRef.current;
-      if (!main) return;
-      const isDesktop = window.matchMedia("(min-width: 768px)").matches;
-      if (!isDesktop) {
-        setComposerDesktopBounds((prev) =>
-          prev.left === undefined && prev.width === undefined ? prev : {},
-        );
-        return;
-      }
-      const rect = main.getBoundingClientRect();
-      const nextLeft = Math.round(rect.left);
-      const nextWidth = Math.round(rect.width);
-      setComposerDesktopBounds((prev) =>
-        prev.left === nextLeft && prev.width === nextWidth
-          ? prev
-          : { left: nextLeft, width: nextWidth },
-      );
-    };
-
-    updateBounds();
-    const main = mainAreaRef.current;
-    const ro =
-      main && typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => updateBounds()) : null;
-    if (ro && main) ro.observe(main);
-    window.addEventListener("resize", updateBounds);
-    window.addEventListener("scroll", updateBounds, { passive: true });
-    return () => {
-      ro?.disconnect();
-      window.removeEventListener("resize", updateBounds);
-      window.removeEventListener("scroll", updateBounds);
-    };
-  }, []);
 
   const conversationMode = useMemo<"consult" | "pick" | null>(() => {
     if (script === "consult_reply") return "consult";
@@ -753,6 +927,23 @@ export default function PickPage() {
   const toolbar_actions = useMemo(
     () => suggested_actions.filter((a) => a.action_id !== "intent_consult" && a.action_id !== "intent_pick"),
     [suggested_actions],
+  );
+  const orderedToolbarActions = useMemo(() => {
+    return [...toolbar_actions].sort((a, b) => {
+      const aActive = isActionActive(a.action_id, preference_snapshot);
+      const bActive = isActionActive(b.action_id, preference_snapshot);
+      if (aActive !== bActive) return aActive ? -1 : 1;
+      if (a.kind !== b.kind) return a.kind === "primary" ? -1 : 1;
+      return a.label.localeCompare(b.label, "zh-CN");
+    });
+  }, [preference_snapshot, toolbar_actions]);
+  const selectedSuggestedActions = useMemo(
+    () => toolbar_actions.filter((a) => selectedSuggestedActionIds.includes(a.action_id)),
+    [selectedSuggestedActionIds, toolbar_actions],
+  );
+  const currentConversationExtractedStocks = useMemo(
+    () => extractUniqueStocksFromMessages(messages),
+    [messages],
   );
 
   const currentConversationItem = useMemo<ConversationListItem>(
@@ -801,13 +992,188 @@ export default function PickPage() {
     [conversationListItems, deletingConversationId],
   );
   const renameDraftTrimmed = renameDraft.trim();
+  const chatBottomInsetPx = useMemo(() => {
+    return composerHeight + (sendPending ? 96 : 20);
+  }, [composerHeight, sendPending]);
+
+  useLayoutEffect(() => {
+    if (!chatPinnedToBottomRef.current) return;
+    scheduleAutoScrollToBottom("auto");
+  }, [chatBottomInsetPx, scheduleAutoScrollToBottom, streamStatus]);
+
+  useEffect(
+    () => () => {
+      if (autoScrollRafRef.current !== null) {
+        cancelAnimationFrame(autoScrollRafRef.current);
+        autoScrollRafRef.current = null;
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const measureBounds = () => {
+      const main = mainAreaRef.current;
+      if (!main) return;
+      const isDesktop = window.matchMedia("(min-width: 768px)").matches;
+      if (!isDesktop) {
+        setComposerDesktopBounds({});
+        return;
+      }
+      const rect = main.getBoundingClientRect();
+      const nextLeft = Math.round(rect.left);
+      const nextWidth = Math.round(rect.width);
+      setComposerDesktopBounds((prev) =>
+        prev.left === nextLeft && prev.width === nextWidth ? prev : { left: nextLeft, width: nextWidth },
+      );
+    };
+
+    measureBounds();
+    const main = mainAreaRef.current;
+    const ro =
+      main && typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => measureBounds()) : null;
+    if (ro && main) ro.observe(main);
+    window.addEventListener("resize", measureBounds);
+    window.addEventListener("scroll", measureBounds, { passive: true });
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", measureBounds);
+      window.removeEventListener("scroll", measureBounds);
+    };
+  }, []);
+
+  useEffect(() => {
+    const composer = composerBarRef.current;
+    if (!composer || typeof ResizeObserver === "undefined") return;
+    const measureHeight = () => {
+      const h = Math.ceil(composer.getBoundingClientRect().height);
+      setComposerHeight((prev) => (prev === h ? prev : h));
+    };
+    measureHeight();
+    const ro = new ResizeObserver(() => measureHeight());
+    ro.observe(composer);
+    return () => ro.disconnect();
+  }, [pickPanelOpen, draft, sendPending, streamingOptionsPending, toolbar_actions.length]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(PICKER_ARCHIVE_STORAGE_KEY, JSON.stringify(conversationArchive));
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }, [conversationArchive]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(PICKER_TITLE_STORAGE_KEY, JSON.stringify(conversationTitleOverrides));
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }, [conversationTitleOverrides]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(PICKER_ACTIVE_SESSION_STORAGE_KEY, sessionId);
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (activeSnapshotHydratedRef.current) return;
+    activeSnapshotHydratedRef.current = true;
+
+    const rawSnapshot = window.localStorage.getItem(PICKER_ACTIVE_SNAPSHOT_STORAGE_KEY);
+    if (rawSnapshot) {
+      try {
+        const snapshot = JSON.parse(rawSnapshot) as ConversationListItem["snapshot"];
+        if (snapshot && Array.isArray(snapshot.messages) && typeof snapshot.sessionId === "string") {
+          usePickerStore.setState({
+            ...snapshot,
+            sendPending: false,
+            sendError: null,
+            streamingOptionsPending: false,
+            quotaBlocked: false,
+            resumePrompt: false,
+          });
+          chatPinnedToBottomRef.current = true;
+          setChatPinnedToBottom(true);
+          return;
+        }
+      } catch {
+        // Ignore invalid snapshot cache.
+      }
+    }
+
+    const activeId = window.localStorage.getItem(PICKER_ACTIVE_SESSION_STORAGE_KEY);
+    if (!activeId || activeId === sessionId) return;
+    const target = conversationArchive.find((item) => item.id === activeId);
+    if (!target) return;
+    usePickerStore.setState({
+      ...target.snapshot,
+      sendPending: false,
+      sendError: null,
+      streamingOptionsPending: false,
+      quotaBlocked: false,
+      resumePrompt: false,
+    });
+    chatPinnedToBottomRef.current = true;
+    setChatPinnedToBottom(true);
+  }, [conversationArchive, sessionId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        PICKER_ACTIVE_SNAPSHOT_STORAGE_KEY,
+        JSON.stringify({
+          sessionId: currentConversationItem.snapshot.sessionId,
+          script: currentConversationItem.snapshot.script,
+          messages: currentConversationItem.snapshot.messages,
+          preference_snapshot: currentConversationItem.snapshot.preference_snapshot,
+          conversation_phase: currentConversationItem.snapshot.conversation_phase,
+          candidate_stocks: currentConversationItem.snapshot.candidate_stocks,
+          suggested_actions: currentConversationItem.snapshot.suggested_actions,
+          confirmedPreferenceSlots: currentConversationItem.snapshot.confirmedPreferenceSlots,
+        }),
+      );
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }, [currentConversationItem]);
+
+  useEffect(() => {
+    if (!shouldArchiveConversation(currentConversationItem)) return;
+    setConversationArchive((prev) => upsertConversationItem(prev, currentConversationItem));
+  }, [currentConversationItem]);
+
+  useEffect(() => {
+    const validIds = new Set(toolbar_actions.map((action) => action.action_id));
+    setSelectedSuggestedActionIds((prev) => prev.filter((id) => validIds.has(id)));
+  }, [toolbar_actions]);
+
+  useEffect(() => {
+    if (toolbar_actions.length > 0) {
+      setOptionsPanelVisible(true);
+    }
+  }, [toolbar_actions]);
+
+  useEffect(() => {
+    setWatchlistKeys(loadWatchlistKeysFromStorage());
+  }, []);
 
   const switchConversation = useCallback(
     (conversationId: string) => {
       if (conversationId === sessionId) return;
       const target = conversationListItems.find((item) => item.id === conversationId);
       if (!target) return;
-      setConversationArchive((prev) => upsertConversationItem(prev, currentConversationItem));
+      if (shouldArchiveConversation(currentConversationItem)) {
+        setConversationArchive((prev) => upsertConversationItem(prev, currentConversationItem));
+      }
       chatPinnedToBottomRef.current = true;
       setChatPinnedToBottom(true);
       usePickerStore.setState({
@@ -923,37 +1289,6 @@ export default function PickPage() {
     resizeDraftTextarea();
   }, [draft, resizeDraftTextarea]);
 
-  useEffect(() => {
-    const el = composerBarRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-
-    let raf = 0;
-    const measure = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        const rect = el.getBoundingClientRect();
-        const gap = Math.ceil(rect.height + composerLiftPx + COMPOSER_EDGE_OFFSET_PX + 12);
-        setComposerBottomGapPx((prev) => (prev === gap ? prev : gap));
-      });
-    };
-
-    measure();
-    const ro = new ResizeObserver(() => measure());
-    ro.observe(el);
-    return () => {
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-    };
-  }, [
-    composerIsMobileFixed,
-    composerLiftPx,
-    draft,
-    sendPending,
-    streamingOptionsPending,
-    toolbar_actions.length,
-    conversationMode,
-  ]);
-
   const handleSend = async () => {
     const text = draft.trim();
     if (!text || sendPending) return;
@@ -969,6 +1304,27 @@ export default function PickPage() {
       }
     }
   };
+
+  const handleSendSelectedSuggestedActions = async () => {
+    if (sendPending || selectedSuggestedActions.length === 0) return;
+    const payload = selectedSuggestedActions.map((action) => action.label.trim()).filter(Boolean).join("；");
+    if (!payload) return;
+    const ok = await sendUserText(payload);
+    if (ok) {
+      setSelectedSuggestedActionIds([]);
+    }
+  };
+
+  const handleClearSuggestedSelection = useCallback(() => {
+    if (selectedSuggestedActionIds.length > 0) {
+      setSelectedSuggestedActionIds([]);
+    }
+  }, [selectedSuggestedActionIds.length]);
+
+  const handleCloseSuggestedPanel = useCallback(() => {
+    setPickPanelOpen(false);
+    setOptionsPanelVisible(false);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -992,162 +1348,178 @@ export default function PickPage() {
       title="选股对话"
       hideHeader
       fillHeight
-      className="flex flex-1 flex-col"
-      contentClassName="flex min-h-0 flex-1 flex-col gap-4 md:grid md:flex-1 md:grid-cols-[minmax(0,22rem)_1fr] md:items-stretch md:gap-6"
+      className="flex min-h-0 flex-1 flex-col gap-0! p-0!"
+      contentClassName="min-h-0 flex-1"
     >
-      <aside className="flex min-h-0 flex-col md:h-full md:min-h-0" aria-label="选股会话侧栏">
-        <ConversationListSection
-          className="rounded-xl border bg-card p-4"
-          items={filteredConversationListItems}
-          activeId={sessionId}
-          onSelect={switchConversation}
-          searchValue={conversationSearch}
-          onSearchChange={setConversationSearch}
-          onEditConversation={openRenameConversation}
-          onDeleteConversation={(item) => setDeletingConversationId(item.id)}
-          onNewConversation={() => {
-            setConversationArchive((prev) => upsertConversationItem(prev, currentConversationItem));
-            setConversationSearch("");
-            resetConversation();
-          }}
-        />
-      </aside>
+      <div className="grid h-full min-h-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-4 px-4 pt-4 pb-0 md:grid-cols-[minmax(0,18rem)_1fr] md:grid-rows-1 md:gap-6 md:px-6 md:pt-6">
+        <aside
+          className="flex min-h-0 flex-col overflow-hidden md:sticky md:top-18 md:h-[calc(100svh-5.5rem)] md:min-h-0 md:self-start"
+          aria-label="选股会话侧栏"
+        >
+          <ConversationListSection
+            className="rounded-xl border bg-card p-4"
+            items={filteredConversationListItems}
+            activeId={sessionId}
+            onSelect={switchConversation}
+            searchValue={conversationSearch}
+            onSearchChange={setConversationSearch}
+            onEditConversation={openRenameConversation}
+            onDeleteConversation={(item) => setDeletingConversationId(item.id)}
+            onNewConversation={() => {
+              if (shouldArchiveConversation(currentConversationItem)) {
+                setConversationArchive((prev) => upsertConversationItem(prev, currentConversationItem));
+              }
+              setConversationSearch("");
+              resetConversation();
+            }}
+          />
+        </aside>
 
-      <main
-        ref={mainAreaRef}
-        className="relative isolate flex min-h-0 flex-1 flex-col md:h-full md:min-h-0"
-      >
-        <section className="flex min-h-0 flex-1 flex-col gap-3 px-1 pb-2 md:px-0 md:pb-0" aria-label="对话消息区域">
-          <div className="relative min-h-0 flex-1">
-            <ScrollArea
-              className="size-full"
-              viewportRef={chatViewportRef}
-              role="log"
-              aria-live="polite"
-              aria-relevant="additions text"
-              aria-label="选股对话消息"
-            >
-              <div
-                ref={chatScrollContentRef}
-                className="flex flex-col pr-1"
-                style={{
-                  paddingBottom: `calc(${composerBottomGapPx}px + env(safe-area-inset-bottom))`,
-                }}
-              >
-                {messages.length === 0 ? (
-                  <div className="mx-auto w-full max-w-4xl">
-                    <PickerChatEmpty mode={conversationMode} />
-                  </div>
-                ) : (
-                  <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
-                    {messages.map((m) => (
-                      <PickerChatMessage
-                        key={m.id}
-                        message={m}
-                        anchorId={`pick-msg-item-${m.id}`}
-                        onEditMessage={handleEditMessage}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
-            {!chatPinnedToBottom ? (
-              <div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-end">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  className="pointer-events-auto shadow-sm"
-                  onClick={() => {
-                    chatPinnedToBottomRef.current = true;
-                    setChatPinnedToBottom(true);
-                    scrollChatToBottom("smooth");
-                  }}
-                >
-                  <ArrowDownIcon data-icon="inline-start" />
-                  回到底部
-                </Button>
-              </div>
-            ) : null}
+        <main
+          ref={mainAreaRef}
+          className="relative isolate grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden md:sticky md:top-18 md:h-[calc(100svh-5.5rem)] md:min-h-0 md:self-start"
+        >
+          <div className="h-full min-h-0 overflow-hidden">
+            <ChatTimelineSection
+              chatViewportRef={chatViewportRef}
+              chatScrollContentRef={chatScrollContentRef}
+              chatBottomInsetPx={chatBottomInsetPx}
+              messages={messages}
+              conversationMode={conversationMode}
+              onEditMessage={handleEditMessage}
+              sendPending={sendPending}
+              streamStatus={streamStatus}
+              conversation_phase={conversation_phase}
+              candidate_stocks={candidate_stocks}
+              onEnterAnalyze={(code) => {
+                const market = inferMarketFromCode(code);
+                useAnalysisStore.getState().setPendingHandoff({
+                  symbol: code,
+                  market,
+                  preference_snapshot,
+                });
+                router.push("/app/analyze");
+              }}
+              onAddWatchlistStock={(stock) => {
+                upsertWatchlistStock(stock);
+                setWatchlistKeys(loadWatchlistKeysFromStorage());
+              }}
+              isInWatchlist={(code) => {
+                const market = inferMarketFromCode(code);
+                return watchlistKeys.has(`${market}.${code.trim().toUpperCase()}`);
+              }}
+              sendError={sendError}
+              onRetrySend={() => void handleSend()}
+              onClearSendError={clearSendError}
+              chatPinnedToBottom={chatPinnedToBottom}
+              onScrollToBottom={() => {
+                chatPinnedToBottomRef.current = true;
+                setChatPinnedToBottom(true);
+                scrollChatToBottom("smooth");
+              }}
+              bottomAnchorRef={chatBottomAnchorRef}
+              bottomAnchorOffsetPx={chatBottomInsetPx + 24}
+            />
           </div>
 
-          {conversation_phase === "candidates_shown" && candidate_stocks.length > 0 ? (
-            <section className="border-t border-border/40 pt-3" aria-label="候选结果">
-              <p className="text-muted-foreground mb-2 text-xs leading-relaxed">{pickerCopy.candidatesSyncNote}</p>
-              <header className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-                <p className="text-sm font-medium">候选结果</p>
-                <p className="text-muted-foreground text-xs">{pickerCopy.candidatesCardDesc}</p>
-              </header>
-              <ul className="max-h-[min(40svh,18rem)] overflow-y-auto pr-1">
-                {candidate_stocks.map((c) => (
-                  <li key={c.code} className="border-b border-border/40 py-3 last:border-b-0">
-                    <p className="text-sm font-medium">
-                      {c.name} <span className="text-muted-foreground font-normal">({c.code})</span>
-                    </p>
-                    <p className="text-muted-foreground mt-1 text-sm leading-relaxed whitespace-pre-wrap">{c.reason}</p>
-                    {c.snapshot_keys.length > 0 ? (
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {c.snapshot_keys.map((k) => (
-                          <Badge key={k} variant="outline">
-                            {k}
-                          </Badge>
-                        ))}
-                      </div>
-                    ) : null}
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        onClick={() => {
-                          useAnalysisStore.getState().setPendingHandoff({
-                            symbol: c.code,
-                            market: preference_snapshot.market,
-                            preference_snapshot,
-                          });
-                          router.push("/app/analyze");
-                        }}
-                      >
-                        进入择时
-                      </Button>
+          <section
+            ref={composerBarRef}
+            style={{
+              left: composerDesktopBounds.left !== undefined ? `${composerDesktopBounds.left}px` : undefined,
+              width: composerDesktopBounds.width !== undefined ? `${composerDesktopBounds.width}px` : undefined,
+            }}
+            className="fixed inset-x-0 bottom-2 z-20 overflow-visible bg-background pt-1 pb-[calc(env(safe-area-inset-bottom)+0.375rem)] md:bottom-3"
+            aria-label="消息输入区"
+          >
+          {currentConversationExtractedStocks.length > 0 ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-full mb-0.5">
+              <div className="pointer-events-auto mx-auto w-full max-w-4xl px-1 md:px-0">
+                <section aria-label="当前对话股票提取">
+                  <Collapsible open={extractedPanelOpen} onOpenChange={setExtractedPanelOpen}>
+                    <div className="rounded-lg border bg-background">
+                      <CollapsibleTrigger className="hover:bg-muted/60 flex w-full items-center justify-between px-2 py-1 text-left transition-colors">
+                        <div className="min-w-0">
+                          <p className="flex items-center gap-1.5 text-sm font-medium leading-tight">
+                            <TrendingUpIcon className="text-muted-foreground size-3.5" />
+                            <span>识别股票</span>
+                          </p>
+                        </div>
+                        <ChevronDownIcon
+                          className={cn("size-4 shrink-0 transition-transform", extractedPanelOpen ? "rotate-180" : "")}
+                        />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="border-t px-2 py-1">
+                        <ScrollArea className="h-52 min-h-0 pr-1">
+                          <ItemGroup
+                            className="grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4"
+                            aria-label="当前对话提取股票列表"
+                          >
+                            {currentConversationExtractedStocks.map((stock) => (
+                              (() => {
+                                const market = inferMarketFromCode(stock.code);
+                                const watchlistKey = `${market}.${stock.code.trim().toUpperCase()}`;
+                                const alreadyInWatchlist = watchlistKeys.has(watchlistKey);
+                                return (
+                              <Item key={stock.code} size="xs" variant="outline">
+                                <ItemHeader>
+                                  <ItemContent>
+                                    <ItemTitle className="text-xs">{stock.name}</ItemTitle>
+                                    <ItemDescription className="text-[11px] leading-tight">{stock.code}</ItemDescription>
+                                  </ItemContent>
+                                  <ItemActions className="gap-1">
+                                    <Button
+                                      type="button"
+                                      size="xs"
+                                      variant="outline"
+                                      onClick={() => {
+                                        const market = inferMarketFromCode(stock.code);
+                                        useAnalysisStore.getState().setPendingHandoff({
+                                          symbol: stock.code,
+                                          market,
+                                          preference_snapshot,
+                                        });
+                                        router.push("/app/analyze");
+                                      }}
+                                    >
+                                      分析
+                                    </Button>
+                                    <Tooltip>
+                                      <TooltipTrigger
+                                        render={
+                                          <Button
+                                            type="button"
+                                            size="icon-xs"
+                                            variant={alreadyInWatchlist ? "secondary" : "outline"}
+                                            disabled={alreadyInWatchlist}
+                                            aria-label={alreadyInWatchlist ? "已在自选" : `将 ${stock.name} 加入自选`}
+                                            onClick={() => {
+                                              upsertWatchlistStock(stock);
+                                              setWatchlistKeys(loadWatchlistKeysFromStorage());
+                                            }}
+                                          >
+                                            {alreadyInWatchlist ? <CheckIcon /> : <PlusIcon />}
+                                          </Button>
+                                        }
+                                      />
+                                      <TooltipContent side="top" align="center">
+                                        {alreadyInWatchlist ? "已在自选" : "加入自选"}
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </ItemActions>
+                                </ItemHeader>
+                              </Item>
+                                );
+                              })()
+                            ))}
+                          </ItemGroup>
+                        </ScrollArea>
+                      </CollapsibleContent>
                     </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
+                  </Collapsible>
+                </section>
+              </div>
+            </div>
           ) : null}
-
-          {sendError ? (
-            <PageErrorState
-              title="消息发送失败"
-              description={sendError}
-              actions={
-                <>
-                  <Button type="button" size="sm" variant="secondary" onClick={() => void handleSend()}>
-                    重试发送
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={clearSendError}>
-                    关闭提示
-                  </Button>
-                </>
-              }
-            />
-          ) : null}
-        </section>
-
-        <section
-          ref={composerBarRef}
-          style={{
-            bottom: `${composerLiftPx + COMPOSER_EDGE_OFFSET_PX}px`,
-            left:
-              composerDesktopBounds.left !== undefined ? `${composerDesktopBounds.left}px` : undefined,
-            width:
-              composerDesktopBounds.width !== undefined
-                ? `${composerDesktopBounds.width}px`
-                : undefined,
-          }}
-          className="fixed inset-x-0 bottom-0 z-50 md:inset-x-auto"
-          aria-label="消息输入区"
-        >
           <div className="mx-auto w-full max-w-4xl px-1 md:px-0">
             <FieldGroup className="bg-background">
               <Field>
@@ -1160,45 +1532,62 @@ export default function PickPage() {
                     <Spinner />
                     {pickerCopy.optionsLoading}
                   </div>
-                ) : conversationMode === "pick" ? (
+                ) : sendPending && streamStatus !== "idle" ? (
+                  <div className="text-muted-foreground flex items-center gap-2 text-xs">
+                    <Spinner />
+                    {streamStatus === "connecting" ? "正在连接对话服务..." : "正在生成回复..."}
+                  </div>
+                ) : conversationMode === "pick" && optionsPanelVisible ? (
                 <Collapsible open={pickPanelOpen} onOpenChange={setPickPanelOpen}>
-                  <div className="rounded-lg border">
+                  <div className="rounded-lg border bg-card">
                       <CollapsibleTrigger
-                        className="hover:bg-muted/60 flex w-full items-center justify-between px-2 py-1.5 text-left transition-colors"
+                        className="hover:bg-muted/60 flex w-full items-center justify-between px-2.5 py-1.5 text-left transition-colors"
                         aria-label="展开或收起选股条件与选项"
                       >
                         <div className="min-w-0">
-                          <p className="text-sm font-medium leading-tight">选股条件与选项</p>
-                          <p className="text-muted-foreground text-xs leading-snug">
-                            {pickConditionItems.length} 条条件 · {toolbar_actions.length} 个可选项
+                          <p className="flex items-center gap-1.5 text-sm font-medium leading-tight">
+                            <TrendingUpIcon className="text-muted-foreground size-3.5" />
+                            <span>选股条件与选项</span>
                           </p>
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                            <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                              条件 {pickConditionItems.length}
+                            </Badge>
+                            <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                              可选项 {toolbar_actions.length}
+                            </Badge>
+                          </div>
                         </div>
                         <ChevronDownIcon
                           className={cn("size-4 shrink-0 transition-transform", pickPanelOpen ? "rotate-180" : "")}
                         />
                       </CollapsibleTrigger>
-                    <CollapsibleContent className="border-t px-2 py-1.5">
-                      <dl className="grid gap-0.5 sm:grid-cols-2">
+                    <CollapsibleContent className="border-t px-2.5 py-2">
+                      <p className="text-muted-foreground mb-1 text-[11px]">条件快照</p>
+                      <dl className="grid gap-1 sm:grid-cols-2">
                           {pickConditionItems.map((item) => (
-                          <div key={item.label} className="bg-muted/80 rounded-md px-1.5 py-1">
-                            <dt className="text-muted-foreground text-xs leading-none">{item.label}</dt>
+                          <div key={item.label} className="bg-muted/70 rounded-md px-1.5 py-1">
+                            <dt className="text-muted-foreground text-[11px] leading-none">{item.label}</dt>
                             <dd className="truncate pt-0.5 text-xs leading-tight">{item.value}</dd>
                           </div>
                           ))}
                       </dl>
+                        <p className="text-muted-foreground mt-2 mb-1 text-[11px]">可选动作</p>
                         {toolbar_actions.length === 0 ? (
-                          <Empty className="mt-1.5 min-h-0 flex-none gap-1 rounded-md border border-dashed p-2">
+                          <Empty className="mt-1 min-h-0 flex-none gap-1 rounded-md border border-dashed p-1.5">
                             <EmptyDescription className="text-xs">当前步骤暂无可选项。</EmptyDescription>
                           </Empty>
                         ) : (
-                          <ul className="mt-1 flex flex-wrap gap-1" aria-label="选股可选项">
-                            {toolbar_actions.map((a) => (
+                          <ul className="mt-1 flex max-h-28 flex-wrap gap-1 overflow-y-auto pr-1" aria-label="选股可选项">
+                            {orderedToolbarActions.map((a) => {
+                              const active = isActionActive(a.action_id, preference_snapshot);
+                              return (
                               <li key={a.action_id}>
                                 <Button
                                   type="button"
                                   size="xs"
                                   variant={
-                                    isActionActive(a.action_id, preference_snapshot)
+                                    active
                                       ? "default"
                                       : a.kind === "primary"
                                         ? "secondary"
@@ -1208,41 +1597,106 @@ export default function PickPage() {
                                   disabled={sendPending}
                                   onClick={() => applyAction(a.action_id)}
                                 >
+                                  {active ? <CheckIcon data-icon="inline-start" /> : null}
                                   {a.label}
                                 </Button>
                               </li>
-                            ))}
+                              );
+                            })}
                           </ul>
                         )}
+                        <div className="mt-1 ml-auto flex justify-end">
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  size="icon-xs"
+                                  variant="ghost"
+                                  disabled={sendPending}
+                                  onClick={handleCloseSuggestedPanel}
+                                  aria-label="关闭条件与选项面板"
+                                >
+                                  <ChevronDownIcon />
+                                </Button>
+                              }
+                            />
+                            <TooltipContent side="top" align="end">关闭</TooltipContent>
+                          </Tooltip>
+                        </div>
                     </CollapsibleContent>
                   </div>
                 </Collapsible>
-                ) : toolbar_actions.length > 0 ? (
-                  <ul
-                    className="flex gap-1 overflow-x-auto rounded-lg border px-2 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                    aria-label="建议操作"
-                  >
-                    {toolbar_actions.map((a) => (
-                      <li key={a.action_id}>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant={
-                            isActionActive(a.action_id, preference_snapshot)
-                              ? "default"
-                              : a.kind === "primary"
-                                ? "secondary"
-                                : "outline"
+                ) : toolbar_actions.length > 0 && optionsPanelVisible ? (
+                  <div className="rounded-lg border p-1">
+                    <ul className="flex flex-col gap-0.5" aria-label="建议操作多选列表">
+                      {orderedToolbarActions.map((a) => {
+                        const selected = selectedSuggestedActionIds.includes(a.action_id);
+                        return (
+                          <li key={a.action_id}>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={selected ? "secondary" : "outline"}
+                              className={cn(
+                                "h-7 w-full justify-start px-2 text-left text-xs",
+                              )}
+                              aria-label={`建议操作：${a.label}`}
+                              disabled={sendPending}
+                              onClick={() => {
+                                setSelectedSuggestedActionIds((prev) =>
+                                  prev.includes(a.action_id)
+                                    ? prev.filter((id) => id !== a.action_id)
+                                    : [...prev, a.action_id],
+                                );
+                              }}
+                            >
+                              {selected ? <CheckIcon data-icon="inline-start" /> : null}
+                              <span className="line-clamp-1">{a.label}</span>
+                            </Button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <div className="mt-1 ml-auto flex items-center gap-0.5">
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              type="button"
+                              size="icon-xs"
+                              variant="outline"
+                              disabled={sendPending || selectedSuggestedActionIds.length === 0}
+                              onClick={handleClearSuggestedSelection}
+                              aria-label="清空已选建议"
+                            >
+                              <Trash2Icon />
+                            </Button>
                           }
-                          aria-label={`建议操作：${a.label}`}
-                          disabled={sendPending}
-                          onClick={() => applyAction(a.action_id)}
-                        >
-                          {a.label}
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
+                        />
+                        <TooltipContent side="top" align="end">清空</TooltipContent>
+                      </Tooltip>
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="default"
+                        disabled={sendPending || selectedSuggestedActions.length === 0}
+                        onClick={() => void handleSendSelectedSuggestedActions()}
+                      >
+                        发送所选{selectedSuggestedActions.length > 0 ? ` (${selectedSuggestedActions.length})` : ""}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon-xs"
+                        variant="ghost"
+                        disabled={sendPending}
+                        onClick={handleCloseSuggestedPanel}
+                        aria-label="关闭建议操作面板"
+                      >
+                        <ChevronDownIcon />
+                      </Button>
+                    </div>
+                  </div>
                 ) : null}
 
                 <InputGroup
@@ -1256,7 +1710,7 @@ export default function PickPage() {
                     placeholder={pickerCopy.inputPlaceholder}
                     disabled={sendPending}
                     aria-invalid={sendError ? true : undefined}
-                    className="max-h-[min(40svh,18rem)] min-h-20 px-3 py-3 md:min-h-24"
+                    className="max-h-[min(40svh,16rem)] min-h-14 px-2.5 py-2 md:min-h-16"
                     maxLength={MAX_DRAFT_CHARS}
                     onCompositionStart={() => {
                       isImeComposingRef.current = true;
@@ -1279,13 +1733,12 @@ export default function PickPage() {
 
                   <InputGroupAddon
                     align="block-end"
-                    className="border-t justify-between gap-2 group-data-[disabled=true]/input-group:opacity-100"
+                    className="justify-between gap-1.5 group-data-[disabled=true]/input-group:opacity-100"
                   >
                     <Select
-                      value={conversationMode ?? "unset"}
+                      value={conversationMode ?? "pick"}
                       onValueChange={(v) => {
                         if (!v || sendPending || streamingOptionsPending) return;
-                        if (v === "unset") return;
                         if (v === "consult") applyAction("intent_consult");
                         if (v === "pick") applyAction("intent_pick");
                       }}
@@ -1295,7 +1748,16 @@ export default function PickPage() {
                         aria-label="对话模式"
                         disabled={sendPending || streamingOptionsPending}
                       >
-                        <SelectValue>{conversationModeLabels[conversationMode ?? "unset"]}</SelectValue>
+                        {(() => {
+                          const mode = (conversationMode ?? "pick") as "consult" | "pick";
+                          const Icon = conversationModeIcons[mode];
+                          return (
+                            <div className="flex items-center gap-1.5">
+                              <Icon className="text-muted-foreground size-3.5" />
+                              <SelectValue>{conversationModeLabels[mode]}</SelectValue>
+                            </div>
+                          );
+                        })()}
                       </SelectTrigger>
                       <SelectContent side="top" align="start">
                         <SelectGroup>
@@ -1315,6 +1777,7 @@ export default function PickPage() {
                             type="button"
                             size="icon-sm"
                             variant="default"
+                            className="rounded-full"
                             disabled={sendPending || !draft.trim()}
                             onClick={() => void handleSend()}
                             aria-label={sendPending ? "发送中" : "发送消息"}
@@ -1349,8 +1812,9 @@ export default function PickPage() {
               </Field>
             </FieldGroup>
           </div>
-        </section>
-      </main>
+          </section>
+        </main>
+      </div>
 
       <AlertDialog
         open={quotaBlocked}

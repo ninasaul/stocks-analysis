@@ -41,10 +41,38 @@ export type PaperFill = {
   totalCny: number;
 };
 
+/** 最近操作过的标的（仅本机 mock 流程，用于快捷选择）。 */
+export type PaperRecentInstrument = {
+  market: Market;
+  symbol: string;
+  name: string;
+};
+
+const MAX_RECENT_INSTRUMENTS = 20;
+
+function rememberRecent(
+  current: PaperRecentInstrument[],
+  entry: PaperRecentInstrument,
+): PaperRecentInstrument[] {
+  const k = positionKey(entry.market, entry.symbol);
+  const next = current.filter((r) => positionKey(r.market, r.symbol) !== k);
+  return [
+    {
+      market: entry.market,
+      symbol: entry.symbol.trim(),
+      name: entry.name.trim() || entry.symbol,
+    },
+    ...next,
+  ].slice(0, MAX_RECENT_INSTRUMENTS);
+}
+
 type PaperTradingState = {
   cashCny: number;
   positions: PaperPosition[];
   fills: PaperFill[];
+  /** 与成交无关的纯 UI 提示列表，存本机。 */
+  recentInstruments: PaperRecentInstrument[];
+  rememberInstrument: (input: { market: Market; symbol: string; name: string }) => void;
   placeBuy: (input: { market: Market; symbol: string; name: string; shares: number }) => { ok: true } | { ok: false; error: string };
   placeSell: (input: { market: Market; symbol: string; shares: number }) => { ok: true } | { ok: false; error: string };
   resetPortfolio: () => void;
@@ -61,6 +89,19 @@ export const usePaperTradingStore = create<PaperTradingState>()(
       cashCny: PAPER_TRADING_STARTING_CASH_CNY,
       positions: [],
       fills: [],
+      recentInstruments: [],
+      rememberInstrument: (input) => {
+        const symbol = input.symbol.trim();
+        if (!symbol) return;
+        const name = input.name.trim() || symbol;
+        set({
+          recentInstruments: rememberRecent(get().recentInstruments, {
+            market: input.market,
+            symbol,
+            name,
+          }),
+        });
+      },
       placeBuy: (input) => {
         const shares = Math.floor(Number(input.shares));
         if (!Number.isFinite(shares) || shares < 1) {
@@ -125,6 +166,11 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           cashCny: Number((cashCny - totalCny).toFixed(2)),
           positions: nextPositions,
           fills: [fill, ...fills].slice(0, 500),
+          recentInstruments: rememberRecent(get().recentInstruments, {
+            market,
+            symbol,
+            name,
+          }),
         });
         return { ok: true };
       },
@@ -176,6 +222,11 @@ export const usePaperTradingStore = create<PaperTradingState>()(
           cashCny: Number((cashCny + totalCny).toFixed(2)),
           positions: nextPositions,
           fills: [fill, ...fills].slice(0, 500),
+          recentInstruments: rememberRecent(get().recentInstruments, {
+            market,
+            symbol,
+            name: pos.name,
+          }),
         });
         return { ok: true };
       },
@@ -192,6 +243,7 @@ export const usePaperTradingStore = create<PaperTradingState>()(
         cashCny: s.cashCny,
         positions: s.positions,
         fills: s.fills,
+        recentInstruments: s.recentInstruments,
       }),
     },
   ),

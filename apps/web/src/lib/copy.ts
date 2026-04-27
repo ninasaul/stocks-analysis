@@ -64,15 +64,15 @@ export const pickerCopy = {
 } as const;
 
 export const historyCopy = {
-  pageSubtitle: "可查看个人建议存档，并按历史记录进行复盘统计。",
+  pageSubtitle: "集中查看历史建议存档，并基于同源样本完成复盘分析与执行校准。",
   recapTitle: "复盘总览",
-  recapDesc: "基于已存档记录汇总执行倾向、风险分布与质量稳定性。",
+  recapDesc: "基于已归档样本汇总执行倾向、风险结构与策略稳定性，用于识别偏差并优化后续决策。",
   recapInsufficientTitle: "数据不足",
   recapInsufficientDesc: "请先完成至少一次股票预测，再查看复盘统计。",
   avgConfidence: "平均置信度",
   avgExpectedReturn: "平均预期盈利率",
   expectedReturnHelp:
-    "以报告生成时的参考价与模型目标价为基准测算的相对变动百分比；仅供复盘对照，不代表真实成交或已实现损益。",
+    "按归档时参考价与模型目标价测算的理论收益率，统一采用百分比口径；该指标仅用于模型评估与复盘对照，不代表可实现收益或真实成交结果。",
   positiveExpectedShare: "正预期盈利率占比",
   downgradedRate: "门控降级占比",
   gatePassRate: "门控通过率",
@@ -80,13 +80,13 @@ export const historyCopy = {
   weeklyShare: "周线分析占比",
   actionDistribution: "动作分布",
   actionDistributionHint:
-    "各动作条数占全部存档的百分比；若某一柱过高，说明结论类型过于集中。",
+    "展示各动作在全部归档样本中的占比。单一动作长期显著偏高，通常意味着信号分布失衡或策略输出存在集中化倾向。",
   recapSnapshotTitle: "数据摘要",
-  recapSnapshotDesc: "汇总样本规模、置信与预期收益测算，便于快速把握整体倾向。",
+  recapSnapshotDesc: "汇总样本规模、置信水平与预期收益测算结果，帮助快速识别策略整体方向与稳定性。",
   recapDistributionTitle: "动作与分布",
-  recapDistributionDesc: "柱状图为各动作条数占比；右侧为门控、风险与周期维度的结构指标。",
+  recapDistributionDesc: "左侧柱状图展示动作占比结构，右侧指标反映门控质量、风险分层与周期偏好，便于横向比对策略特征。",
   recapRiskMixTitle: "风险等级构成",
-  recapRiskMixHint: "三条合计为 100%，对应各条存档的风险标签。",
+  recapRiskMixHint: "三档风险占比合计为 100%，用于评估策略在不同风险层级上的暴露结构与配置倾向。",
   riskTierLow: "低风险",
   riskTierMedium: "中风险",
   riskTierHigh: "高风险",
@@ -144,15 +144,15 @@ export const accountCopy = {
 
 export const landingCopy = {
   heroEyebrow: "智谱投研 · 面向个人投资者的研究辅助",
-  heroTitleLine1: "单票择时分析",
-  heroTitleLine2: "结构化报告与复核",
+  heroTitleLine1: "看清一只股票的进出逻辑",
+  heroTitleLine2: "从分析到复盘，AI 全程陪跑",
   heroLead:
-    "在统一评分下汇总技术、结构与风险、事件折扣等维度，输出五态结论与研究计划要点，供您整理单票择时判断。",
+    "技术面、风险位、关键价格一页呈现；结论有逻辑、有依据，方便你自己判断和留档。",
   heroSupport:
     "报告载明关注区间、风险位、观察目标位及失效条件，便于对照关键价位，并支持导出或打印以便自行留档。",
   heroBoundary:
     "仅提供研究信息与分析工具，不构成投资建议，不提供任何交易执行能力。",
-  heroCtaPrimary: "进入工作台",
+  heroCtaPrimary: "开始分析",
   heroCtaSecondary: "查看使用说明",
   heroCtaLogin: "登录或注册",
   heroLoginHint: "登录后可使用股票预测与选股对话，并在同一处查看订阅与当日剩余次数。",
@@ -163,52 +163,57 @@ export const landingCopy = {
   ] as const,
   heroTrustHeading: "报告中的重点信息",
   heroTrustPills: ["五态与综合评分", "关键价位与失效条件", "导出与打印留痕"] as const,
-  featuresHeading: "核心功能说明",
+  featuresHeading: "核心功能 · AI 股票研究工具",
+  featuresTitle: "告诉我你想看哪只股票，其余的交给 AI",
   featuresSectionLead:
-    "已确定标的：生成单票结构化择时报告。尚未收窄范围：以选股对话确认条件并获取候选及说明。登录后：可查阅已保存建议并进入复盘。内容由大模型在您提供信息的基础上生成，仅供研究参考，请结合公开信息自行判断与复核。",
+    "已有目标？直接生成结构化择时报告。还在筛选？通过对话逐步锁定候选标的。每一次分析自动存档，随时回来复盘。",
+  featuresTags: ["选股筛选", "择时报告", "风险评级", "建议存档"] as const,
+  featuresDisclaimer:
+    "内容由 AI 基于您的输入生成，仅供研究参考，不构成投资建议，请自行判断与核实。",
   featuresMatrixSummary: {
     label: "功能概览",
     value: "4",
-    caption: "单票分析 · 选股辅助 · 建议记录 · 智能生成",
+    caption: "选股筛选 · 择时报告 · 风险评级 · 建议存档",
   } as const,
-  featuresAnalyzeCta: "进入股票预测",
+  featuresAnalyzeCta: "开始分析 →",
+  featuresCtaHint: "已有目标股票，直接告诉我代码或名称即可。",
   features: [
     {
-      scope: "股票预测",
-      title: "单票结构化择时报告",
+      scope: "01 · 择时报告",
+      title: "一张报告，看清进出逻辑",
       description:
-        "一页呈现结论倾向、综合评分、风险等级与研究计划，并标明关注区间、风险位、观察目标位及失效条件；支持 Markdown 导出或浏览器打印，便于留档与复核。",
-      deliverable: "固定版式、关键价位、导出与打印",
-      useCase: "单票研判、核对关键价位与失效条件时使用。",
+        "结论倾向、风险等级、关键价位、失效条件——一页全部呈现，不用再自己拼表格。支持导出与打印，方便留档复核。",
+      deliverable: "结构化报告 · 关键价位 · 可导出",
+      useCase: "已有目标股票时，直接生成可复核的单票择时报告。",
     },
     {
-      scope: "选股对话",
-      title: "条件化候选筛选",
+      scope: "选股筛选",
+      title: "还没想好选哪只？跟 AI 聊出来",
       description:
-        "以对话方式确认市场、风险偏好与持有周期等条件，生成附带依据说明的候选列表；可按需进入单票报告，使筛选结论与深读分析在同一路径内衔接。",
-      deliverable: "偏好摘要、候选依据、衔接单票分析",
-      useCase: "关注面较宽、需可解释筛选再下钻时使用。",
+        "告诉 AI 你的市场偏好、风险承受度和持有周期，它会帮你收敛条件、给出带理由的候选清单，再一键跳入个股深度报告。",
+      deliverable: "对话筛选 · 候选清单 · 衔接报告",
+      useCase: "关注面较宽、需要先收敛候选再下钻研究时使用。",
     },
     {
-      scope: "登录后",
-      title: "建议记录与复盘",
+      scope: "历史复盘",
+      title: "每次判断都留痕，事后随时来验",
       description:
-        "登录后自动保存股票预测相关建议，支持按时间查阅当时结论与复盘摘要；列表与复盘所涉字段口径与正式报告一致，便于对照当时判断。",
-      deliverable: "建议列表、复盘视图、口径一致",
+        "登录后自动存档所有预测建议，按时间回溯当时的结论与依据。复盘字段与报告口径一致，一眼看出自己当时对在哪、错在哪。",
+      deliverable: "自动存档 · 历史复盘 · 口径一致",
       useCase: "留存研究记录、定期回顾判断质量时使用。",
     },
     {
-      scope: "智能生成",
-      title: "大模型驱动的研究输出",
+      scope: "决策自主",
+      title: "AI 给观点，你来做决定",
       description:
-        "股票预测与选股说明均由大模型在您提交信息的基础上生成：单票写入固定版式字段，选股结合对话输出候选与自然语言依据；均可导出或打印，决策与风险须由您本人把关。",
-      deliverable: "模型说明、版式字段、与对话衔接",
+        "报告与候选清单均由 AI 基于你的输入生成，逻辑透明可追溯。所有结论均可导出打印，最终的买卖判断和风险，由你自己把握。",
+      deliverable: "逻辑透明 · 可导出 · 决策自主",
       useCase: "借助 AI 汇总与表述要点、自行完成决策把关时使用。",
     },
   ] as const,
   howItWorksHeading: "工作原理",
   howItWorksBody:
-    "全流程由 AI Agent 驱动：根据你的输入自动选择「股票预测」或「选股对话」路径，边交互边收敛，再生成结构化结论并沉淀到历史复盘。登录后可在「我的账号 / 订阅」查看当日额度与套餐状态；股票预测与选股会话按日分别计次。",
+    "输入你的想法，AI 自动判断走「个股预测」还是「选股筛选」，边对话边收敛，最终生成结构化报告并存入复盘记录。两类功能额度独立，登录后可在「我的账号」查看用量。",
   pricingHeading: subscriptionTierPublicCopy.plansSectionTitle,
   pricingDesc:
     "免费版登录后生效，含基础研究与历史存档；专业版在股票预测与选股会话的每日次数上更高。访客规则、权益字段与支付入口以订阅页为准。",

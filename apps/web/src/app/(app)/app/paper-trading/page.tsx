@@ -2,11 +2,10 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChartLineIcon, CircleHelpIcon, SearchIcon } from "lucide-react";
+import { ChartLineIcon, CircleHelpIcon } from "lucide-react";
 import { toast } from "sonner";
 import type { AnalysisInput } from "@/lib/contracts/domain";
 import {
-  ANALYZE_SYMBOL_MOCK_UNIVERSE,
   formatAnalyzeBoardSymbol,
   fuzzyAnalyzeSymbolScore,
   parseAnalyzeSearchInput,
@@ -16,6 +15,7 @@ import { requestStockSearch } from "@/lib/api/stocks";
 import { buildMockBaseQuote, quoteCurrencyLabel } from "@/lib/mock-base-quote";
 import { AppPageLayout } from "@/components/features/app-page-layout";
 import { PageLoadingState } from "@/components/features/page-state";
+import { StockSearchCombobox } from "@/components/features/stock-search-combobox";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,11 +29,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
@@ -130,7 +125,7 @@ function formatFillTime(ts: number) {
 }
 
 const COPY_PAGE_DETAIL =
-  "使用与股票预测页一致的本地推算行情完成买卖记账；资金与持仓保存在当前浏览器。港股、美股按固定参考汇率折算为人民币，统一计入资金池。";
+  "成交价与估值均来自本地 mock 行情（与预测页相同算法，不拉取交易所实时价）；资金、持仓、成交与最近搜索保存在当前浏览器。港股、美股按固定参考汇率折算为人民币，统一计入资金池。";
 
 const COPY_SIM_DISCLAIMER_DETAIL =
   "本模块不构成投资建议，也不连接券商或交易所；成交价与盈亏均为本地推算结果，与实盘成交条件无关。";
@@ -174,6 +169,8 @@ export default function PaperTradingPage() {
   const cashCny = usePaperTradingStore((s) => s.cashCny);
   const positions = usePaperTradingStore((s) => s.positions);
   const fills = usePaperTradingStore((s) => s.fills);
+  const recentInstruments = usePaperTradingStore((s) => s.recentInstruments);
+  const rememberInstrument = usePaperTradingStore((s) => s.rememberInstrument);
   const placeBuy = usePaperTradingStore((s) => s.placeBuy);
   const placeSell = usePaperTradingStore((s) => s.placeSell);
   const resetPortfolio = usePaperTradingStore((s) => s.resetPortfolio);
@@ -185,6 +182,7 @@ export default function PaperTradingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [simDisclaimerOpen, setSimDisclaimerOpen] = useState(false);
+  const [remoteSearching, setRemoteSearching] = useState(false);
   const [remoteSearchItems, setRemoteSearchItems] = useState<AnalyzeSymbolSearchItem[]>([]);
 
   useEffect(() => {
@@ -211,7 +209,6 @@ export default function PaperTradingPage() {
 
   const searchItems = useMemo(() => {
     const byKey = new Map<string, AnalyzeSymbolSearchItem>();
-    for (const m of ANALYZE_SYMBOL_MOCK_UNIVERSE) byKey.set(m.key, m);
     for (const item of remoteSearchItems) byKey.set(item.key, item);
     for (const p of positions) {
       const k = `${p.market}.${p.symbol}`;
@@ -219,8 +216,30 @@ export default function PaperTradingPage() {
         byKey.set(k, { key: k, market: p.market, symbol: p.symbol.trim(), name: p.name });
       }
     }
-    return Array.from(byKey.values());
-  }, [remoteSearchItems, positions]);
+    for (const r of recentInstruments) {
+      const k = `${r.market}.${r.symbol.trim()}`;
+      const cur = byKey.get(k);
+      const name = (r.name.trim() || r.symbol).trim();
+      if (cur) {
+        byKey.set(k, { ...cur, name: name || cur.name });
+      } else {
+        byKey.set(k, { key: k, market: r.market, symbol: r.symbol.trim(), name: name || r.symbol });
+      }
+    }
+    const list = Array.from(byKey.values());
+    const recentOrder = new Map(
+      recentInstruments.map((r, i) => [`${r.market}.${r.symbol.trim()}`, i]),
+    );
+    list.sort((a, b) => {
+      const ka = `${a.market}.${a.symbol.trim()}`;
+      const kb = `${b.market}.${b.symbol.trim()}`;
+      const ia = recentOrder.get(ka) ?? 9999;
+      const ib = recentOrder.get(kb) ?? 9999;
+      if (ia !== ib) return ia - ib;
+      return a.key.localeCompare(b.key);
+    });
+    return list;
+  }, [remoteSearchItems, positions, recentInstruments]);
 
   useEffect(() => {
     const keyword = query.trim();
@@ -228,29 +247,45 @@ export default function PaperTradingPage() {
     const searchTerm = parsed?.symbol?.trim() || keyword;
     if (authSession !== "user" || !searchTerm || (parsed && parsed.market !== "CN")) {
       setRemoteSearchItems([]);
+      setRemoteSearching(false);
       return;
     }
 
     let canceled = false;
+    setRemoteSearching(true);
     const timer = window.setTimeout(() => {
-      void requestStockSearch(searchTerm, 12)
+      void requestStockSearch(searchTerm, 6)
         .then((items) => {
-          if (!canceled) setRemoteSearchItems(items);
+          if (!canceled) {
+            setRemoteSearchItems(items);
+            setRemoteSearching(false);
+          }
         })
         .catch(() => {
-          if (!canceled) setRemoteSearchItems([]);
+          if (!canceled) {
+            setRemoteSearchItems([]);
+            setRemoteSearching(false);
+          }
         });
     }, 200);
 
     return () => {
       canceled = true;
       window.clearTimeout(timer);
+      setRemoteSearching(false);
     };
   }, [authSession, query]);
 
+  const sellSymbolSet = useMemo(
+    () => new Set(positions.map((p) => entryKey({ market: p.market, symbol: p.symbol }))),
+    [positions],
+  );
+
   const suggestionItems = useMemo(() => {
     const needle = q.toLowerCase();
-    if (!needle) return [];
+    if (!needle) {
+      return searchItems.slice(0, 6);
+    }
     return searchItems
       .map((item, index) => ({
         item,
@@ -262,9 +297,14 @@ export default function PaperTradingPage() {
         if (b.score !== a.score) return b.score - a.score;
         return a.recentRank - b.recentRank;
       })
-      .slice(0, 12)
+      .slice(0, 6)
       .map((row) => row.item);
   }, [searchItems, q]);
+
+  const visibleSuggestionItems = useMemo(() => {
+    if (side !== "sell") return suggestionItems;
+    return suggestionItems.filter((item) => sellSymbolSet.has(entryKey(item)));
+  }, [side, suggestionItems, sellSymbolSet]);
 
   const portfolioMetrics = useMemo(() => {
     let marketValueCny = 0;
@@ -282,18 +322,25 @@ export default function PaperTradingPage() {
     return { marketValueCny, costBasisCny, unrealized, totalEquity };
   }, [positions, cashCny]);
 
-  const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    if (!q) return;
-    const resolved = tryResolveInstrumentFromPool(q, "CN", searchItems);
-    if (resolved) setSelected(resolved);
-  };
-
   const applyInstrument = useCallback((inst: Instrument) => {
     setSelected(inst);
+    rememberInstrument({ market: inst.market, symbol: inst.symbol, name: inst.name });
     setQuery("");
-  }, []);
+  }, [rememberInstrument]);
+
+  const searchSectionTitle =
+    side === "sell"
+      ? q
+        ? "搜索结果（仅持仓可卖）"
+        : "最近使用（仅展示可卖持仓）"
+      : q
+        ? "搜索结果"
+        : "最近使用";
+
+  const searchEmptyMessage =
+    side === "sell"
+      ? "当前无可卖持仓，请先买入后再卖出。"
+      : "没有匹配结果，按 Enter 可按输入代码解析。";
 
   const onSubmitOrder = () => {
     const shares = Math.floor(Number(shareInput));
@@ -542,7 +589,7 @@ export default function PaperTradingPage() {
                     <span>下单</span>
                     <InfoTip label="资金与搜索范围">
                       <p>
-                        起始资金 {formatCny(PAPER_TRADING_STARTING_CASH_CNY)}，以人民币计价资金池。登录后输入 A 股关键词会请求与「股票预测」相同的后端搜索接口；未登录或港股、美股前缀（如 HK.、US.）时仍使用本地示例池与持仓代码匹配。成交价与预测页使用同一套本地推算行情；港股、美股进出资金按固定参考汇率折算为人民币。
+                        起始资金 {formatCny(PAPER_TRADING_STARTING_CASH_CNY)}，以人民币计价资金池。成交价与资产估值均使用与预测页同一套本地 mock 行情（不请求实时行情）。证券候选来源为后端模糊搜索结果与本页持久化的最近搜索/最近交易；未登录时展示本机最近记录并支持直接输入代码。港股、美股资金按固定参考汇率折算为人民币。
                       </p>
                     </InfoTip>
                   </CardTitle>
@@ -556,45 +603,27 @@ export default function PaperTradingPage() {
                     </TabsList>
                   </Tabs>
 
-                  <div className="shrink-0">
-                    <InputGroup className="bg-background">
-                      <InputGroupAddon>
-                        <SearchIcon />
-                      </InputGroupAddon>
-                      <InputGroupInput
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        onKeyDown={onSearchKeyDown}
-                        placeholder="代码或名称搜索，回车解析"
-                        aria-label="模拟交易标的搜索"
-                        autoComplete="off"
-                      />
-                    </InputGroup>
-                  </div>
-
-                  {suggestionItems.length > 0 ? (
-                    <section aria-label="匹配标的" className="flex flex-col gap-2">
-                      <p className="text-muted-foreground text-xs font-medium">搜索结果</p>
-                      <ul className="flex flex-col gap-1 rounded-lg border bg-card p-1">
-                        {suggestionItems.map((u) => (
-                          <li key={u.key}>
-                            <button
-                              type="button"
-                              className="hover:bg-muted/80 flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors"
-                              onClick={() => applyInstrument(universeItemToInstrument(u))}
-                            >
-                              <span className="min-w-0 flex-1 truncate">
-                                <span className="font-medium">{u.name}</span>
-                                <span className="text-muted-foreground ml-2 tabular-nums">
-                                  {compactBoardCode(u.market, u.symbol)}
-                                </span>
-                              </span>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    </section>
-                  ) : null}
+                  <StockSearchCombobox
+                    query={query}
+                    onQueryChange={setQuery}
+                    items={visibleSuggestionItems}
+                    loading={remoteSearching}
+                    title={searchSectionTitle}
+                    emptyMessage={searchEmptyMessage}
+                    ariaLabel="模拟交易标的搜索"
+                    formatCode={(item) => compactBoardCode(item.market, item.symbol)}
+                    onSelect={(item) => applyInstrument(universeItemToInstrument(item))}
+                    onResolveEnter={(rawQuery, activeItem) => {
+                      if (!rawQuery && activeItem) {
+                        applyInstrument(universeItemToInstrument(activeItem));
+                        return;
+                      }
+                      const resolved =
+                        tryResolveInstrumentFromPool(rawQuery, "CN", searchItems) ??
+                        (activeItem ? universeItemToInstrument(activeItem) : null);
+                      if (resolved) applyInstrument(resolved);
+                    }}
+                  />
 
                   {side === "sell" && positions.length > 0 ? (
                     <section aria-label="从持仓选择" className="flex flex-col gap-2">

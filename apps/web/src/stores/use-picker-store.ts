@@ -9,7 +9,7 @@ import type {
   SuggestedAction,
 } from "@/lib/contracts/domain";
 import { preferenceSnapshotSchema } from "@/lib/contracts/domain";
-import { requestPickerTurn } from "@/lib/api/picker";
+import { requestPickerTurnStream } from "@/lib/api/picker";
 import { isMockFlowEnabled } from "@/lib/env";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useSubscriptionStore } from "@/stores/use-subscription-store";
@@ -34,7 +34,8 @@ type PickerScript =
   | "pick_d8"
   | "pick_d3"
   | "ready"
-  | "candidates";
+  | "candidates"
+  | "backend_dialogue";
 
 type PickerState = {
   sessionId: string;
@@ -46,6 +47,7 @@ type PickerState = {
   suggested_actions: SuggestedAction[];
   streamingOptionsPending: boolean;
   sendPending: boolean;
+  streamStatus: "idle" | "connecting" | "streaming";
   sendError: string | null;
   clearSendError: () => void;
   resumePrompt: boolean;
@@ -108,6 +110,19 @@ function pushAssistant(
     conversation_phase: phase,
     streamingOptionsPending: false,
     ...extra,
+  }));
+}
+
+function appendAssistantChunk(
+  set: (fn: (s: PickerState) => Partial<PickerState>) => void,
+  messageId: string,
+  chunk: string,
+) {
+  if (!chunk) return;
+  set((s) => ({
+    messages: s.messages.map((msg) =>
+      msg.id === messageId && msg.role === "assistant" ? { ...msg, content: `${msg.content}${chunk}` } : msg,
+    ),
   }));
 }
 
@@ -274,6 +289,14 @@ function buildMockConsultReply(text: string) {
   ].join("\n");
 }
 
+function buildExtensionQuestionActions(extensionQuestions: string[]): SuggestedAction[] {
+  return extensionQuestions.slice(0, 5).map((question, index) => ({
+    action_id: `extq_${index + 1}`,
+    label: question,
+    kind: "secondary" as const,
+  }));
+}
+
 export const usePickerStore = create<PickerState>((set, get) => ({
   sessionId: INITIAL_SESSION_ID,
   script: "start",
@@ -291,6 +314,7 @@ export const usePickerStore = create<PickerState>((set, get) => ({
   suggested_actions: startActions,
   streamingOptionsPending: false,
   sendPending: false,
+  streamStatus: "idle",
   sendError: null,
   resumePrompt: false,
   quotaBlocked: false,
@@ -310,6 +334,7 @@ export const usePickerStore = create<PickerState>((set, get) => ({
       suggested_actions: startActions,
       streamingOptionsPending: false,
       sendPending: false,
+      streamStatus: "idle",
       sendError: null,
       resumePrompt: false,
       quotaBlocked: false,
@@ -339,37 +364,109 @@ export const usePickerStore = create<PickerState>((set, get) => ({
   sendUserText: async (text) => {
     const t = text.trim();
     if (!t) return false;
-    set({ sendPending: true, sendError: null });
+    set({ sendPending: true, sendError: null, streamStatus: "connecting" });
+    const currentSessionId = get().sessionId;
+    let assistantMessageId = "";
+    let chunkBuffer = "";
+    let chunkFlushRaf: number | null = null;
+    const flushBufferedChunks = () => {
+      if (!assistantMessageId || !chunkBuffer) return;
+      const next = chunkBuffer;
+      chunkBuffer = "";
+      appendAssistantChunk(set, assistantMessageId, next);
+    };
+    const scheduleChunkFlush = () => {
+      if (chunkFlushRaf !== null) return;
+      chunkFlushRaf = requestAnimationFrame(() => {
+        chunkFlushRaf = null;
+        flushBufferedChunks();
+      });
+    };
     try {
-      await requestPickerTurn({ session_id: get().sessionId, text: t });
-    } catch {
+      pushUser(set, t);
+      assistantMessageId = id();
+      set((s) => ({
+        messages: [
+          ...s.messages,
+          {
+            id: assistantMessageId,
+            role: "assistant",
+            content: "",
+            createdAt: Date.now(),
+          },
+        ],
+      }));
+
+      const turn = await requestPickerTurnStream(
+        { session_id: currentSessionId, text: t },
+        {
+          onChunk: (chunk) => {
+            if (get().streamStatus === "connecting") {
+              set({ streamStatus: "streaming" });
+            }
+            if (!chunk) return;
+            chunkBuffer += chunk;
+            scheduleChunkFlush();
+          },
+        },
+      );
+
+      if (chunkFlushRaf !== null) {
+        cancelAnimationFrame(chunkFlushRaf);
+        chunkFlushRaf = null;
+      }
+      flushBufferedChunks();
+
+      if (!turn.response) {
+        set((s) => ({
+          messages: s.messages.map((msg) =>
+            msg.id === assistantMessageId && msg.role === "assistant"
+              ? { ...msg, content: "已收到你的问题，请继续补充你关注的条件。" }
+              : msg,
+          ),
+        }));
+      }
+      const actions = buildExtensionQuestionActions(turn.extension_questions);
+      set({
+        suggested_actions: actions,
+        conversation_phase: "clarifying",
+        script: "backend_dialogue",
+        sessionId: turn.session_id || currentSessionId,
+        streamStatus: "idle",
+      });
+    } catch (error) {
+      if (chunkFlushRaf !== null) {
+        cancelAnimationFrame(chunkFlushRaf);
+        chunkFlushRaf = null;
+      }
+      flushBufferedChunks();
       set({
         sendPending: false,
-        sendError: "消息发送失败，请检查网络后重试。",
+        streamStatus: "idle",
+        sendError:
+          error instanceof Error && error.message
+            ? error.message
+            : "消息发送失败，请检查网络后重试。",
       });
+      if (assistantMessageId) {
+        set((s) => ({
+          messages: s.messages.filter((msg) => msg.id !== assistantMessageId),
+        }));
+      }
       return false;
     }
-    pushUser(set, t);
-    const { script } = get();
-    if (script === "start" || script === "consult_reply") {
-      set({ streamingOptionsPending: true, suggested_actions: [] });
-      window.setTimeout(() => {
-        pushAssistant(
-          set,
-          buildMockConsultReply(t),
-          [
-            { action_id: "intent_pick", label: "帮我选股", kind: "primary" },
-            { action_id: "intent_consult", label: "继续咨询", kind: "secondary" },
-          ],
-          "clarifying",
-        );
-      }, 500);
-    }
-    set({ sendPending: false });
+    set({ sendPending: false, streamStatus: "idle" });
     return true;
   },
 
   applyAction: (action_id) => {
+    if (action_id.startsWith("extq_")) {
+      const target = get().suggested_actions.find((action) => action.action_id === action_id);
+      if (!target?.label || get().sendPending) return;
+      void get().sendUserText(target.label);
+      return;
+    }
+
     if (action_id === "intent_consult") {
       pushUser(set, "随便问问");
       set({ script: "consult_reply" });
