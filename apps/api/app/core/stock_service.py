@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 import akshare as ak
 import baostock as bs
 import pandas as pd
+import tushare as ts
+from dotenv import load_dotenv
 
 from .logging import logger
 
@@ -31,26 +33,31 @@ class StockService:
             industry_file = os.path.join(data_dir, 'industry_info.csv')
             concept_file = os.path.join(data_dir, 'concept_info.csv')
             
-            # 检查文件是否存在且是今天的日期
+            # 检查文件是否存在且间隔不超过5天
             today = datetime.now().date()
             file_exists = os.path.exists(csv_file)
-            file_is_today = False
+            file_updated = False
             
             if file_exists:
                 file_mtime = datetime.fromtimestamp(os.path.getmtime(csv_file)).date()
-                file_is_today = (file_mtime == today)
-                logger.info(f"文件存在: {file_exists}, 文件日期: {file_mtime}, 当前日期: {today}")
+                days_since_update = (today - file_mtime).days
+                file_updated = (days_since_update <= 5)
+                logger.info(f"文件存在: {file_exists}, 文件日期: {file_mtime}, 当前日期: {today}, 间隔天数: {days_since_update}")
             else:
                 logger.info(f"文件不存在: {file_exists}")
             
-            if file_exists and file_is_today:
+            if file_exists and file_updated:
                 # 从文件中读取数据
                 try:
-                    stock_info_a_code_name_df = pd.read_csv(csv_file, dtype={'code': str})
+                    stock_info_df = pd.read_csv(csv_file, dtype={'code': str})
                     # 确保股票代码保持6位格式，补前导零
-                    stock_info_a_code_name_df['code'] = stock_info_a_code_name_df['code'].str.zfill(6)
-                    self.stock_code_name_map = dict(zip(stock_info_a_code_name_df["code"], stock_info_a_code_name_df["name"]))
-                    logger.info(f"加载股票数据，共 {len(self.stock_code_name_map)} 条")
+                    stock_info_df['code'] = stock_info_df['code'].str.zfill(6)
+                    # 构建股票代码到完整信息的映射
+                    self.stock_basic_info_map = {}
+                    for _, row in stock_info_a_code_name_df.iterrows():
+                        code = row['code']
+                        self.stock_basic_info_map[code] = row.to_dict()
+                    logger.info(f"加载股票数据，共 {len(self.stock_basic_info_map)} 条")
                 except Exception as e:
                     logger.error(f"从文件读取股票数据失败: {e}")
                     # 如果文件读取失败，尝试从网络获取
@@ -104,31 +111,54 @@ class StockService:
     def _fetch_and_save_stock_data(self, csv_file):
         """从网络获取股票数据并保存到文件"""
         try:
-            stock_info_a_code_name_df = ak.stock_info_a_code_name()
+            # 加载环境变量
+            load_dotenv()
+            tushare_api_key = os.getenv('TUSHARE_API_KEY')
+            
+            if not tushare_api_key:
+                raise Exception("TUSHARE_API_KEY 未配置")
+            
+            # 初始化 tushare pro
+            pro = ts.pro_api(tushare_api_key)
+            
+            # 获取股票基本信息
+            data = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,area,industry,list_date')
+            
+            # 处理数据
+            data['code'] = data['symbol']
             # 确保股票代码保持6位格式，补前导零
-            stock_info_a_code_name_df['code'] = stock_info_a_code_name_df['code'].astype(str).str.zfill(6)
-            self.stock_code_name_map = dict(zip(stock_info_a_code_name_df["code"], stock_info_a_code_name_df["name"]))
+            data['code'] = data['code'].astype(str).str.zfill(6)
+            
+            # 构建股票代码到完整信息的映射
+            self.stock_basic_info_map = {}
+            for _, row in data.iterrows():
+                code = row['code']
+                self.stock_basic_info_map[code] = row.to_dict()
+            
             # 保存到文件
-            stock_info_a_code_name_df.to_csv(csv_file, index=False)
-            logger.info(f"从网络获取股票数据并保存到文件，共 {len(self.stock_code_name_map)} 条")
+            data.to_csv(csv_file, index=False)
+            logger.info(f"从 Tushare 获取股票数据并保存到文件，共 {len(self.stock_basic_info_map)} 条")
         except Exception as e:
-            logger.error(f"从网络获取股票数据失败: {e}")
+            logger.error(f"从 Tushare 获取股票数据失败: {e}")
             # 如果网络获取失败，尝试从文件读取（如果文件存在）
             if os.path.exists(csv_file):
                 try:
-                    stock_info_a_code_name_df = pd.read_csv(csv_file, dtype={'code': str})
+                    stock_info_df = pd.read_csv(csv_file, dtype={'code': str})
                     # 确保股票代码保持6位格式，补前导零
-                    stock_info_a_code_name_df['code'] = stock_info_a_code_name_df['code'].str.zfill(6)
-                    self.stock_code_name_map = dict(zip(stock_info_a_code_name_df["code"], stock_info_a_code_name_df["name"]))
-                    if '000858' in self.stock_code_name_map:
-                        logger.debug(f"文件读取后，self.stock_code_name_map['000858'] = {self.stock_code_name_map['000858']}")
-                    logger.info(f"从文件读取股票数据（网络获取失败），共 {len(self.stock_code_name_map)} 条")
+                    stock_info_df['code'] = stock_info_df['code'].str.zfill(6)
+                    # 构建股票代码到完整信息的映射
+                    self.stock_basic_info_map = {}
+                    for _, row in stock_info_a_code_name_df.iterrows():
+                        code = row['code']
+                        self.stock_basic_info_map[code] = row.to_dict()
+
+                    logger.info(f"从文件读取股票数据（网络获取失败），共 {len(self.stock_basic_info_map)} 条")
                 except Exception as e:
                     logger.error(f"从文件读取股票数据失败: {e}")
-                    self.stock_code_name_map = {}
+                    self.stock_basic_info_map = {}
                     logger.info("股票数据映射为空")
             else:
-                self.stock_code_name_map = {}
+                self.stock_basic_info_map = {}
                 logger.info("股票数据映射为空")
 
     def _fetch_and_save_industry_data(self, industry_file):
@@ -320,10 +350,22 @@ class StockService:
             return code
 
     def get_stock_name(self, code: str) -> str:
-        stock_name = self.stock_code_name_map.get(code)
-        if stock_name:
-            return stock_name
+        stock_info = self.stock_basic_info_map.get(code)
+        if stock_info:
+            return stock_info.get('name', 'Unknown')
         return "Unknown"
+    
+    def get_stock_basic_info(self, code: str) -> Dict:
+        """
+        获取股票基本信息
+        
+        Args:
+            code: 股票代码
+        
+        Returns:
+            包含股票基本信息的字典，包含 name、industry、area 等字段
+        """
+        return self.stock_basic_info_map.get(code, {})
     
     def get_stock_market(self, code: str) -> str:
         """

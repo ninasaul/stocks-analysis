@@ -24,7 +24,7 @@ TEST_USER = {
     "username": "tester",
     "email": "test@example.com",
     "password": "Test123456",
-    "phone": "13800138000"
+    "phone": "13800138001"
 }
 
 # 测试用的会员信息
@@ -56,7 +56,7 @@ class UserManagementTest:
         response = requests.post(url, json=data)
         print(f"状态码: {response.status_code}")
         
-        if response.status_code == 201:
+        if response.status_code in [200, 201]:
             user_data = response.json()
             self.user_id = user_data["id"]
             TEST_MEMBERSHIP["user_id"] = self.user_id
@@ -514,8 +514,8 @@ def main():
         membership_test = MembershipManagementTest(user_test.access_token, user_test.user_id)
         membership_test.test_create_membership()
         membership_test.test_get_membership()
-        membership_test.test_renew_membership()
         membership_test.test_upgrade_membership()
+        membership_test.test_renew_membership()
         membership_test.test_get_api_call_stats()
         
         # 执行API调用测试

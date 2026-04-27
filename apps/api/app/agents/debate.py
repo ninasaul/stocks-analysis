@@ -1,6 +1,20 @@
 """简化版 Bull/Bear 辩论"""
 
+from fastapi import HTTPException
 from ..core.logging import logger
+
+
+def is_llm_error(error_msg: str) -> bool:
+    """检查错误是否是LLM相关的错误"""
+    if not error_msg:
+        return False
+    llm_keywords = [
+        "API调用失败", "LLM", "模型", "model", "LLM调用",
+        "InternalError", "ServiceUnavailable", "Too many requests",
+        "rate limit", "限流", "token", "chat", "openai"
+    ]
+    return any(keyword.lower() in error_msg.lower() for keyword in llm_keywords)
+
 
 BULL_PROMPT = """你是看多研究员。请严格基于以下数据为 {ticker} 构建看多论点，重点参考择时分析，不要添加个人主观意见。
 
@@ -49,7 +63,7 @@ BEAR_PROMPT = """你是看空研究员。请严格基于以下数据对 {ticker}
 
 
 async def run_debate(ticker: str, timing_scores: dict, 
-                     fundamental: dict, llm) -> dict:
+                     fundamental: dict, llm, analyst_insights: dict = None) -> tuple:
     """
     执行一轮 Bull/Bear 辩论，输出最终信号
 
@@ -61,13 +75,34 @@ async def run_debate(ticker: str, timing_scores: dict,
     再与技术打分做加权融合：
     最终信号 = 0.4 × 辩论信号 + 0.6 × 技术打分信号
     
+    Args:
+        ticker: 股票代码
+        timing_scores: 技术指标评分
+        fundamental: 基本面数据
+        llm: LLM客户端
+        analyst_insights: 分析师的LLM分析结果
+        
     Returns:
-        辩论结果，如果失败则包含error字段
+        (辩论结果, token消耗)，如果失败则包含error字段
     """
     try:
+        # 准备分析师洞察信息
+        analyst_info = ""
+        if analyst_insights:
+            if analyst_insights.get("market_analysis"):
+                analyst_info += f"## 市场分析师观点\n{analyst_insights['market_analysis']}\n\n"
+            if analyst_insights.get("fundamental_analysis"):
+                analyst_info += f"## 基本面分析师观点\n{analyst_insights['fundamental_analysis']}\n\n"
+            if analyst_insights.get("news_analysis"):
+                analyst_info += f"## 新闻分析师观点\n{analyst_insights['news_analysis']}\n\n"
+
         # Bull 发言
-        bull_response = await llm.chat(
-            BULL_PROMPT.format(
+        bull_prompt = BULL_PROMPT
+        if analyst_info:
+            bull_prompt = bull_prompt.replace("## 基本面检查", f"## 分析师洞察\n{analyst_info}\n## 基本面检查")
+        
+        bull_response, bull_tokens = await llm.chat(
+            bull_prompt.format(
                 ticker=ticker,
                 timing_scores=format_scores(timing_scores),
                 fundamental_check=str(fundamental)
@@ -79,8 +114,12 @@ async def run_debate(ticker: str, timing_scores: dict,
         bull = safe_parse_json(bull_response)
 
         # Bear 发言
-        bear_response = await llm.chat(
-            BEAR_PROMPT.format(
+        bear_prompt = BEAR_PROMPT
+        if analyst_info:
+            bear_prompt = bear_prompt.replace("## 基本面检查", f"## 分析师洞察\n{analyst_info}\n## 基本面检查")
+        
+        bear_response, bear_tokens = await llm.chat(
+            bear_prompt.format(
                 ticker=ticker,
                 timing_scores=format_scores(timing_scores),
                 fundamental_check=str(fundamental),
@@ -108,6 +147,8 @@ async def run_debate(ticker: str, timing_scores: dict,
         tech_score = timing_scores.get("composite", 0)
         final_score = 0.6 * tech_score + 0.4 * debate_signal
 
+        total_tokens = bull_tokens.get('total_tokens', 0) + bear_tokens.get('total_tokens', 0)
+
         return {
             "bull": bull,
             "bear": bear,
@@ -115,20 +156,11 @@ async def run_debate(ticker: str, timing_scores: dict,
             "tech_score": round(tech_score, 4),
             "final_score": round(final_score, 4),
             "signal": score_to_signal(final_score),
-        }
+        }, total_tokens
     except Exception as e:
         error_msg = f"多空辩论失败: {str(e)}"
         logger.error(f"多空辩论失败: {str(e)}")
-        return {
-            "bull": {},
-            "bear": {},
-            "debate_signal": 0,
-            "tech_score": 0,
-            "final_score": 0,
-            "signal": "HOLD",
-            "error": error_msg,
-            "error_detail": str(e)
-        }
+        raise HTTPException(status_code=503, detail=f"LLM模型服务不可用: {str(e)}")
 
 
 def score_to_signal(score: float) -> str:

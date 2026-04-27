@@ -1,5 +1,5 @@
 """业务逻辑层"""
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Tuple
 import hashlib
 import logging
@@ -185,7 +185,7 @@ class UserService:
         if not updates:
             return UserService.get_user_by_id(user_id)
         updates.append("updated_at = %s")
-        params.append(datetime.now())
+        params.append(datetime.now().astimezone())
         params.append(user_id)
         query = f"UPDATE users SET {', '.join(updates)} WHERE id = %s"
         execute_update(query, tuple(params))
@@ -221,7 +221,7 @@ class UserService:
                 return UserService.get_user_by_id(user_id)
 
             updates.append("updated_at = %s")
-            params.append(datetime.now())
+            params.append(datetime.now().astimezone())
             params.append(user_id)
 
             query = f"UPDATE users SET {', '.join(updates)} WHERE id = %s"
@@ -332,7 +332,7 @@ class MembershipService:
             if not user:
                 raise ValueError("用户不存在")
 
-            start_date = datetime.now()
+            start_date = datetime.now().astimezone()
             end_date = None
 
             if membership_data.type != MembershipType.NORMAL and membership_data.duration_months:
@@ -388,7 +388,7 @@ class MembershipService:
             创建的会员对象
         """
         try:
-            start_date = datetime.now()
+            start_date = datetime.now().astimezone()
             api_call_limit = Membership.API_CALL_LIMITS.get(MembershipType.NORMAL, 100)
 
             query = """
@@ -469,7 +469,7 @@ class MembershipService:
                 return MembershipService.get_membership_by_id(membership_id)
 
             updates.append("updated_at = %s")
-            params.append(datetime.now())
+            params.append(datetime.now().astimezone())
             params.append(membership_id)
 
             query = f"UPDATE memberships SET {', '.join(updates)} WHERE id = %s"
@@ -497,7 +497,7 @@ class MembershipService:
                 SET status = %s, updated_at = %s
                 WHERE id = %s
             """
-            params = (status.value, datetime.now(), membership_id)
+            params = (status.value, datetime.now().astimezone(), membership_id)
             affected = execute_update(query, params)
             return affected > 0
         except Exception as e:
@@ -524,7 +524,7 @@ class MembershipService:
             if membership.type == MembershipType.NORMAL:
                 raise ValueError("普通会员不能续费")
 
-            new_end_date = membership.end_date or datetime.now()
+            new_end_date = membership.end_date or datetime.now().astimezone()
             new_end_date += timedelta(days=duration_months * 30)
 
             return MembershipService.update_membership(
@@ -556,10 +556,10 @@ class MembershipService:
             if new_type == MembershipType.NORMAL:
                 end_date = None
             else:
-                if membership.end_date and membership.end_date > datetime.now():
+                if membership.end_date and membership.end_date > datetime.now().astimezone():
                     end_date = membership.end_date
                 else:
-                    end_date = datetime.now()
+                    end_date = datetime.now().astimezone()
 
                 if duration_months:
                     end_date += timedelta(days=duration_months * 30)
@@ -575,7 +575,7 @@ class MembershipService:
                 new_type.value,
                 end_date,
                 new_api_call_limit,
-                datetime.now(),
+                datetime.now().astimezone(),
                 membership_id
             )
             execute_update(query, params)
@@ -636,7 +636,7 @@ class MembershipService:
                 SET api_call_used = 0, updated_at = %s
                 WHERE status = 'active'
             """
-            execute_update(query, (datetime.now(),))
+            execute_update(query, (datetime.now().astimezone(),))
             logger.info("每日API调用次数已重置")
         except Exception as e:
             logger.error(f"重置API调用次数失败: {e}")
@@ -729,10 +729,10 @@ class ApiCallService:
         """
         try:
             query = """
-                INSERT INTO api_call_logs (user_id, endpoint, method, response_status)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO api_call_logs (user_id, endpoint, method, response_status, call_time)
+                VALUES (%s, %s, %s, %s, %s)
             """
-            params = (user_id, endpoint, method, response_status)
+            params = (user_id, endpoint, method, response_status, datetime.now().astimezone())
             log_id = execute_insert(query, params)
             if log_id:
                 return ApiCallService.get_api_log_by_id(log_id)
@@ -817,7 +817,7 @@ class ApiCallService:
             """
             successful_calls = execute_query(successful_calls_query, (user_id,))[0][0]
 
-            today = datetime.now().date()
+            today = datetime.now().astimezone().date()
             today_calls_query = """
                 SELECT COUNT(*) FROM api_call_logs
                 WHERE user_id = %s AND DATE(call_time) = %s
@@ -866,7 +866,7 @@ class ApiCallService:
                 SET api_call_used = %s, updated_at = %s
                 WHERE id = %s
             """
-            params = (membership.api_call_used, datetime.now(), membership.id)
+            params = (membership.api_call_used, datetime.now().astimezone(), membership.id)
             execute_update(query, params)
 
             return True
@@ -967,7 +967,7 @@ class RefreshTokenService:
                 SET status = %s, updated_at = %s
                 WHERE id = %s
             """
-            params = (RefreshTokenStatus.EXPIRED.value, datetime.now(), token_id)
+            params = (RefreshTokenStatus.EXPIRED.value, datetime.now().astimezone(), token_id)
             affected = execute_update(query, params)
             return affected > 0
         except Exception as e:
@@ -1011,7 +1011,7 @@ class RefreshTokenService:
                 SET status = %s, updated_at = %s
                 WHERE id = %s
             """
-            params = (RefreshTokenStatus.REVOKED.value, datetime.now(), token_id)
+            params = (RefreshTokenStatus.REVOKED.value, datetime.now().astimezone(), token_id)
             affected = execute_update(query, params)
             return affected > 0
         except Exception as e:
@@ -1038,7 +1038,7 @@ class RefreshTokenService:
             """
             params = (
                 RefreshTokenStatus.REVOKED.value, 
-                datetime.now(), 
+                datetime.now().astimezone(), 
                 user_id, 
                 RefreshTokenStatus.ACTIVE.value
             )
@@ -1060,8 +1060,8 @@ class RefreshTokenService:
             """
             params = (
                 RefreshTokenStatus.EXPIRED.value, 
-                datetime.now(), 
-                datetime.now(), 
+                datetime.now().astimezone(), 
+                datetime.now().astimezone(), 
                 RefreshTokenStatus.ACTIVE.value
             )
             affected = execute_update(query, params)
@@ -1101,7 +1101,7 @@ class RefreshTokenService:
                 return False
             
             # 检查是否过期
-            if expires_at < datetime.now():
+            if expires_at < datetime.now().astimezone():
                 # 标记为过期
                 RefreshTokenService.mark_as_expired(token_id)
                 return False
@@ -1368,7 +1368,7 @@ class WechatUserService:
                 return WechatUserService.get_wechat_user_by_id(wechat_user_id)
 
             updates.append("updated_at = %s")
-            params.append(datetime.now())
+            params.append(datetime.now().astimezone())
             params.append(wechat_user_id)
 
             query = f"UPDATE wechat_users SET {', '.join(updates)} WHERE id = %s"
@@ -1806,14 +1806,14 @@ class TokenBlacklistService:
         try:
             if expires_at is None:
                 # 默认过期时间为7天
-                expires_at = datetime.now() + timedelta(days=7)
+                expires_at = datetime.now().astimezone() + timedelta(days=7)
             
             query = """
                 INSERT INTO token_blacklist (token, token_type, user_id, expires_at, added_at)
                 VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (token) DO NOTHING
             """
-            params = (token, token_type, user_id, expires_at, datetime.now())
+            params = (token, token_type, user_id, expires_at, datetime.now().astimezone())
             execute_insert(query, params)
             logger.info(f"令牌已加入黑名单: {token[:20]}...")
             return True
@@ -1843,3 +1843,4 @@ class TokenBlacklistService:
         except Exception as e:
             logger.error(f"检查令牌黑名单失败: {e}")
             return False
+

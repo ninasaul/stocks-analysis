@@ -2,6 +2,8 @@
 
 # 进入容器并启动后端服务
 # 环境变量已在 Dockerfile 中设置好，此脚本只需安装依赖并启动服务
+# 线程数
+WORKERS=4
 
 docker exec stock-end bash -c "
 cd /app/apps/api &&
@@ -18,7 +20,7 @@ echo '访问地址：http://localhost:8011'
 echo 'API文档：http://localhost:8011/docs'
 echo '==================='
 
-nohup python -m uvicorn app.main:app --host \$HOST --port \$PORT > app.log 2>&1 &
+nohup python -m uvicorn app.main:app --host \$HOST --port \$PORT --workers $WORKERS > /dev/null 2>&1 &
 
 sleep 2
 if ps aux | grep -v grep | grep uvicorn > /dev/null; then

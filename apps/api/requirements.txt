@@ -1,6 +1,6 @@
 fastapi==0.135.2
-uvicorn==0.42.0
-akshare==1.18.55
+uvicorn==0.46.0
+akshare==1.18.57
 python-dotenv==1.0.1
 numpy==2.4.4
 pandas==2.3.3
@@ -15,3 +15,9 @@ python-jose[cryptography]==3.5.0
 python-multipart==0.0.22
 passlib[bcrypt]==1.7.4
 redis==5.3.0
+weasyprint==68.1
+Markdown==3.10.2
+pypandoc==1.17
+markdown2==2.5.5
+fpdf==1.7.2
+reportlab==4.4.10

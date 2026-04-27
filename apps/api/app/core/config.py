@@ -93,7 +93,7 @@ class LLMClient:
         
         logger.info(f"初始化LLM客户端: provider={self.provider}, model={self.config['model']}")
     
-    async def chat(self, prompt: str, response_format: str = "text", temperature: float = 0.1, seed: int = 42) -> str:
+    async def chat(self, prompt: str, response_format: str = "text", temperature: float = 0.1, seed: int = 42) -> tuple:
         """
         同步聊天完成
         
@@ -104,7 +104,7 @@ class LLMClient:
             seed: 随机种子，确保结果可重复
         
         Returns:
-            响应内容
+            (响应内容, token使用情况)
         """
         import aiohttp
         import json
@@ -140,7 +140,10 @@ class LLMClient:
                         raise Exception(f"API调用失败: {error_text}")
                     
                     data = await response.json()
-                    return data["choices"][0]["message"]["content"]
+                    content = data["choices"][0]["message"]["content"]
+                    # 获取token使用情况
+                    token_usage = data.get("usage", {})
+                    return content, token_usage
         
         except Exception as e:
             logger.error(f"{self.provider} LLM调用失败: {e}")
@@ -233,10 +236,10 @@ def get_llm_client(provider: Optional[str] = None) -> LLMClient:
         
         # 返回一个 mock 客户端
         class MockLLM:
-            async def chat(self, prompt: str, response_format: str = "text") -> str:
+            async def chat(self, prompt: str, response_format: str = "text") -> tuple:
                 import json
                 if response_format == "json":
-                    return json.dumps({
+                    content = json.dumps({
                         "pass": True,
                         "score": 8,
                         "checks": {
@@ -249,7 +252,15 @@ def get_llm_client(provider: Optional[str] = None) -> LLMClient:
                         },
                         "conclusion": "基本面良好，通过安全边际检查"
                     })
-                return "这是一个模拟的 LLM 响应"
+                else:
+                    content = "这是一个模拟的 LLM 响应"
+                # 模拟token使用情况
+                token_usage = {
+                    "prompt_tokens": len(prompt) // 4,  # 简单估算
+                    "completion_tokens": len(content) // 4,
+                    "total_tokens": (len(prompt) + len(content)) // 4
+                }
+                return content, token_usage
             
             async def stream_chat(self, prompt: str, response_format: str = "text"):
                 yield "这是一个模拟的流式 LLM 响应"

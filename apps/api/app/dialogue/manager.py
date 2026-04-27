@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Optional, AsyncGenerator
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 from app.core.config import get_llm_client
 from app.core.logging import logger
@@ -19,34 +19,59 @@ class DialogueManager:
 
     def __init__(self):
         if not hasattr(self, 'initialized'):
-            self.conversation_history: List[Dict[str, str]] = []
+            self.sessions: Dict[str, Dict] = {}  # 存储多个会话 {session_id: {"history": [...], "criteria": {...}}}
             self.current_session_id: Optional[str] = None
-            self.user_criteria: Dict[str, Any] = {}
             self.initialized = True
             logger.info("DialogueManager 初始化完成")
 
+    def _get_session(self, session_id: Optional[str]) -> Dict:
+        """获取或创建会话"""
+        if not session_id:
+            session_id = self.current_session_id
+        
+        if not session_id:
+            # 如果没有会话ID，返回当前会话（如果存在）
+            if self.current_session_id:
+                return self.sessions.get(self.current_session_id, {"history": [], "criteria": {}})
+            return {"history": [], "criteria": {}}
+        
+        # 确保会话存在
+        if session_id not in self.sessions:
+            self.sessions[session_id] = {"history": [], "criteria": {}}
+        
+        # 如果是新的会话ID，更新当前会话
+        if session_id != self.current_session_id:
+            self.current_session_id = session_id
+        
+        return self.sessions[session_id]
+
     def add_user_message(self, message: str, session_id: Optional[str] = None) -> None:
         """添加用户消息到历史"""
-        if session_id != self.current_session_id:
-            self.conversation_history = []
-            self.user_criteria = {}
-            self.current_session_id = session_id
-
-        self.conversation_history.append({
+        session = self._get_session(session_id)
+        
+        session["history"].append({
             "role": "user",
             "content": message,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().astimezone().isoformat()
         })
         # logger.debug(f"添加用户消息: {message[:50]}...")
 
-    def add_assistant_message(self, message: str) -> None:
+    def add_assistant_message(self, message: str, session_id: Optional[str] = None) -> None:
         """添加助手消息到历史"""
-        self.conversation_history.append({
+        session = self._get_session(session_id)
+        
+        session["history"].append({
             "role": "assistant",
             "content": message,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().astimezone().isoformat()
         })
         # logger.debug(f"添加助手消息: {message[:50]}...")
+
+    def update_criteria(self, criteria: Dict[str, Any], session_id: Optional[str] = None) -> None:
+        """更新用户选股条件"""
+        session = self._get_session(session_id)
+        session["criteria"].update(criteria)
+        logger.debug(f"更新选股条件: {criteria}")
 
     def extract_criteria(self, message: str) -> Dict[str, Any]:
         """提取用户消息中的选股条件"""
@@ -110,9 +135,9 @@ class DialogueManager:
 
         return criteria
 
-    def merge_criteria(self, new_criteria: Dict[str, Any]) -> Dict[str, Any]:
-        """合并新旧条件"""
-        merged = self.user_criteria.copy()
+    def merge_criteria(self, current_criteria: Dict[str, Any], new_criteria: Dict[str, Any]) -> Dict[str, Any]:
+        """合并选股条件"""
+        merged = current_criteria.copy()
         for key, value in new_criteria.items():
             if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
                 merged[key].update(value)
@@ -120,8 +145,12 @@ class DialogueManager:
                 merged[key] = value
         return merged
 
-    def build_prompt(self, user_message: str, context: Optional[Dict[str, Any]] = None) -> str:
+    def build_prompt(self, user_message: str, context: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None) -> str:
         """构建发送给 LLM 的提示"""
+        session = self._get_session(session_id)
+        user_criteria = session.get("criteria", {})
+        conversation_history = session.get("history", [])
+        
         prompt_parts = [
             "# 角色定义\n",
             "你是一个专业的股票投资顾问，擅长分析股票的技术面和基本面。\n\n",
@@ -138,9 +167,9 @@ class DialogueManager:
             "   - 有重大违法违规记录的股票\n\n"
         ]
 
-        if self.user_criteria:
+        if user_criteria:
             prompt_parts.append("# 已确定的选股条件\n")
-            for key, value in self.user_criteria.items():
+            for key, value in user_criteria.items():
                 prompt_parts.append(f"- {key}: {value}\n")
             prompt_parts.append("\n")
 
@@ -148,9 +177,9 @@ class DialogueManager:
             prompt_parts.append("# 当前分析上下文\n")
             prompt_parts.append(f"{json.dumps(context, ensure_ascii=False, indent=2)}\n\n")
 
-        if self.conversation_history:
+        if conversation_history:
             prompt_parts.append("# 对话历史\n")
-            for msg in self.conversation_history[-10:]:
+            for msg in conversation_history[-10:]:
                 role = "用户" if msg["role"] == "user" else "助手"
                 prompt_parts.append(f"{role}：{msg['content']}\n")
             prompt_parts.append("\n")
@@ -178,26 +207,38 @@ class DialogueManager:
 
         return "".join(prompt_parts)
 
-    async def get_response(self, user_message: str, context: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None) -> Dict[str, Any]:
+    async def get_response(self, user_message: str, context: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None, mode: str = "prompt") -> Dict[str, Any]:
         """获取 LLM 响应"""
         self.add_user_message(user_message, session_id)
 
-        new_criteria = self.extract_criteria(user_message)
-        if new_criteria:
-            self.user_criteria = self.merge_criteria(new_criteria)
-            logger.info(f"提取到选股条件: {self.user_criteria}")
+        # 提取选股条件（仅在 prompt 模式下）
+        if mode == "prompt":
+            new_criteria = self.extract_criteria(user_message)
+            if new_criteria:
+                current_criteria = self.get_criteria(session_id)
+                merged_criteria = self.merge_criteria(current_criteria, new_criteria)
+                self.update_criteria(merged_criteria, session_id)
+                logger.info(f"提取到选股条件: {merged_criteria}")
 
-        prompt = self.build_prompt(user_message, context)
-        logger.debug(f"构建提示: {prompt[:200]}...")
+            # 构建提示词
+            prompt = self.build_prompt(user_message, context, session_id)
+            logger.debug(f"构建提示: {prompt[:200]}...")
+        else:
+            # direct 模式：直接使用用户消息作为提示词
+            prompt = user_message
+            logger.debug(f"直接对话模式: {prompt[:200]}...")
 
         try:
             llm_client = get_llm_client()
             response = await llm_client.chat(prompt)
-            self.add_assistant_message(response)
+            self.add_assistant_message(response, session_id)
             logger.info(f"LLM 响应成功")
             
-            # 提取延伸问题
-            extension_questions = self._extract_extension_questions(response)
+            # 提取延伸问题（仅在 prompt 模式下）
+            if mode == "prompt":
+                extension_questions = self._extract_extension_questions(response)
+            else:
+                extension_questions = []
             
             return {
                 "response": response,
@@ -222,29 +263,40 @@ class DialogueManager:
             return questions[:5]  # 最多返回5个问题
         return []
 
-    async def get_streaming_response(self, user_message: str, context: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def get_streaming_response(self, user_message: str, context: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None, mode: str = "prompt") -> AsyncGenerator[Dict[str, Any], None]:
         """获取 LLM 流式响应"""
         self.add_user_message(user_message, session_id)
 
-        new_criteria = self.extract_criteria(user_message)
-        if new_criteria:
-            self.user_criteria = self.merge_criteria(new_criteria)
-            logger.info(f"提取到选股条件: {self.user_criteria}")
+        # 提取选股条件（仅在 prompt 模式下）
+        if mode == "prompt":
+            new_criteria = self.extract_criteria(user_message)
+            if new_criteria:
+                current_criteria = self.get_criteria(session_id)
+                merged_criteria = self.merge_criteria(current_criteria, new_criteria)
+                self.update_criteria(merged_criteria, session_id)
+                logger.info(f"提取到选股条件: {merged_criteria}")
 
-        prompt = self.build_prompt(user_message, context)
-        logger.debug(f"构建提示: {prompt[:200]}...")
+        # 根据模式决定是否构建提示词
+        if mode == "prompt":
+            prompt = self.build_prompt(user_message, context, session_id)
+            logger.debug(f"构建提示: {prompt[:200]}...")
+        else:
+            # direct 模式：直接使用用户消息作为提示词
+            prompt = user_message
+            logger.debug(f"直接对话模式: {prompt[:200]}...")
 
         try:
             llm_client = get_llm_client()
             
-            # 发送一些提示信息
-            yield {"chunk": "正在分析您的选股条件...", "extension_questions": []}
-            await asyncio.sleep(0.2)
-            yield {"chunk": "\n\n", "extension_questions": []}
-            await asyncio.sleep(0.2)
-            yield {"chunk": "我需要思考一下...", "extension_questions": []}
-            await asyncio.sleep(0.2)
-            yield {"chunk": "\n\n", "extension_questions": []}
+            # 发送一些提示信息（仅在 prompt 模式下）
+            if mode == "prompt":
+                yield {"chunk": "正在分析您的选股条件...", "extension_questions": []}
+                await asyncio.sleep(0.2)
+                yield {"chunk": "\n\n", "extension_questions": []}
+                await asyncio.sleep(0.2)
+                yield {"chunk": "我需要思考一下...", "extension_questions": []}
+                await asyncio.sleep(0.2)
+                yield {"chunk": "\n\n", "extension_questions": []}
             
             # 使用真正的流式LLM调用
             full_response = ""
@@ -253,35 +305,48 @@ class DialogueManager:
                     yield {"chunk": chunk, "extension_questions": []}
                     full_response += chunk
             
-            self.add_assistant_message(full_response)
+            self.add_assistant_message(full_response, session_id)
             logger.info(f"LLM 流式响应成功")
             
-            # 提取延伸问题
-            extension_questions = self._extract_extension_questions(full_response)
-            # 发送包含延伸问题的最终响应
-            yield {"chunk": "", "extension_questions": extension_questions}
+            # 提取延伸问题（仅在 prompt 模式下）
+            if mode == "prompt":
+                extension_questions = self._extract_extension_questions(full_response)
+                # 发送包含延伸问题的最终响应
+                yield {"chunk": "", "extension_questions": extension_questions}
+            else:
+                # direct模式不提取延伸问题
+                yield {"chunk": "", "extension_questions": []}
         except Exception as e:
             logger.error(f"LLM 调用失败: {e}")
             yield {"chunk": "抱歉，我现在无法回答您的问题，请稍后再试。", "extension_questions": []}
 
     def get_history(self, session_id: Optional[str] = None) -> List[Dict[str, str]]:
         """获取对话历史"""
-        if session_id == self.current_session_id:
-            return self.conversation_history
-        return []
+        session = self._get_session(session_id)
+        return session.get("history", [])
 
-    def get_criteria(self) -> Dict[str, Any]:
+    def get_criteria(self, session_id: Optional[str] = None) -> Dict[str, Any]:
         """获取当前选股条件"""
-        return self.user_criteria.copy()
+        session = self._get_session(session_id)
+        return session.get("criteria", {}).copy()
 
     def clear_history(self, session_id: Optional[str] = None) -> bool:
         """清除对话历史"""
-        if session_id == self.current_session_id or session_id is None:
-            self.conversation_history = []
-            self.user_criteria = {}
-            self.current_session_id = None
-            logger.info("对话历史已清除")
-            return True
+        if session_id:
+            # 清除指定会话
+            if session_id in self.sessions:
+                del self.sessions[session_id]
+                if session_id == self.current_session_id:
+                    self.current_session_id = None
+                logger.info(f"会话 {session_id} 历史已清除")
+                return True
+        else:
+            # 清除当前会话
+            if self.current_session_id and self.current_session_id in self.sessions:
+                del self.sessions[self.current_session_id]
+                self.current_session_id = None
+                logger.info("当前会话历史已清除")
+                return True
         return False
 
 dialogue_manager = DialogueManager()

@@ -53,13 +53,14 @@ def get_access_token():
         raise Exception(f"登录失败: {response.text}")
 
 
-def test_stream_api(message, session_id):
+def test_stream_api(message, session_id, mode="prompt"):
     """
     测试流式对话接口
 
     Args:
         message: 用户消息
         session_id: 会话ID
+        mode: 对话模式: prompt(有提示词) 或 direct(无提示词)
     """
     access_token = get_access_token()
     headers = {"Authorization": f"Bearer {access_token}"}
@@ -67,13 +68,15 @@ def test_stream_api(message, session_id):
     url = f"{BASE_URL}/api/dialogue/stream"
     params = {
         "message": message,
-        "session_id": session_id
+        "session_id": session_id,
+        "mode": mode
     }
 
     print(f"\n测试流式对话接口...")
     print(f"请求URL: {url}")
     print(f"消息: {message}")
     print(f"会话ID: {session_id}")
+    print(f"模式: {mode}")
     print("=" * 80)
 
     try:
@@ -131,18 +134,18 @@ if __name__ == "__main__":
     print("开始测试流式对话接口")
     print("=" * 80)
     
-    # 第一次对话
-    print("\n=== 第一次对话 ===")
+    # 测试 prompt 模式（有提示词）
+    print("\n=== 测试 prompt 模式（有提示词）===")
     message1 = "帮我选一只股票，要求股价大于100且处于均线多头排列"
-    test_stream_api(message1, session_id)
+    test_stream_api(message1, session_id, mode="prompt")
     
     # 等待5秒，确保服务器有时间处理请求
-    print("\n等待5秒，准备第二次对话...")
+    print("\n等待5秒，准备测试 direct 模式...")
     time.sleep(5)
     
-    # 第二次对话
-    print("\n=== 第二次对话 ===")
-    message2 = "如果股票是创新药呢？"
-    test_stream_api(message2, session_id)
+    # 测试 direct 模式（无提示词）
+    print("\n=== 测试 direct 模式（无提示词）===")
+    message2 = "你好，今天天气怎么样？"
+    test_stream_api(message2, session_id, mode="direct")
     
     print("\n测试完成！")

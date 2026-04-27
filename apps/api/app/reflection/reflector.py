@@ -1,8 +1,22 @@
 """反思机制模块"""
 from typing import Dict, Any
+from fastapi import HTTPException
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def is_llm_error(error_msg: str) -> bool:
+    """检查错误是否是LLM相关的错误"""
+    if not error_msg:
+        return False
+    llm_keywords = [
+        "API调用失败", "LLM", "模型", "model", "LLM调用",
+        "InternalError", "ServiceUnavailable", "Too many requests",
+        "rate limit", "限流", "token", "chat", "openai"
+    ]
+    return any(keyword.lower() in error_msg.lower() for keyword in llm_keywords)
+
 
 class Reflector:
     """处理决策反思和经验总结"""
@@ -39,7 +53,7 @@ class Reflector:
 请提供详细、准确且可操作的分析结果。
 """
 
-    async def reflect_on_decision(self, decision_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def reflect_on_decision(self, decision_data: Dict[str, Any]) -> tuple:
         """
         对交易决策进行反思
         
@@ -47,58 +61,51 @@ class Reflector:
             decision_data: 包含决策相关数据的字典
         
         Returns:
-            反思结果，如果失败则包含error字段
+            (反思结果, token消耗)，如果失败则包含error字段
         """
-        # 构建反思提示
-        prompt = f"""
+        # 构建反思提示（使用安全的字符串拼接，避免格式占位符错误）
+        prompt = """
 交易决策数据：
-ticker: {decision_data.get('ticker', '')}
+ticker: """ + str(decision_data.get('ticker', '')) + """
 
 技术打分：
-{decision_data.get('timing', {})}
+""" + str(decision_data.get('timing', {})) + """
 
 基本面检查：
-{decision_data.get('fundamental', {})}
+""" + str(decision_data.get('fundamental', {})) + """
 
 多空辩论：
-{decision_data.get('debate', {})}
+""" + str(decision_data.get('debate', {})) + """
 
 最终信号：
-{decision_data.get('signal', '')}
+""" + str(decision_data.get('signal', '')) + """
 
 最终得分：
-{decision_data.get('score', 0)}
+""" + str(decision_data.get('score', 0)) + """
 
 请对以上决策进行全面反思和分析，并以 JSON 格式返回结果。
 
 JSON 格式示例：
-{{
+{
   "evaluation": "决策评估",
   "analysis": "原因分析",
   "suggestions": "改进建议",
   "lessons": "经验总结"
-}}
+}
         """
         
         # 调用 LLM 进行反思
         try:
-            response = await self.llm.chat(
+            response, token_usage = await self.llm.chat(
                 self.reflection_prompt + "\n" + prompt,
                 response_format="json"
             )
             result = self._safe_parse_json(response)
-            return result
+            return result, token_usage.get('total_tokens', 0)
         except Exception as e:
             error_msg = f"反思分析失败: {str(e)}"
             logger.error(f"反思分析失败: {str(e)}")
-            return {
-                "evaluation": "反思分析失败",
-                "analysis": "",
-                "suggestions": "",
-                "lessons": "",
-                "error": error_msg,
-                "error_detail": str(e)
-            }
+            raise HTTPException(status_code=503, detail=f"LLM模型服务不可用: {str(e)}")
     
     async def reflect_on_trade(self, trade_data: Dict[str, Any]) -> Dict[str, Any]:
         """

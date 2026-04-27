@@ -9,13 +9,14 @@ from ..user_management.models import User
 from ..core.auth import get_current_user
 from ..core.logging import logger
 
-router = APIRouter(prefix="/api/dialogue", tags=["对话"])
+router = APIRouter(prefix="/api/dialogue", tags=["AI对话"])
 
 
 @router.post("/sync")
 async def dialogue_sync(
     message: str = Query(..., description="用户消息"),
     session_id: Optional[str] = Query(None, description="会话ID"),
+    mode: str = Query("prompt", description="对话模式: prompt(有提示词) 或 direct(无提示词)"),
     current_user: User = Depends(get_current_user)
 ) -> dict:
     """
@@ -24,14 +25,15 @@ async def dialogue_sync(
     Args:
         message: 用户消息
         session_id: 会话ID（可选，用于区分不同会话）
+        mode: 对话模式: prompt(有提示词) 或 direct(无提示词)
 
     Returns:
         对话响应
     """
-    logger.info(f"用户 {current_user.id} ({current_user.username}) 发送同步对话请求: {message[:50]}..., session_id: {session_id}")
+    logger.info(f"用户 {current_user.id} ({current_user.username}) 发送同步对话请求: {message[:50]}..., session_id: {session_id}, mode: {mode}")
     
     # 获取 LLM 响应（对话历史已在 DialogueManager 中存储）
-    result = await dialogue_manager.get_response(message, None, session_id)
+    result = await dialogue_manager.get_response(message, None, session_id, mode)
     response = result.get("response", "")
     extension_questions = result.get("extension_questions", [])
     
@@ -93,11 +95,12 @@ async def get_dialogue_history(
         "session_id": session_id or dialogue_manager.current_session_id
     }
 
-
+# TODO 增加参数选项，用以区分普通聊天和选股对话
 @router.post("/stream")
 async def dialogue_stream(
     message: str = Query(..., description="用户消息"),
     session_id: Optional[str] = Query(None, description="会话ID"),
+    mode: str = Query("prompt", description="对话模式: prompt(选股对话) 或 direct(直接对话)"),
     current_user: User = Depends(get_current_user)
 ) -> StreamingResponse:
     """
@@ -106,14 +109,15 @@ async def dialogue_stream(
     Args:
         message: 用户消息
         session_id: 会话ID（可选，用于区分不同会话）
+        mode: 对话模式: prompt(选股对话，有提示词) 或 direct(直接对话，无提示词)
 
     Returns:
         流式响应
     """
-    logger.info(f"用户 {current_user.id} ({current_user.username}) 发送流式对话请求: {message[:50]}..., session_id: {session_id}")
+    logger.info(f"用户 {current_user.id} ({current_user.username}) 发送流式对话请求: {message[:50]}..., session_id: {session_id}, mode: {mode}")
     
     async def stream_generator():
-        async for item in dialogue_manager.get_streaming_response(message, None, session_id):
+        async for item in dialogue_manager.get_streaming_response(message, None, session_id, mode):
             # 以SSE格式发送数据
             yield f"data: {json.dumps({'chunk': item.get('chunk', ''), 'extension_questions': item.get('extension_questions', [])})}\n\n"
     
