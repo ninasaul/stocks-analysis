@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import {
   BarChart3Icon,
   BookOpenIcon,
@@ -10,7 +10,6 @@ import {
   LibraryIcon,
   NewspaperIcon,
   RadioIcon,
-  SearchIcon,
   Share2Icon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -23,7 +22,6 @@ import {
   parseAnalyzeSearchInput,
   type AnalyzeSymbolSearchItem,
 } from "@/lib/analyze-symbol-search";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -45,12 +43,6 @@ import {
 } from "@/components/ui/field";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-  InputGroupText,
-} from "@/components/ui/input-group";
-import {
   Select,
   SelectContent,
   SelectGroup,
@@ -62,6 +54,7 @@ import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { StockSearchCombobox } from "@/components/features/stock-search-combobox";
 
 const MODEL_OPTIONS = ANALYZE_MODEL_OPTIONS;
 
@@ -163,12 +156,6 @@ const ANALYST_ROWS: {
   },
 ];
 
-const marketLabels: Record<AnalysisInput["market"], string> = {
-  CN: "A 股",
-  HK: "港股",
-  US: "美股",
-};
-
 function HelpTip({ label, content }: { label: string; content: string }) {
   return (
     <Tooltip>
@@ -183,23 +170,6 @@ function HelpTip({ label, content }: { label: string; content: string }) {
         <p className="m-0 max-w-64 text-xs leading-normal">{content}</p>
       </TooltipContent>
     </Tooltip>
-  );
-}
-
-function renderHighlightedText(text: string, query: string) {
-  const q = query.trim();
-  if (!q) return text;
-  const lowerText = text.toLowerCase();
-  const lowerQuery = q.toLowerCase();
-  const index = lowerText.indexOf(lowerQuery);
-  if (index === -1) return text;
-  const end = index + q.length;
-  return (
-    <>
-      {text.slice(0, index)}
-      <span className="bg-muted text-foreground rounded-sm">{text.slice(index, end)}</span>
-      {text.slice(end)}
-    </>
   );
 }
 
@@ -360,12 +330,9 @@ export function AnalyzeRunConfigDialog({
   const reactId = useId();
   const fieldId = reactId.replace(/:/g, "");
   const formId = `${fieldId}-analyze-form`;
-  const searchBoxRef = useRef<HTMLDivElement | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
   const [fallbackMarket, setFallbackMarket] = useState<AnalysisInput["market"]>("CN");
   const [selectedSearchKey, setSelectedSearchKey] = useState<string | null>(null);
-  const [searchFocused, setSearchFocused] = useState(false);
-  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [depth, setDepth] = useState<AnalysisDepth>(3);
   const [analysts, setAnalysts] = useState<Set<AnalystRole>>(() => new Set(["market", "fundamental"]));
   const [quickModel, setQuickModel] = useState<string>(MODEL_OPTIONS[0]);
@@ -420,8 +387,6 @@ export function AnalyzeRunConfigDialog({
       }
       setAnalysisDate(formatDateInput(new Date()));
       setPreviewNonce(0);
-      setSearchFocused(false);
-      setActiveSearchIndex(0);
     });
   }, [open, searchKeyword, market, riskTier, holdingHorizon, linkedPreference, prefsHydrated, symbolSearchItems]);
 
@@ -452,11 +417,6 @@ export function AnalyzeRunConfigDialog({
       .slice(0, 12)
       .map((entry) => entry.item);
   }, [symbolSearchItems, searchDraft]);
-
-  const effectiveSearchIndex = useMemo(() => {
-    if (!filteredSearchItems.length) return 0;
-    return Math.min(Math.max(0, activeSearchIndex), filteredSearchItems.length - 1);
-  }, [activeSearchIndex, filteredSearchItems.length]);
 
   const selectedSearchItem = useMemo(() => {
     if (!selectedSearchKey) return null;
@@ -490,7 +450,6 @@ export function AnalyzeRunConfigDialog({
     setFallbackMarket(item.market);
     setSelectedSearchKey(item.key);
     setSearchDraft(`${item.name}（${item.market}.${item.symbol}）`);
-    setSearchFocused(false);
   };
 
   const analystAddonEach = 0.15;
@@ -662,110 +621,34 @@ export function AnalyzeRunConfigDialog({
                         content="与页顶搜索同源；可点选下拉结果，也可手输代码。带 CN./HK./US. 前缀时以前缀为准。"
                       />
                     </FieldLabel>
-                    <div
-                      ref={searchBoxRef}
-                      className="relative w-full max-w-full"
-                      onBlur={(event) => {
-                        const next = event.relatedTarget;
-                        if (next instanceof Node && searchBoxRef.current?.contains(next)) return;
-                        setSearchFocused(false);
+                    <StockSearchCombobox
+                      query={searchDraft}
+                      onQueryChange={(next) => {
+                        setSearchDraft(next);
+                        setSelectedSearchKey(null);
                       }}
-                    >
-                      <InputGroup>
-                        <InputGroupAddon align="inline-start">
-                          <InputGroupText>
-                            <SearchIcon aria-hidden className="size-4" />
-                            <span className="sr-only">搜索股票</span>
-                          </InputGroupText>
-                        </InputGroupAddon>
-                        <InputGroupInput
-                          id={`${fieldId}-search`}
-                          name="symbolSearch"
-                          value={searchDraft}
-                          onFocus={() => setSearchFocused(true)}
-                          onChange={(e) => {
-                            setSearchDraft(e.target.value);
-                            setSelectedSearchKey(null);
-                            setActiveSearchIndex(0);
-                            if (!searchFocused) setSearchFocused(true);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "ArrowDown") {
-                              e.preventDefault();
-                              if (!searchFocused) setSearchFocused(true);
-                              setActiveSearchIndex((prev) =>
-                                filteredSearchItems.length
-                                  ? Math.min(prev + 1, filteredSearchItems.length - 1)
-                                  : 0,
-                              );
-                              return;
-                            }
-                            if (e.key === "ArrowUp") {
-                              e.preventDefault();
-                              if (!searchFocused) setSearchFocused(true);
-                              setActiveSearchIndex((prev) =>
-                                filteredSearchItems.length ? Math.max(prev - 1, 0) : 0,
-                              );
-                              return;
-                            }
-                            if (e.key === "Escape") {
-                              setSearchFocused(false);
-                              return;
-                            }
-                            if (e.key === "Enter") {
-                              if (searchFocused && filteredSearchItems.length > 0) {
-                                e.preventDefault();
-                                const picked =
-                                  filteredSearchItems[effectiveSearchIndex] ?? filteredSearchItems[0];
-                                if (picked) applySearchItem(picked);
-                              }
-                            }
-                          }}
-                          placeholder="代码或简称，例如 茅台、AAPL；无下拉时可手输 CN.600519"
-                          autoComplete="off"
-                          aria-required="true"
-                          aria-autocomplete="list"
-                          aria-expanded={searchFocused && filteredSearchItems.length > 0}
-                          aria-controls={searchFocused ? `${fieldId}-search-listbox` : undefined}
-                        />
-                      </InputGroup>
-                      {searchFocused ? (
-                        <div
-                          id={`${fieldId}-search-listbox`}
-                          role="listbox"
-                          className="absolute top-full z-60 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border bg-popover p-1 shadow-md"
-                        >
-                          {filteredSearchItems.length ? (
-                            filteredSearchItems.map((item, index) => (
-                              <Button
-                                key={item.key}
-                                type="button"
-                                role="option"
-                                aria-selected={effectiveSearchIndex === index}
-                                variant={effectiveSearchIndex === index ? "secondary" : "ghost"}
-                                className="h-auto w-full justify-start py-2"
-                                onMouseEnter={() => setActiveSearchIndex(index)}
-                                onClick={() => applySearchItem(item)}
-                              >
-                                <div className="flex w-full items-start justify-between gap-2 text-left">
-                                  <div className="flex min-w-0 flex-col items-start">
-                                    <span>
-                                      {item.market}.{renderHighlightedText(item.symbol, searchDraft)}
-                                    </span>
-                                    <span className="text-muted-foreground text-xs">
-                                      {renderHighlightedText(item.name, searchDraft)}
-                                    </span>
-                                  </div>
-                                  <Badge variant="outline">{marketLabels[item.market]}</Badge>
-                                </div>
-                              </Button>
-                            ))
-                          ) : (
-                            <p className="text-muted-foreground px-2 py-1.5 text-sm">无匹配标的</p>
-                          )}
-                        </div>
-                      ) : null}
-                    </div>
+                      items={filteredSearchItems}
+                      loading={false}
+                      title={searchDraft.trim() ? "搜索结果" : "最近使用"}
+                      emptyMessage="无匹配标的"
+                      placeholder="代码或简称，例如 茅台、AAPL；无下拉时可手输 CN.600519"
+                      ariaLabel="分析配置标的搜索"
+                      inputId={`${fieldId}-search`}
+                      listId={`${fieldId}-search-listbox`}
+                      formatCode={(item) => `${item.market}.${item.symbol}`}
+                      onSelect={applySearchItem}
+                      onResolveEnter={(rawQuery, activeItem) => {
+                        if (activeItem) {
+                          applySearchItem(activeItem);
+                          return;
+                        }
+                        const parsed = parseAnalyzeSearchInput(rawQuery, fallbackMarket);
+                        if (parsed?.symbol) {
+                          setSelectedSearchKey(null);
+                          setSearchDraft(`${parsed.market}.${parsed.symbol}`);
+                        }
+                      }}
+                    />
                   </Field>
                   <Field>
                     <FieldLabel htmlFor={`${fieldId}-date`}>

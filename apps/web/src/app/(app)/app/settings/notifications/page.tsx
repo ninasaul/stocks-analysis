@@ -28,7 +28,7 @@ export default function SettingsNotificationsPage() {
       <Card role="region" aria-labelledby="settings-subsection-notifications">
         <CardHeader>
           <CardTitle id="settings-subsection-notifications">通知设置</CardTitle>
-          <CardDescription>控制股票预测页内浏览器提示的类别。</CardDescription>
+          <CardDescription>控制页面内成功提示。</CardDescription>
         </CardHeader>
         <CardContent>
           <PageLoadingState title="正在加载通知偏好" description="正在读取本机保存的开关状态。" />
@@ -42,9 +42,7 @@ export default function SettingsNotificationsPage() {
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1 space-y-1">
           <CardTitle id="settings-subsection-notifications">通知设置</CardTitle>
-          <CardDescription>
-            以下为页面内轻提示（Sonner）。关闭后对应成功类提示不再弹出；校验失败、复制失败等仍会提示，便于排查问题。
-          </CardDescription>
+          <CardDescription>关闭后，对应成功提示不再弹出；错误提示仍会保留。</CardDescription>
         </div>
         <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => resetNotificationPreferences()}>
           恢复默认
@@ -55,9 +53,7 @@ export default function SettingsNotificationsPage() {
           <Field orientation="responsive">
             <FieldContent>
               <FieldTitle id="settings-notify-task-label">报告与交接提示</FieldTitle>
-              <FieldDescription>
-                股票预测中：报告生成成功、从选股对话交接至当前页等提示。
-              </FieldDescription>
+              <FieldDescription>报告生成、选股交接等成功反馈。</FieldDescription>
             </FieldContent>
             <Switch
               checked={notifyTaskComplete}
@@ -69,9 +65,7 @@ export default function SettingsNotificationsPage() {
           <Field orientation="responsive">
             <FieldContent>
               <FieldTitle id="settings-notify-workspace-label">导出与复制成功提示</FieldTitle>
-              <FieldDescription>
-                导出 Markdown/HTML、复制报告片段等操作成功后的反馈。
-              </FieldDescription>
+              <FieldDescription>导出、复制等操作完成后的反馈。</FieldDescription>
             </FieldContent>
             <Switch
               checked={notifyWorkspaceActions}

@@ -2,16 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { accountCopy } from "@/lib/copy";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useSubscriptionStore } from "@/stores/use-subscription-store";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
+import { requestCurrentMembership, type MembershipApiResult } from "@/lib/api/subscription";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Spinner } from "@/components/ui/spinner";
 import { PageLoadingState } from "@/components/features/page-state";
 
@@ -19,6 +18,8 @@ export default function AccountPage() {
   const router = useRouter();
   const authHydrated = useStoreHydrated(useAuthStore);
   const subHydrated = useStoreHydrated(useSubscriptionStore);
+  const session = useAuthStore((s) => s.session);
+  const syncSession = useAuthStore((s) => s.syncSession);
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const getPlan = useSubscriptionStore((s) => s.getPlan);
@@ -27,8 +28,85 @@ export default function AccountPage() {
   const periodEnd = useSubscriptionStore((s) => s.periodEnd);
   const autoRenew = useSubscriptionStore((s) => s.autoRenew);
   const [logoutPending, setLogoutPending] = useState(false);
+  const [membershipLoading, setMembershipLoading] = useState(false);
+  const [membershipError, setMembershipError] = useState<string | null>(null);
+  const [membership, setMembership] = useState<MembershipApiResult | null>(null);
 
   const subscriptionReady = subHydrated;
+  const backendSubscription = useMemo(() => {
+    if (!membership) return null;
+    if (membership.type === "normal") {
+      return {
+        planId: "free" as const,
+        billingCycle: null,
+        periodEnd: null,
+        autoRenew: false,
+      };
+    }
+    if (membership.type === "premium_quarterly") {
+      return {
+        planId: "pro" as const,
+        billingCycle: "quarter" as const,
+        periodEnd: membership.end_date?.slice(0, 10) ?? null,
+        autoRenew: membership.status === "active",
+      };
+    }
+    if (membership.type === "premium_yearly") {
+      return {
+        planId: "pro" as const,
+        billingCycle: "year" as const,
+        periodEnd: membership.end_date?.slice(0, 10) ?? null,
+        autoRenew: membership.status === "active",
+      };
+    }
+    return {
+      planId: "pro" as const,
+      billingCycle: "month" as const,
+      periodEnd: membership.end_date?.slice(0, 10) ?? null,
+      autoRenew: membership.status === "active",
+    };
+  }, [membership]);
+
+  const displayPlanId = backendSubscription?.planId ?? currentPlanId;
+  const displayBillingCycle = backendSubscription?.billingCycle ?? billingCycle;
+  const displayPeriodEnd = backendSubscription?.periodEnd ?? periodEnd;
+  const displayAutoRenew = backendSubscription?.autoRenew ?? autoRenew;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!authHydrated || session !== "user") {
+      return () => {
+        cancelled = true;
+      };
+    }
+    void (async () => {
+      setMembershipLoading(true);
+      setMembershipError(null);
+      try {
+        await syncSession();
+        const latest = useAuthStore.getState();
+        if (latest.session !== "user" || !latest.accessToken) {
+          throw new Error("登录状态已失效，请重新登录");
+        }
+        const result = await requestCurrentMembership(latest.accessToken);
+        if (!cancelled) {
+          setMembership(result);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMembershipError(error instanceof Error ? error.message : "获取会员信息失败");
+        }
+      } finally {
+        if (!cancelled) {
+          setMembershipLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authHydrated, session, syncSession]);
 
   if (!authHydrated || !subscriptionReady) {
     return (
@@ -46,23 +124,32 @@ export default function AccountPage() {
           <CardContent className="flex flex-col gap-2 text-sm">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-muted-foreground">当前</span>
-              <Badge variant={currentPlanId === "pro" ? "default" : "secondary"}>
-                {getPlan(currentPlanId).name}
+              <Badge variant={displayPlanId === "pro" ? "default" : "secondary"}>
+                {getPlan(displayPlanId).name}
               </Badge>
-              {currentPlanId === "pro" ? (
+              {displayPlanId === "pro" && displayBillingCycle ? (
                 <span className="text-muted-foreground">
-                  · {billingCycle === "month" ? "月付" : billingCycle === "quarter" ? "季付" : "年付"}
+                  · {displayBillingCycle === "month" ? "月付" : displayBillingCycle === "quarter" ? "季付" : "年付"}
                 </span>
               ) : null}
             </div>
-            {periodEnd ? (
+            {displayPeriodEnd ? (
               <p className="text-muted-foreground">
-                当前周期至 <span className="text-foreground font-medium tabular-nums">{periodEnd}</span>
-                ，自动续费：{autoRenew ? "开" : "关"}
+                当前周期至 <span className="text-foreground font-medium tabular-nums">{displayPeriodEnd}</span>
+                ，自动续费：{displayAutoRenew ? "开" : "关"}
               </p>
             ) : (
               <p className="text-muted-foreground">未开通付费套餐。</p>
             )}
+            {membershipLoading ? (
+              <p className="text-muted-foreground inline-flex items-center gap-2">
+                <Spinner />
+                正在同步后端会员状态
+              </p>
+            ) : null}
+            {membershipError ? (
+              <p className="text-sm text-destructive">{membershipError}</p>
+            ) : null}
           </CardContent>
           <CardFooter>
             <Button variant="outline" render={<Link href="/subscription" />}>
@@ -113,21 +200,6 @@ export default function AccountPage() {
           </CardFooter>
         </Card>
 
-        <Alert>
-          <AlertTitle>账号注销</AlertTitle>
-          <AlertDescription>{accountCopy.deactivateNote}</AlertDescription>
-        </Alert>
-
-        <Separator />
-
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" render={<Link href="/privacy" />}>
-            隐私政策
-          </Button>
-          <Button variant="outline" render={<Link href="/terms" />}>
-            服务条款
-          </Button>
-        </div>
     </>
   );
 }

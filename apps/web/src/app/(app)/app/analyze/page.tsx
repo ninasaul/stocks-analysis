@@ -12,7 +12,6 @@ import {
   FileDownIcon,
   FileTextIcon,
   GlobeIcon,
-  SearchIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { AnalysisInput, PreferenceSnapshot, TimingReport } from "@/lib/contracts/domain";
@@ -40,12 +39,6 @@ import { Spinner } from "@/components/ui/spinner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-  InputGroupText,
-} from "@/components/ui/input-group";
-import {
   AlertDialog,
   AlertDialogCancel,
   AlertDialogContent,
@@ -57,6 +50,7 @@ import {
 import { AnalyzeRunConfigDialog } from "@/components/features/analyze-run-config-dialog";
 import { AppPageLayout } from "@/components/features/app-page-layout";
 import { PageEmptyState, PageErrorState, PageLoadingState } from "@/components/features/page-state";
+import { StockSearchCombobox } from "@/components/features/stock-search-combobox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -284,23 +278,6 @@ function parseStockCodeParam(raw: string) {
 }
 
 const fuzzySearchScore = fuzzyAnalyzeSymbolScore;
-
-function renderHighlightedText(text: string, query: string) {
-  const q = query.trim();
-  if (!q) return text;
-  const lowerText = text.toLowerCase();
-  const lowerQuery = q.toLowerCase();
-  const index = lowerText.indexOf(lowerQuery);
-  if (index === -1) return text;
-  const end = index + q.length;
-  return (
-    <>
-      {text.slice(0, index)}
-      <span className="bg-muted text-foreground rounded-sm">{text.slice(index, end)}</span>
-      {text.slice(end)}
-    </>
-  );
-}
 
 function tickQuote(prev: BasicQuote): BasicQuote {
   const jitter = (Math.random() - 0.5) * 0.004;
@@ -600,17 +577,15 @@ function AnalyzePageContent() {
   const [quotaOpen, setQuotaOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [linkedPreference, setLinkedPreference] = useState<PreferenceSnapshot | null>(null);
-  const [searchFocused, setSearchFocused] = useState(false);
   const [activeAnalysisId, setActiveAnalysisId] = useState<string | null>(null);
   const [localHistoryLoaded, setLocalHistoryLoaded] = useState(false);
   const [localHistory, setLocalHistory] = useState<TimingReport[]>([]);
   const [liveQuote, setLiveQuote] = useState<BasicQuote | null>(null);
-  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [actionReasonOpen, setActionReasonOpen] = useState(false);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [selectedSearchKey, setSelectedSearchKey] = useState<string | null>(null);
+  const [remoteSearching, setRemoteSearching] = useState(false);
   const [remoteSearchItems, setRemoteSearchItems] = useState<SearchItem[]>([]);
-  const searchBoxRef = useRef<HTMLDivElement | null>(null);
   const analyzeReportScrollRef = useRef<HTMLDivElement | null>(null);
   const stockCodeParam = searchParams.get("stockCode");
 
@@ -1000,46 +975,41 @@ function AnalyzePageContent() {
     const searchTerm = picked?.symbol?.trim() || keyword;
     if (authSession !== "user" || !searchTerm || (picked && picked.market !== "CN")) {
       setRemoteSearchItems([]);
+      setRemoteSearching(false);
       return;
     }
 
     let canceled = false;
+    setRemoteSearching(true);
     const timer = window.setTimeout(() => {
       void requestStockSearch(searchTerm, 6)
         .then((items) => {
-          if (!canceled) setRemoteSearchItems(items);
+          if (!canceled) {
+            setRemoteSearchItems(items);
+            setRemoteSearching(false);
+          }
         })
         .catch(() => {
-          if (!canceled) setRemoteSearchItems([]);
+          if (!canceled) {
+            setRemoteSearchItems([]);
+            setRemoteSearching(false);
+          }
         });
     }, 200);
 
     return () => {
       canceled = true;
       window.clearTimeout(timer);
+      setRemoteSearching(false);
     };
     // 勿依赖 selectedInput：其为每次 useMemo 新对象；远程结果更新后 searchItems 里条目引用会变，
     // 会误触发无限轮询。用 key / keyword 等标量表达「搜什么」即可。
   }, [authSession, searchKeyword, market, selectedSearchItem?.key]);
 
-  useEffect(() => {
-    if (!searchFocused) return;
-    setActiveSearchIndex((prev) => {
-      if (!filteredSearchItems.length) return 0;
-      return Math.min(prev, filteredSearchItems.length - 1);
-    });
-  }, [filteredSearchItems.length, searchFocused]);
-
-  useEffect(() => {
-    if (!searchFocused) return;
-    setActiveSearchIndex(0);
-  }, [searchKeyword, searchFocused]);
-
   const applySearchItem = (item: SearchItem) => {
     setMarket(item.market);
     setSelectedSearchKey(item.key);
     setSearchKeyword(`${item.name}（${formatAnalyzeBoardSymbol(item.market, item.symbol)}）`);
-    setSearchFocused(false);
   };
 
   const executeAnalysis = async (input: AnalysisInput, displayKeyword: string) => {
@@ -1152,95 +1122,37 @@ function AnalyzePageContent() {
 
       <div className="flex flex-col gap-3 print:hidden sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-          <div
-            ref={searchBoxRef}
-            className="relative min-w-0 w-full sm:max-w-md lg:max-w-lg"
-            onBlur={(event) => {
-              const next = event.relatedTarget;
-              if (next instanceof Node && searchBoxRef.current?.contains(next)) return;
-              setSearchFocused(false);
-            }}
-          >
-            <InputGroup>
-              <InputGroupAddon align="inline-start">
-                <InputGroupText>
-                  <SearchIcon aria-hidden="true" />
-                  <span className="sr-only">搜索股票</span>
-                </InputGroupText>
-              </InputGroupAddon>
-              <InputGroupInput
-                value={searchKeyword}
-                onFocus={() => setSearchFocused(true)}
-                onChange={(event) => {
-                  setSearchKeyword(event.target.value);
+          <div className="relative min-w-0 w-full sm:max-w-md lg:max-w-lg">
+            <StockSearchCombobox
+              query={searchKeyword}
+              onQueryChange={(next) => {
+                setSearchKeyword(next);
+                setSelectedSearchKey(null);
+              }}
+              items={filteredSearchItems}
+              loading={remoteSearching}
+              title={searchKeyword.trim() ? "搜索结果" : "最近使用"}
+              emptyMessage="无匹配标的"
+              placeholder="代码或简称，例如 茅台、AAPL"
+              ariaLabel="搜索股票"
+              inputId="analyze-stock-search-input"
+              listId="analyze-stock-search-listbox"
+              formatCode={(item) => `${item.market}.${item.symbol}`}
+              onSelect={(item) => applySearchItem(item)}
+              onResolveEnter={(rawQuery, activeItem) => {
+                if (activeItem) {
+                  applySearchItem(activeItem);
+                  return;
+                }
+                const parsed = parseSearchInput(rawQuery, market);
+                if (parsed?.symbol) {
                   setSelectedSearchKey(null);
-                  if (!searchFocused) setSearchFocused(true);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "ArrowDown") {
-                    event.preventDefault();
-                    if (!searchFocused) setSearchFocused(true);
-                    setActiveSearchIndex((prev) =>
-                      filteredSearchItems.length ? Math.min(prev + 1, filteredSearchItems.length - 1) : 0,
-                    );
-                    return;
-                  }
-                  if (event.key === "ArrowUp") {
-                    event.preventDefault();
-                    if (!searchFocused) setSearchFocused(true);
-                    setActiveSearchIndex((prev) => (filteredSearchItems.length ? Math.max(prev - 1, 0) : 0));
-                    return;
-                  }
-                  if (event.key === "Escape") {
-                    setSearchFocused(false);
-                    return;
-                  }
-                  if (event.key === "Enter") {
-                    if (searchFocused && filteredSearchItems.length > 0) {
-                      event.preventDefault();
-                      const picked = filteredSearchItems[activeSearchIndex] ?? filteredSearchItems[0];
-                      if (picked) {
-                        applySearchItem(picked);
-                        return;
-                      }
-                    }
-                    setConfigOpen(true);
-                  }
-                }}
-                placeholder="代码或简称，例如 茅台、AAPL"
-                autoComplete="off"
-              />
-            </InputGroup>
-            {searchFocused ? (
-              <div className="absolute top-full z-40 mt-1 w-full rounded-lg border bg-popover p-1 shadow-md">
-                {filteredSearchItems.length ? (
-                  filteredSearchItems.map((item, index) => (
-                    <Button
-                      key={item.key}
-                      type="button"
-                      variant={activeSearchIndex === index ? "secondary" : "ghost"}
-                      className="h-auto w-full justify-start py-2"
-                      onMouseEnter={() => setActiveSearchIndex(index)}
-                      onClick={() => applySearchItem(item)}
-                    >
-                      <div className="flex w-full items-start justify-between gap-2 text-left">
-                        <div className="flex min-w-0 flex-col items-start">
-                          <span>
-                            {item.market}.{renderHighlightedText(item.symbol, searchKeyword)}
-                          </span>
-                          <span className="text-muted-foreground text-xs">
-                            {renderHighlightedText(item.name, searchKeyword)}
-                          </span>
-                        </div>
-                        <Badge variant="outline">{marketLabels[item.market]}</Badge>
-                      </div>
-                    </Button>
-                  ))
-                ) : (
-                  <p className="text-muted-foreground px-2 py-1.5 text-sm">无匹配标的</p>
-                )}
-              </div>
-            ) : null}
+                  setSearchKeyword(`${parsed.market}.${parsed.symbol}`);
+                  return;
+                }
+                setConfigOpen(true);
+              }}
+            />
           </div>
           <Button type="button" disabled={loading} onClick={() => setConfigOpen(true)}>
             {loading ? (

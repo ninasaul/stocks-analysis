@@ -1,12 +1,14 @@
 "use client";
 
-import { CopyIcon, PencilLineIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, PencilLineIcon, PlusIcon, TrendingUpIcon } from "lucide-react";
 import { ThumbsDownIcon, ThumbsUpIcon } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { pickerCopy } from "@/lib/copy";
@@ -63,18 +65,17 @@ const assistantMarkdownComponents: Components = {
       {children}
     </pre>
   ),
+  table: ({ children }) => (
+    <div className="my-2 overflow-x-auto rounded-md border border-border/60">
+      <table className="w-full min-w-max border-collapse text-xs">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="bg-muted/60">{children}</thead>,
+  tbody: ({ children }) => <tbody className="divide-y divide-border/50">{children}</tbody>,
+  tr: ({ children }) => <tr>{children}</tr>,
+  th: ({ children }) => <th className="px-2 py-1.5 text-left font-medium">{children}</th>,
+  td: ({ children }) => <td className="px-2 py-1.5 align-top">{children}</td>,
 };
-
-function formatMessageTime(ms: number) {
-  return new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(ms));
-}
-
-function formatMessageTimeIso(ms: number) {
-  return new Date(ms).toISOString();
-}
 
 async function copyMessageBody(text: string) {
   try {
@@ -83,6 +84,28 @@ async function copyMessageBody(text: string) {
   } catch {
     toast.error(pickerCopy.copyMessageError);
   }
+}
+
+type InlineStock = {
+  name: string;
+  code: string;
+};
+
+const STOCK_INLINE_PATTERN = /([\u4e00-\u9fa5A-Za-z0-9\-·]+)[（(](\d{6})[）)]/g;
+
+function extractInlineStocks(content: string): InlineStock[] {
+  const result: InlineStock[] = [];
+  const seen = new Set<string>();
+  for (const match of content.matchAll(STOCK_INLINE_PATTERN)) {
+    const name = match[1]?.trim() ?? "";
+    const code = match[2]?.trim() ?? "";
+    if (!name || !code) continue;
+    const key = `${name}-${code}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({ name, code });
+  }
+  return result;
 }
 
 export function PickerChatEmpty({ mode }: { mode: "consult" | "pick" | null }) {
@@ -109,17 +132,23 @@ export function PickerChatMessage({
   message,
   anchorId,
   onEditMessage,
+  onAnalyzeStock,
+  onAddWatchlistStock,
+  isInWatchlist,
+  showPostStreamUi = true,
 }: {
   message: PickerMessage;
   anchorId?: string;
   onEditMessage?: (message: PickerMessage) => void;
+  onAnalyzeStock?: (code: string) => void;
+  onAddWatchlistStock?: (stock: InlineStock) => void;
+  isInWatchlist?: (code: string) => boolean;
+  showPostStreamUi?: boolean;
 }) {
   const isUser = message.role === "user";
-  const labelId = `pick-msg-${message.id}-label`;
-  const timeLabel = formatMessageTime(message.createdAt);
-  const timeIso = formatMessageTimeIso(message.createdAt);
   const canCopy = message.content.trim().length > 0;
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
+  const inlineStocks = useMemo(() => extractInlineStocks(message.content), [message.content]);
 
   const handleFeedback = (next: "up" | "down") => {
     setFeedback((prev) => {
@@ -134,55 +163,140 @@ export function PickerChatMessage({
   return (
     <article
       id={anchorId}
-      className={cn("group/message flex min-w-0 flex-col gap-1.5", isUser ? "items-end" : "items-start")}
+      className={cn("group/message flex min-w-0 flex-col", isUser ? "items-end gap-1" : "items-start gap-1.5")}
       aria-label={isUser ? "用户消息" : "助手消息"}
     >
       <div
         className={cn(
-          "flex max-w-full flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs",
-          isUser ? "flex-row-reverse justify-end" : "flex-row",
-        )}
-      >
-        <span
-          id={labelId}
-          className={cn(
-            "select-none",
-            isUser ? "font-medium text-foreground" : "font-medium text-muted-foreground",
-          )}
-        >
-          {isUser ? "我" : "助手"}
-        </span>
-        <time dateTime={timeIso} className="text-muted-foreground tabular-nums">
-          {timeLabel}
-        </time>
-      </div>
-
-      <div
-        className={cn(
-          "min-w-0 max-w-[min(100%,36rem)] wrap-break-word",
+          "min-w-0 max-w-full wrap-break-word",
           isUser
-            ? "rounded-2xl rounded-br-md border border-primary/15 bg-primary/10 px-3.5 py-2.5 text-foreground"
+            ? "rounded-md border border-border bg-muted/40 px-3 py-2 text-foreground"
             : "rounded-none border-0 bg-transparent p-0 text-foreground",
         )}
-        aria-labelledby={labelId}
       >
-        <div className="flex min-w-0 flex-col gap-2">
-          {isUser ? (
-            <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
-          ) : (
-            <div className="min-w-0 text-sm">
-              <ReactMarkdown components={assistantMarkdownComponents}>{message.content}</ReactMarkdown>
+        <div className={cn("flex min-w-0 flex-col", isUser ? "gap-1" : "gap-2")}>
+          <div className="min-w-0 text-sm">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents}>
+              {message.content}
+            </ReactMarkdown>
+          </div>
+          {showPostStreamUi && inlineStocks.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {inlineStocks.map((stock) => {
+                const alreadyInWatchlist = isInWatchlist?.(stock.code) ?? false;
+                return (
+                  <HoverCard key={`${message.id}-${stock.code}`}>
+                    <HoverCardTrigger className="inline-flex items-center rounded-md border px-1.5 py-0.5 text-xs transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+                      {stock.name}（{stock.code}）
+                    </HoverCardTrigger>
+                    <HoverCardContent side="top" align="start" className="w-72">
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <TrendingUpIcon className="text-muted-foreground size-4" />
+                          <p className="text-sm font-medium leading-tight">
+                            {stock.name}（{stock.code}）
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant="outline"
+                            onClick={() => onAnalyzeStock?.(stock.code)}
+                            disabled={!onAnalyzeStock}
+                          >
+                            分析
+                          </Button>
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant={alreadyInWatchlist ? "secondary" : "outline"}
+                            onClick={() => onAddWatchlistStock?.(stock)}
+                            disabled={alreadyInWatchlist || !onAddWatchlistStock}
+                          >
+                            {alreadyInWatchlist ? <CheckIcon data-icon="inline-start" /> : <PlusIcon data-icon="inline-start" />}
+                            {alreadyInWatchlist ? "已在自选" : "加自选"}
+                          </Button>
+                        </div>
+                      </div>
+                    </HoverCardContent>
+                  </HoverCard>
+                );
+              })}
             </div>
-          )}
+          ) : null}
         </div>
       </div>
-      <div
-        className={cn(
-          "pointer-events-none -mt-1 flex gap-1 px-1 opacity-0 transition-opacity group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100",
-          isUser ? "self-end" : "self-start",
-        )}
-      >
-        {isUser && onEditMessage ? (
+      {showPostStreamUi ? (
+        <div
+          className={cn(
+            "pointer-events-none -mt-1 flex gap-1 px-1 opacity-0 transition-opacity group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100",
+            isUser ? "self-end" : "self-start",
+          )}
+        >
+          {isUser && onEditMessage ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => onEditMessage(message)}
+                    aria-label="编辑用户消息"
+                  >
+                    <PencilLineIcon />
+                  </Button>
+                }
+              />
+              <TooltipContent side="top" align="start">
+                编辑消息
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
+          {!isUser ? (
+            <>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      size="icon-xs"
+                      variant={feedback === "up" ? "secondary" : "ghost"}
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() => handleFeedback("up")}
+                      aria-label="赞同回答"
+                    >
+                      <ThumbsUpIcon />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="top" align="start">
+                  赞同回答
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      size="icon-xs"
+                      variant={feedback === "down" ? "secondary" : "ghost"}
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() => handleFeedback("down")}
+                      aria-label="不赞同回答"
+                    >
+                      <ThumbsDownIcon />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="top" align="start">
+                  不赞同回答
+                </TooltipContent>
+              </Tooltip>
+            </>
+          ) : null}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -191,81 +305,20 @@ export function PickerChatMessage({
                   size="icon-xs"
                   variant="ghost"
                   className="text-muted-foreground hover:text-foreground"
-                  onClick={() => onEditMessage(message)}
-                  aria-label="编辑用户消息"
+                  onClick={() => void copyMessageBody(message.content)}
+                  disabled={!canCopy}
+                  aria-label={isUser ? "复制用户消息" : "复制助手消息"}
                 >
-                  <PencilLineIcon />
+                  <CopyIcon />
                 </Button>
               }
             />
             <TooltipContent side="top" align="start">
-              编辑消息
+              复制消息
             </TooltipContent>
           </Tooltip>
-        ) : null}
-        {!isUser ? (
-          <>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant={feedback === "up" ? "secondary" : "ghost"}
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={() => handleFeedback("up")}
-                    aria-label="赞同回答"
-                  >
-                    <ThumbsUpIcon />
-                  </Button>
-                }
-              />
-              <TooltipContent side="top" align="start">
-                赞同回答
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant={feedback === "down" ? "secondary" : "ghost"}
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={() => handleFeedback("down")}
-                    aria-label="不赞同回答"
-                  >
-                    <ThumbsDownIcon />
-                  </Button>
-                }
-              />
-              <TooltipContent side="top" align="start">
-                不赞同回答
-              </TooltipContent>
-            </Tooltip>
-          </>
-        ) : null}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost"
-                className="text-muted-foreground hover:text-foreground"
-                onClick={() => void copyMessageBody(message.content)}
-                disabled={!canCopy}
-                aria-label={isUser ? "复制用户消息" : "复制助手消息"}
-              >
-                <CopyIcon />
-              </Button>
-            }
-          />
-          <TooltipContent side="top" align="start">
-            复制消息
-          </TooltipContent>
-        </Tooltip>
-      </div>
+        </div>
+      ) : null}
     </article>
   );
 }

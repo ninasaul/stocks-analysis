@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChartLineIcon, EllipsisVerticalIcon, SearchIcon, Trash2Icon } from "lucide-react";
+import { ChartLineIcon, EllipsisVerticalIcon, Trash2Icon } from "lucide-react";
 import type { AnalysisInput } from "@/lib/contracts/domain";
 import {
   ANALYZE_SYMBOL_MOCK_UNIVERSE,
@@ -15,6 +15,7 @@ import {
 import { requestStockSearch } from "@/lib/api/stocks";
 import { buildMockBaseQuote } from "@/lib/mock-base-quote";
 import { AppPageLayout } from "@/components/features/app-page-layout";
+import { StockSearchCombobox } from "@/components/features/stock-search-combobox";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -24,11 +25,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/use-auth-store";
 
@@ -109,6 +105,7 @@ export default function WatchlistPage() {
   const authSession = useAuthStore((s) => s.session);
   const [query, setQuery] = useState("");
   const [entries, setEntries] = useState<WatchlistEntry[]>([]);
+  const [remoteSearching, setRemoteSearching] = useState(false);
   const [remoteSearchItems, setRemoteSearchItems] = useState<AnalyzeSymbolSearchItem[]>([]);
 
   const keySet = useMemo(() => new Set(entries.map((e) => entryKey(e))), [entries]);
@@ -198,23 +195,32 @@ export default function WatchlistPage() {
     const searchTerm = parsed?.symbol?.trim() || keyword;
     if (authSession !== "user" || !searchTerm || (parsed && parsed.market !== "CN")) {
       setRemoteSearchItems([]);
+      setRemoteSearching(false);
       return;
     }
 
     let canceled = false;
+    setRemoteSearching(true);
     const timer = window.setTimeout(() => {
       void requestStockSearch(searchTerm, 6)
         .then((items) => {
-          if (!canceled) setRemoteSearchItems(items);
+          if (!canceled) {
+            setRemoteSearchItems(items);
+            setRemoteSearching(false);
+          }
         })
         .catch(() => {
-          if (!canceled) setRemoteSearchItems([]);
+          if (!canceled) {
+            setRemoteSearchItems([]);
+            setRemoteSearching(false);
+          }
         });
     }, 200);
 
     return () => {
       canceled = true;
       window.clearTimeout(timer);
+      setRemoteSearching(false);
     };
   }, [authSession, query]);
 
@@ -230,7 +236,7 @@ export default function WatchlistPage() {
   }, [entries, q]);
 
   const addSuggestions = useMemo(() => {
-    if (!q) return [];
+    if (!q) return searchItems.filter((u) => !keySet.has(entryKey(u))).slice(0, 6);
     const needle = q.toLowerCase();
     return searchItems
       .filter((u) => !keySet.has(entryKey(u)))
@@ -244,7 +250,7 @@ export default function WatchlistPage() {
         if (b.score !== a.score) return b.score - a.score;
         return a.recentRank - b.recentRank;
       })
-      .slice(0, 12)
+      .slice(0, 6)
       .map((row) => row.u);
   }, [keySet, q, searchItems]);
 
@@ -261,14 +267,6 @@ export default function WatchlistPage() {
     setEntries((prev) => prev.filter((e) => entryKey(e) !== k));
   }, []);
 
-  const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    if (!q) return;
-    const resolved = tryResolveEntryFromPool(q, "CN", searchItems);
-    if (resolved) addEntry(resolved);
-  };
-
   const listEmpty = entries.length === 0;
   const filterEmpty = !listEmpty && q.length > 0 && filteredEntries.length === 0;
 
@@ -283,47 +281,29 @@ export default function WatchlistPage() {
       }
       contentClassName="gap-4"
     >
-      <div className="shrink-0">
-        <InputGroup className="bg-background">
-          <InputGroupAddon>
-            <SearchIcon />
-          </InputGroupAddon>
-          <InputGroupInput
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onSearchKeyDown}
-            placeholder="代码或名称模糊搜索；回车按输入加入自选"
-            aria-label="自选模糊搜索"
-            autoComplete="off"
-          />
-        </InputGroup>
-      </div>
-
-      {addSuggestions.length > 0 ? (
-        <section aria-label="可加入自选的匹配标的" className="flex flex-col gap-2">
-          <p className="text-muted-foreground text-xs font-medium">可加入自选</p>
-          <ul className="flex flex-col gap-1 rounded-lg border bg-card p-1">
-            {addSuggestions.map((u) => (
-              <li key={u.key}>
-                <button
-                  type="button"
-                  className={cn(
-                    "hover:bg-muted/80 flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors",
-                  )}
-                  onClick={() => addEntry(universeItemToEntry(u))}
-                >
-                  <span className="min-w-0 flex-1 truncate">
-                    <span className="font-medium">{u.name}</span>
-                    <span className="text-muted-foreground ml-2 tabular-nums">
-                      {compactBoardCode(u.market, u.symbol)}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      <StockSearchCombobox
+        query={query}
+        onQueryChange={setQuery}
+        items={addSuggestions}
+        loading={remoteSearching}
+        title={q ? "可加入自选" : "最近可选"}
+        emptyMessage="无可加入标的"
+        placeholder="代码或名称模糊搜索；回车按输入加入自选"
+        ariaLabel="自选模糊搜索"
+        inputId="watchlist-stock-search-input"
+        listId="watchlist-stock-search-listbox"
+        formatCode={(item) => compactBoardCode(item.market, item.symbol)}
+        onSelect={(item) => addEntry(universeItemToEntry(item))}
+        onResolveEnter={(rawQuery, activeItem) => {
+          if (activeItem) {
+            addEntry(universeItemToEntry(activeItem));
+            return;
+          }
+          if (!rawQuery) return;
+          const resolved = tryResolveEntryFromPool(rawQuery, "CN", searchItems);
+          if (resolved) addEntry(resolved);
+        }}
+      />
 
       {listEmpty ? (
         <Empty className="border">
