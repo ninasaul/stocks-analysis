@@ -3,33 +3,12 @@ from fastapi import APIRouter, Query, Depends, HTTPException
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 
-from ..services.llm_service import LLMService, LLMManager, UnifiedLLMClient
+from ..services.llm_service import LLMService, UnifiedLLMClient
 from ..user_management.models import User
-from ..core.auth import get_current_user, get_current_user_optional
-from ..core.admin import require_admin
+from ..core.auth import get_current_user
 from ..core.logging import logger
 
 router = APIRouter(prefix="/api/llm", tags=["LLM管理"])
-
-
-class CreatePresetRequest(BaseModel):
-    name: str
-    display_name: str
-    base_url: str
-    default_model: str
-    api_key: Optional[str] = ""
-    is_active: bool = True
-    config: Optional[Dict[str, Any]] = None
-
-
-class UpdatePresetRequest(BaseModel):
-    display_name: Optional[str] = None
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
-    default_model: Optional[str] = None
-    models: Optional[List[str]] = None
-    is_active: Optional[bool] = None
-    config: Optional[Dict[str, Any]] = None
 
 
 class CreateUserConfigRequest(BaseModel):
@@ -50,9 +29,6 @@ class UpdateUserConfigRequest(BaseModel):
     provider: Optional[str] = None
     is_active: Optional[bool] = None
     config: Optional[Dict[str, Any]] = None
-
-
-
 
 
 @router.get("/presets")
@@ -84,80 +60,6 @@ async def get_llm_preset(preset_id: int) -> Dict[str, Any]:
     if not preset:
         raise HTTPException(status_code=404, detail="预设模型不存在")
     return {"preset": preset.to_dict()}
-
-
-@router.post("/presets")
-async def create_llm_preset(
-    request: CreatePresetRequest,
-    current_user: User = Depends(require_admin)
-) -> Dict[str, Any]:
-    """
-    创建预定义LLM模型（仅管理员）
-
-    Returns:
-        创建的预设
-    """
-    try:
-        preset = LLMService.create_preset(
-            name=request.name,
-            display_name=request.display_name,
-            api_key=request.api_key or "",
-            base_url=request.base_url,
-            default_model=request.default_model,
-            is_active=request.is_active,
-            config=request.config
-        )
-        logger.info(f"用户 {current_user.id} 创建预设模型: {request.name}")
-        return {"preset": preset.to_dict(), "message": "创建成功"}
-    except Exception as e:
-        logger.error(f"创建预设模型失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.put("/presets/{preset_id}")
-async def update_llm_preset(
-    preset_id: int,
-    request: UpdatePresetRequest,
-    current_user: User = Depends(require_admin)
-) -> Dict[str, Any]:
-    """
-    更新预定义LLM模型（仅管理员）
-
-    Returns:
-        更新后的预设
-    """
-    preset = LLMService.update_preset(
-        preset_id=preset_id,
-        display_name=request.display_name,
-        api_key=request.api_key,
-        base_url=request.base_url,
-        default_model=request.default_model,
-        models=request.models,
-        is_active=request.is_active,
-        config=request.config
-    )
-    if not preset:
-        raise HTTPException(status_code=404, detail="预设模型不存在")
-    logger.info(f"用户 {current_user.id} 更新预设模型: {preset_id}")
-    return {"preset": preset.to_dict(), "message": "更新成功"}
-
-
-@router.delete("/presets/{preset_id}")
-async def delete_llm_preset(
-    preset_id: int,
-    current_user: User = Depends(require_admin)
-) -> Dict[str, Any]:
-    """
-    删除预定义LLM模型（仅管理员，系统预设不可删除）
-
-    Returns:
-        操作结果
-    """
-    success = LLMService.delete_preset(preset_id)
-    if not success:
-        raise HTTPException(status_code=400, detail="无法删除系统预设")
-    logger.info(f"用户 {current_user.id} 删除预设模型: {preset_id}")
-    return {"message": "删除成功"}
 
 
 @router.get("/user/configs")
@@ -267,6 +169,32 @@ async def delete_user_llm_config(
     LLMService.delete_user_config(current_user.id, config_id)
     logger.info(f"用户 {current_user.id} 删除LLM配置: {config_id}")
     return {"message": "删除成功"}
+
+
+@router.get("/user/configs/{config_id}/api-key")
+async def get_user_config_api_key(
+    config_id: int,
+    current_user: User = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    获取用户指定配置的解密后的API Key（仅供配置所有者查看）
+
+    Returns:
+        API Key信息
+    """
+    config = LLMService.get_user_config_by_id(current_user.id, config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="配置不存在")
+    
+    # 记录访问日志（安全审计）
+    logger.warning(f"用户 {current_user.id} 查看了配置 {config_id} 的API Key")
+    
+    return {
+        "config_id": config.id,
+        "name": config.name,
+        "api_key": config.api_key,
+        "message": "请注意保护您的API Key，不要泄露给他人"
+    }
 
 
 @router.post("/user/configs/{config_id}/test")
