@@ -297,10 +297,40 @@ def authenticate_user(identifier: str, password: str) -> Optional[User]:
     if not verify_password(password, user.password_hash):
         return None
 
-    if user.status != UserStatus.ACTIVE:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="账号已停用或尚未激活",
-        )
 
-    return user
+
+def get_current_user_optional(token: Optional[str] = Depends(oauth2_scheme)) -> Optional[User]:
+    """
+    获取当前用户（可选），如果令牌无效返回 None
+
+    Args:
+        token: JWT 令牌
+
+    Returns:
+        当前用户或 None
+    """
+    if not token:
+        return None
+
+    try:
+        payload = verify_token(token)
+        if payload is None:
+            return None
+
+        username: str = payload.get("sub")
+        if username is None:
+            return None
+
+        # 查询用户
+        query = "SELECT * FROM users WHERE username = %s"
+        result = execute_query(query, (username,))
+        if not result:
+            return None
+
+        user = User.from_db_row(result[0])
+        if user.status != "active":
+            return None
+
+        return user
+    except Exception:
+        return None

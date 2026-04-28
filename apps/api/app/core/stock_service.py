@@ -217,6 +217,14 @@ class StockService:
             else:
                 self.concept_list = []
 
+    def _fetch_index_data(self, index_code: str, start_date: str, end_date: str = None):
+        stock_zh_index_daily_df = ak.stock_zh_index_daily(symbol=index_code)
+        if stock_zh_index_daily_df.empty:
+            raise HTTPException(status_code=404, detail=f"Index {index_code} not found")
+        return stock_zh_index_daily_df[(stock_zh_index_daily_df["date"] >= start_date) & (stock_zh_index_daily_df["date"] <= end_date)]
+
+
+
     def get_stock_quote(self, stock_code: str) -> Dict:
         stock_individual_spot_em_df = ak.stock_individual_spot_xq(symbol=self.get_full_uppercase_stock_code(stock_code))
         if stock_individual_spot_em_df.empty:

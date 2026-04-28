@@ -129,11 +129,10 @@ def fetch_fundamental(ticker: str) -> Dict:
                 "asset_liability_ratio": float(row["资产负债率(%)"]) if not pd.isna(row["资产负债率(%)"]) else None,
             })
         
-        logger.info(f"获取基本面数据完成: {ticker}")
-        logger.debug(f"获取到的基本面数据: {fundamental}")
+        logger.info(f"{ticker} 获取基本面数据: {fundamental}")
         return fundamental
     except Exception as e:
-        logger.error(f"获取基本面数据失败: {e}")
+        logger.error(f"{ticker} 获取基本面数据失败: {e}")
         return {}
 
 

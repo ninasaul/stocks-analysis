@@ -1,7 +1,8 @@
 """配置模块"""
 import os
+import json
 from dotenv import load_dotenv
-from typing import Optional, Dict, Any
+from typing import Dict, Any, List
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,20 +17,22 @@ class Config:
     APP_NAME = "Timing Agent API"
     APP_VERSION = "0.1.0"
     DEBUG = os.getenv("DEBUG", "False").lower() == "true"
-    
+
     # LLM 提供商配置
-    DEFAULT_PROVIDER = os.getenv("DEFAULT_PROVIDER", "aliyun")  # aliyun 或 deepseek
-    
-    # 阿里云配置
-    ALIYUN_API_KEY = os.getenv("ALIYUN_API_KEY", "")
-    ALIYUN_MODEL = os.getenv("ALIYUN_MODEL", "qwen-plus")
-    ALIYUN_BASE_URL = os.getenv("ALIYUN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-    
-    # DeepSeek配置
-    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-    DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
-    DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-    
+    DEFAULT_PROVIDER = os.getenv("DEFAULT_PROVIDER", "aliyun")
+
+    # LLM 预设配置（从环境变量加载）
+    @staticmethod
+    def get_llm_presets() -> List[Dict[str, Any]]:
+        """从环境变量获取LLM预设配置"""
+        presets_str = os.getenv("LLM_PRESETS", "[]")
+        try:
+            presets = json.loads(presets_str)
+            return presets
+        except json.JSONDecodeError as e:
+            logger.error(f"LLM_PRESETS 解析失败: {e}")
+            return []
+
     # 数据配置
     DEFAULT_DAYS = 60  # 基于最大指标需求
     
@@ -52,217 +55,7 @@ class Config:
     # JWT 配置
     SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
     ALGORITHM = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
-    
-    # 提供商配置映射
-    PROVIDER_CONFIG = {
-        "aliyun": {
-            "api_key": ALIYUN_API_KEY,
-            "model": ALIYUN_MODEL,
-            "base_url": ALIYUN_BASE_URL
-        },
-        "deepseek": {
-            "api_key": DEEPSEEK_API_KEY,
-            "model": DEEPSEEK_MODEL,
-            "base_url": DEEPSEEK_BASE_URL
-        }
-    }
+    ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
 
 config = Config()
-
-
-class LLMClient:
-    """LLM客户端类，支持多个提供商"""
-    
-    def __init__(self, provider: Optional[str] = None):
-        """
-        初始化LLM客户端
-        
-        Args:
-            provider: 提供商名称（aliyun或deepseek），默认使用配置中的默认提供商
-        """
-        self.provider = provider or config.DEFAULT_PROVIDER
-        self.config = config.PROVIDER_CONFIG.get(self.provider)
-        
-        if not self.config:
-            raise ValueError(f"不支持的提供商: {self.provider}")
-        
-        if not self.config["api_key"]:
-            raise ValueError(f"{self.provider} API密钥未配置")
-        
-        logger.info(f"初始化LLM客户端: provider={self.provider}, model={self.config['model']}")
-    
-    async def chat(self, prompt: str, response_format: str = "text", temperature: float = 0.1, seed: int = 42) -> tuple:
-        """
-        同步聊天完成
-        
-        Args:
-            prompt: 提示
-            response_format: 响应格式
-            temperature: 温度参数，控制输出随机性（0-2）
-            seed: 随机种子，确保结果可重复
-        
-        Returns:
-            (响应内容, token使用情况)
-        """
-        import aiohttp
-        import json
-        
-        url = f"{self.config['base_url']}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.config['api_key']}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": self.config["model"],
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "temperature": temperature,
-            "seed": seed
-        }
-        
-        if response_format == "json":
-            payload["response_format"] = {"type": "json_object"}
-        
-        # 过滤敏感参数
-        filtered_payload = payload.copy()
-        filtered_payload["api_key"] = "***"
-        logger.info(f"调用 {self.provider} LLM 参数: {filtered_payload}")
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        logger.error(f"{self.provider} API调用失败: {response.status} - {error_text}")
-                        raise Exception(f"API调用失败: {error_text}")
-                    
-                    data = await response.json()
-                    content = data["choices"][0]["message"]["content"]
-                    # 获取token使用情况
-                    token_usage = data.get("usage", {})
-                    return content, token_usage
-        
-        except Exception as e:
-            logger.error(f"{self.provider} LLM调用失败: {e}")
-            raise
-    
-    async def stream_chat(self, prompt: str, response_format: str = "text"):
-        """
-        流式聊天完成
-        
-        Args:
-            prompt: 提示
-            response_format: 响应格式
-        
-        Yields:
-            响应内容块
-        """
-        import aiohttp
-        import json
-        
-        url = f"{self.config['base_url']}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.config['api_key']}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": self.config["model"],
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": True
-        }
-        
-        if response_format == "json":
-            payload["response_format"] = {"type": "json_object"}
-        
-        # 过滤敏感参数
-        filtered_payload = payload.copy()
-        filtered_payload["api_key"] = "***"
-        logger.info(f"调用 {self.provider} LLM 流式参数: {filtered_payload}")
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        logger.error(f"{self.provider} API调用失败: {response.status} - {error_text}")
-                        yield f"API调用失败: {error_text}"
-                        return
-                    
-                    # 处理流式响应
-                    async for line in response.content:
-                        if line:
-                            line_str = line.decode('utf-8').strip()
-                            if line_str.startswith('data: '):
-                                data_str = line_str[6:]
-                                if data_str == '[DONE]':
-                                    break
-                                
-                                try:
-                                    data = json.loads(data_str)
-                                    if 'choices' in data and len(data['choices']) > 0:
-                                        delta = data['choices'][0].get('delta', {})
-                                        content = delta.get('content', '')
-                                        if content:
-                                            yield content
-                                except json.JSONDecodeError as e:
-                                    logger.warning(f"解析JSON失败: {e}, 数据: {data_str}")
-                                    continue
-                    
-                    logger.info(f"{self.provider} LLM 流式响应完成")
-        
-        except Exception as e:
-            logger.error(f"{self.provider} 流式LLM调用失败: {e}")
-            yield f"流式调用失败: {str(e)}"
-
-
-def get_llm_client(provider: Optional[str] = None) -> LLMClient:
-    """
-    获取 LLM 客户端
-    
-    Args:
-        provider: 提供商名称（可选）
-    
-    Returns:
-        LLM 客户端实例
-    """
-    try:
-        return LLMClient(provider)
-    except Exception as e:
-        logger.error(f"初始化 LLM 客户端失败: {e}")
-        
-        # 返回一个 mock 客户端
-        class MockLLM:
-            async def chat(self, prompt: str, response_format: str = "text") -> tuple:
-                import json
-                if response_format == "json":
-                    content = json.dumps({
-                        "pass": True,
-                        "score": 8,
-                        "checks": {
-                            "valuation": {"pass": True, "detail": "估值合理"},
-                            "profitability": {"pass": True, "detail": "盈利质量良好"},
-                            "growth": {"pass": True, "detail": "有成长性"},
-                            "health": {"pass": True, "detail": "财务健康"},
-                            "risk_screen": {"pass": True, "detail": "无明显风险"},
-                            "industry_prosperity": {"pass": True, "detail": "行业景气度正常"}
-                        },
-                        "conclusion": "基本面良好，通过安全边际检查"
-                    })
-                else:
-                    content = "这是一个模拟的 LLM 响应"
-                # 模拟token使用情况
-                token_usage = {
-                    "prompt_tokens": len(prompt) // 4,  # 简单估算
-                    "completion_tokens": len(content) // 4,
-                    "total_tokens": (len(prompt) + len(content)) // 4
-                }
-                return content, token_usage
-            
-            async def stream_chat(self, prompt: str, response_format: str = "text"):
-                yield "这是一个模拟的流式 LLM 响应"
-        
-        return MockLLM()

@@ -32,7 +32,7 @@ ANALYST_DEPTH_CONFIG = {
             "fundamental_metrics": ["PE", "PB"],
             "sentiment_analysis": False,
             "risk_assessment": False,
-            "llm_analysis": False,
+            "llm_analysis": False, # 快速分析不使用LLM
             "peer_comparison": False,
             "historical_analysis": False,
             "scenario_analysis": False,
@@ -54,7 +54,7 @@ ANALYST_DEPTH_CONFIG = {
             "fundamental_metrics": ["PE", "PB", "ROE"],
             "sentiment_analysis": True,
             "risk_assessment": False,
-            "llm_analysis": True,
+            "llm_analysis": True, # 深度分析使用LLM
             "peer_comparison": False,
             "historical_analysis": False,
             "scenario_analysis": False,
@@ -76,7 +76,7 @@ ANALYST_DEPTH_CONFIG = {
             "fundamental_metrics": ["PE", "PB", "ROE", "CashFlow"],
             "sentiment_analysis": True,
             "risk_assessment": True,
-            "llm_analysis": True,
+            "llm_analysis": True, # 全面分析使用LLM
             "peer_comparison": True,
             "historical_analysis": True,
             "scenario_analysis": True,

@@ -1,6 +1,7 @@
 """
 数据库初始化脚本
 用于创建所有需要的数据库表
+支持API Key加密存储和密钥轮换
 """
 import psycopg2
 from psycopg2 import sql
@@ -10,6 +11,9 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# 加密相关常量
+ENCRYPTION_KEY_ENV = "DB_ENCRYPTION_KEY"
 
 
 class DatabaseInitializer:
@@ -98,10 +102,10 @@ class DatabaseInitializer:
         try:
             cursor = self.connection.cursor()
             cursor.execute(sql)
-            print(f"✓ {description or 'SQL执行成功'}")
+            print(f"[OK] {description or 'SQL执行成功'}")
             cursor.close()
         except Exception as e:
-            print(f"✗ {description or 'SQL执行失败'}: {e}")
+            print(f"[ERROR] {description or 'SQL执行失败'}: {e}")
             raise
 
     def create_users_table(self):
@@ -272,11 +276,178 @@ class DatabaseInitializer:
         """
         self.execute_sql(sql, "创建用户股票跟踪池表")
 
+    def create_user_stock_portfolio_table(self):
+        """创建用户自选股表"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS user_stock_portfolio (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            stock_code VARCHAR(20) NOT NULL,
+            stock_name VARCHAR(100) NOT NULL,
+            exchange VARCHAR(20),
+            market VARCHAR(20),
+            added_date DATE NOT NULL DEFAULT CURRENT_DATE,
+            CONSTRAINT fk_portfolio_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            CONSTRAINT uq_portfolio_user_stock UNIQUE (user_id, stock_code)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_portfolio_user_id ON user_stock_portfolio(user_id);
+        CREATE INDEX IF NOT EXISTS idx_portfolio_stock_code ON user_stock_portfolio(stock_code);
+        """
+        self.execute_sql(sql, "创建用户自选股表")
+
+    def create_dialogue_sessions_table(self):
+        """创建对话会话表"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS dialogue_sessions (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            session_id VARCHAR(100) NOT NULL,
+            topic VARCHAR(200) NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_dialogue_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            CONSTRAINT uq_user_session UNIQUE (user_id, session_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_dialogue_user_id ON dialogue_sessions(user_id);
+        CREATE INDEX IF NOT EXISTS idx_dialogue_session_id ON dialogue_sessions(session_id);
+        """
+        self.execute_sql(sql, "创建对话会话表")
+
+    def create_dialogue_messages_table(self):
+        """创建对话消息表"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS dialogue_messages (
+            id SERIAL PRIMARY KEY,
+            session_id INTEGER NOT NULL,
+            role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant')),
+            content TEXT NOT NULL,
+            timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_message_session FOREIGN KEY (session_id) REFERENCES dialogue_sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_message_session_id ON dialogue_messages(session_id);
+        CREATE INDEX IF NOT EXISTS idx_message_timestamp ON dialogue_messages(timestamp);
+        """
+        self.execute_sql(sql, "创建对话消息表")
+
+    def enable_pgcrypto(self):
+        """启用pgcrypto扩展用于加密"""
+        sql = "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+        self.execute_sql(sql, "启用pgcrypto加密扩展")
+
+    def create_llm_presets_table(self):
+        """创建预定义LLM模型表（支持加密存储API Key）"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS llm_presets (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(50) NOT NULL UNIQUE,
+            display_name VARCHAR(100) NOT NULL,
+            api_key BYTEA,
+            base_url VARCHAR(500) NOT NULL,
+            default_model VARCHAR(100) NOT NULL,
+            models JSONB DEFAULT '[]',
+            is_active BOOLEAN DEFAULT true,
+            is_system BOOLEAN DEFAULT false,
+            config JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_llm_presets_name ON llm_presets(name);
+        CREATE INDEX IF NOT EXISTS idx_llm_presets_is_active ON llm_presets(is_active);
+        """
+        self.execute_sql(sql, "创建预定义LLM模型表（支持加密）")
+
+    def create_user_llm_configs_table(self):
+        """创建用户自定义LLM配置表（支持加密存储API Key）"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS user_llm_configs (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            name VARCHAR(50) NOT NULL,
+            provider VARCHAR(50),
+            api_key BYTEA NOT NULL,
+            base_url VARCHAR(500) NOT NULL,
+            model VARCHAR(100) NOT NULL,
+            is_active BOOLEAN DEFAULT true,
+            config JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_user_llm_configs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            CONSTRAINT uq_user_llm_config_name UNIQUE (user_id, name)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_user_llm_configs_user_id ON user_llm_configs(user_id);
+        CREATE INDEX IF NOT EXISTS idx_user_llm_configs_is_active ON user_llm_configs(is_active);
+        """
+        self.execute_sql(sql, "创建用户自定义LLM配置表（支持加密）")
+
+    def create_user_llm_usage_table(self):
+        """创建用户LLM使用量统计表"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS user_llm_usage (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            preset_id INTEGER REFERENCES llm_presets(id) ON DELETE SET NULL,
+            user_config_id INTEGER REFERENCES user_llm_configs(id) ON DELETE SET NULL,
+            provider VARCHAR(50),
+            model VARCHAR(100) NOT NULL,
+            prompt_tokens INTEGER DEFAULT 0,
+            completion_tokens INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
+            cost DECIMAL(10, 4) DEFAULT 0,
+            called_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_user_llm_usage_user_id ON user_llm_usage(user_id);
+        CREATE INDEX IF NOT EXISTS idx_user_llm_usage_called_at ON user_llm_usage(called_at);
+        """
+        self.execute_sql(sql, "创建用户LLM使用量统计表")
+
+    def create_user_llm_preferences_table(self):
+        """创建用户LLM偏好表"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS user_llm_preferences (
+            user_id INTEGER PRIMARY KEY,
+            preset_id INTEGER REFERENCES llm_presets(id) ON DELETE SET NULL,
+            user_config_id INTEGER REFERENCES user_llm_configs(id) ON DELETE SET NULL,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_user_llm_preferences_preset ON user_llm_preferences(preset_id);
+        CREATE INDEX IF NOT EXISTS idx_user_llm_preferences_config ON user_llm_preferences(user_config_id);
+        """
+        self.execute_sql(sql, "创建用户LLM偏好表")
+
+    def create_admins_table(self):
+        """创建管理员表"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS admins (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL UNIQUE,
+            role VARCHAR(50) NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'super_admin')),
+            permissions JSONB DEFAULT '[]',
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_admins_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_admins_user_id ON admins(user_id);
+        CREATE INDEX IF NOT EXISTS idx_admins_role ON admins(role);
+        """
+        self.execute_sql(sql, "创建管理员表")
+
     def create_all_tables(self):
         """创建所有表"""
         print("\n开始创建数据库表...")
         print("=" * 50)
 
+        # 先启用加密扩展
+        self.enable_pgcrypto()
+        
         self.create_users_table()
         self.create_memberships_table()
         self.create_api_call_logs_table()
@@ -285,6 +456,13 @@ class DatabaseInitializer:
         self.create_wechat_users_table()
         self.create_stock_analysis_results_table()
         self.create_user_stock_watchlist_table()
+        self.create_user_stock_portfolio_table()
+        self.create_dialogue_sessions_table()
+        self.create_dialogue_messages_table()
+        self.create_llm_presets_table()
+        self.create_user_llm_configs_table()
+        self.create_user_llm_usage_table()
+        self.create_user_llm_preferences_table()
         self.apply_schema_patches()
 
         print("=" * 50)
@@ -301,11 +479,238 @@ class DatabaseInitializer:
 
         -- 删除stock_analysis_results表中的唯一约束（如果存在）
         ALTER TABLE stock_analysis_results DROP CONSTRAINT IF EXISTS stock_analysis_results_user_id_stock_code_analysis_date_key;
-        
+
         -- 修改created_at字段为带时区的TIMESTAMP WITH TIME ZONE
         ALTER TABLE stock_analysis_results ALTER COLUMN created_at TYPE TIMESTAMP WITH TIME ZONE USING created_at AT TIME ZONE 'Asia/Shanghai';
+
+        -- 添加llm_presets表的models列
+        ALTER TABLE llm_presets ADD COLUMN IF NOT EXISTS models JSONB DEFAULT '[]';
         """
         self.execute_sql(sql, "应用数据库结构补丁（仅加列/索引，不做历史数据回填）")
+
+    def migrate_api_keys_to_encrypted(self, encryption_key: str):
+        """
+        将现有的明文API Key迁移为加密格式
+        仅对仍为VARCHAR类型的api_key字段进行迁移
+        
+        Args:
+            encryption_key: 加密密钥（从环境变量获取）
+        """
+        if not encryption_key:
+            print("[ERROR] 未设置DB_ENCRYPTION_KEY环境变量，无法进行密钥迁移")
+            return
+
+        print("\n开始迁移API Key到加密格式...")
+        print("-" * 50)
+        print(f"[DEBUG] 使用的加密密钥: {encryption_key[:8]}...{encryption_key[-4:]}")
+
+        try:
+            # 启用pgcrypto扩展
+            self.enable_pgcrypto()
+
+            # 迁移 llm_presets 表
+            cursor = self.connection.cursor()
+            
+            # 检查api_key字段类型是否为VARCHAR（未加密状态）
+            cursor.execute("""
+                SELECT data_type 
+                FROM information_schema.columns 
+                WHERE table_name = 'llm_presets' AND column_name = 'api_key'
+            """)
+            result = cursor.fetchone()
+            print(f"[DEBUG] llm_presets.api_key 当前类型: {result[0] if result else 'UNKNOWN'}")
+            
+            if result and result[0] == 'character varying':
+                # 先查看有多少条数据需要迁移
+                cursor.execute("SELECT COUNT(*) FROM llm_presets WHERE api_key IS NOT NULL AND api_key != ''")
+                count = cursor.fetchone()[0]
+                print(f"正在迁移 llm_presets 表中的API Key ({count} 条)...")
+                
+                update_sql = """
+                    UPDATE llm_presets 
+                    SET api_key = pgp_sym_encrypt(api_key::text, %s)::bytea 
+                    WHERE api_key IS NOT NULL AND api_key != ''
+                """
+                cursor.execute(update_sql, (encryption_key,))
+                self.connection.commit()
+                print(f"已加密 {cursor.rowcount} 条记录")
+                
+                # 将字段类型改为BYTEA
+                alter_sql = "ALTER TABLE llm_presets ALTER COLUMN api_key TYPE bytea USING api_key::bytea"
+                cursor.execute(alter_sql)
+                self.connection.commit()
+                print("已将 llm_presets.api_key 字段类型改为 bytea")
+            elif result and result[0] == 'bytea':
+                print("llm_presets 表中的API Key已是 bytea 类型，检查是否需要重新加密...")
+                # 测试解密一条数据
+                try:
+                    cursor.execute("SELECT pgp_sym_decrypt(api_key, %s) FROM llm_presets WHERE api_key IS NOT NULL LIMIT 1", (encryption_key,))
+                    test_result = cursor.fetchone()
+                    print("解密测试成功，密钥匹配")
+                except Exception as e:
+                    print(f"[WARNING] 解密测试失败: {e}")
+                    print("当前密钥与加密时使用的密钥不匹配！")
+                    print("如果需要使用新密钥，请先使用旧密钥进行密钥轮换")
+            else:
+                print("llm_presets 表中的API Key状态未知，跳过")
+
+            # 迁移 user_llm_configs 表
+            cursor.execute("""
+                SELECT data_type 
+                FROM information_schema.columns 
+                WHERE table_name = 'user_llm_configs' AND column_name = 'api_key'
+            """)
+            result = cursor.fetchone()
+            print(f"[DEBUG] user_llm_configs.api_key 当前类型: {result[0] if result else 'UNKNOWN'}")
+            
+            if result and result[0] == 'character varying':
+                # 先查看有多少条数据需要迁移
+                cursor.execute("SELECT COUNT(*) FROM user_llm_configs WHERE api_key IS NOT NULL AND api_key != ''")
+                count = cursor.fetchone()[0]
+                print(f"正在迁移 user_llm_configs 表中的API Key ({count} 条)...")
+                
+                update_sql = """
+                    UPDATE user_llm_configs 
+                    SET api_key = pgp_sym_encrypt(api_key::text, %s)::bytea 
+                    WHERE api_key IS NOT NULL AND api_key != ''
+                """
+                cursor.execute(update_sql, (encryption_key,))
+                self.connection.commit()
+                print(f"已加密 {cursor.rowcount} 条记录")
+                
+                # 将字段类型改为BYTEA
+                alter_sql = "ALTER TABLE user_llm_configs ALTER COLUMN api_key TYPE bytea USING api_key::bytea"
+                cursor.execute(alter_sql)
+                self.connection.commit()
+                print("已将 user_llm_configs.api_key 字段类型改为 bytea")
+            elif result and result[0] == 'bytea':
+                print("user_llm_configs 表中的API Key已是 bytea 类型，检查是否需要重新加密...")
+                # 测试解密一条数据
+                try:
+                    cursor.execute("SELECT pgp_sym_decrypt(api_key, %s) FROM user_llm_configs WHERE api_key IS NOT NULL LIMIT 1", (encryption_key,))
+                    test_result = cursor.fetchone()
+                    print("解密测试成功，密钥匹配")
+                except Exception as e:
+                    print(f"[WARNING] 解密测试失败: {e}")
+                    print("当前密钥与加密时使用的密钥不匹配！")
+            else:
+                print("user_llm_configs 表中的API Key状态未知，跳过")
+
+            cursor.close()
+            print("-" * 50)
+            print("API Key迁移完成！\n")
+
+        except Exception as e:
+            print(f"[ERROR] API Key迁移失败: {e}")
+            self.connection.rollback()
+            raise
+
+    def rotate_encryption_key(self, old_key: str, new_key: str):
+        """
+        密钥轮换：使用旧密钥解密数据，再用新密钥重新加密
+        
+        Args:
+            old_key: 旧的加密密钥
+            new_key: 新的加密密钥
+        """
+        if not old_key or not new_key:
+            print("[ERROR] 必须提供旧密钥和新密钥")
+            return
+
+        print(f"\n开始密钥轮换...")
+        print("-" * 50)
+
+        try:
+            cursor = self.connection.cursor()
+
+            # 轮换 llm_presets 表
+            print("正在轮换 llm_presets 表的密钥...")
+            update_sql = """
+                UPDATE llm_presets 
+                SET api_key = pgp_sym_encrypt(pgp_sym_decrypt(api_key, %s), %s)::bytea 
+                WHERE api_key IS NOT NULL
+            """
+            cursor.execute(update_sql, (old_key, new_key))
+            self.connection.commit()
+            print(f"已轮换 {cursor.rowcount} 条记录")
+
+            # 轮换 user_llm_configs 表
+            print("正在轮换 user_llm_configs 表的密钥...")
+            update_sql = """
+                UPDATE user_llm_configs 
+                SET api_key = pgp_sym_encrypt(pgp_sym_decrypt(api_key, %s), %s)::bytea 
+                WHERE api_key IS NOT NULL
+            """
+            cursor.execute(update_sql, (old_key, new_key))
+            self.connection.commit()
+            print(f"已轮换 {cursor.rowcount} 条记录")
+
+            cursor.close()
+            print("-" * 50)
+            print("密钥轮换完成！\n")
+            print("请更新环境变量 DB_ENCRYPTION_KEY 为新密钥")
+
+        except Exception as e:
+            print(f"[ERROR] 密钥轮换失败: {e}")
+            self.connection.rollback()
+            raise
+
+    def add_llm_tables_if_not_exist(self):
+        """为已存在的数据库添加LLM相关表"""
+        sql = """
+        CREATE TABLE IF NOT EXISTS llm_presets (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(50) NOT NULL UNIQUE,
+            display_name VARCHAR(100) NOT NULL,
+            api_key VARCHAR(500),
+            base_url VARCHAR(500) NOT NULL,
+            default_model VARCHAR(100) NOT NULL,
+            models JSONB DEFAULT '[]',
+            is_active BOOLEAN DEFAULT true,
+            is_system BOOLEAN DEFAULT false,
+            config JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        
+        CREATE TABLE IF NOT EXISTS user_llm_configs (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            name VARCHAR(50) NOT NULL,
+            provider VARCHAR(50),
+            api_key VARCHAR(500) NOT NULL,
+            base_url VARCHAR(500) NOT NULL,
+            model VARCHAR(100) NOT NULL,
+            is_active BOOLEAN DEFAULT true,
+            config JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_user_llm_configs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            CONSTRAINT uq_user_llm_config_name UNIQUE (user_id, name)
+        );
+        
+        CREATE TABLE IF NOT EXISTS user_llm_usage (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            preset_id INTEGER,
+            user_config_id INTEGER,
+            provider VARCHAR(50),
+            model VARCHAR(100) NOT NULL,
+            prompt_tokens INTEGER DEFAULT 0,
+            completion_tokens INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
+            cost DECIMAL(10, 4) DEFAULT 0,
+            called_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS user_llm_preferences (
+            user_id INTEGER PRIMARY KEY,
+            preset_id INTEGER REFERENCES llm_presets(id) ON DELETE SET NULL,
+            user_config_id INTEGER REFERENCES user_llm_configs(id) ON DELETE SET NULL,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+        self.execute_sql(sql, "为已存在数据库添加LLM相关表")
 
     def drop_all_tables(self):
         """删除所有表（慎用！）"""
@@ -315,7 +720,14 @@ class DatabaseInitializer:
             print("操作已取消")
             return
 
+        # DROP TABLE IF EXISTS user_llm_usage CASCADE;
+        # DROP TABLE IF EXISTS user_llm_configs CASCADE;
+        # DROP TABLE IF EXISTS llm_presets CASCADE;
+
         sql = """
+        DROP TABLE IF EXISTS dialogue_messages CASCADE;
+        DROP TABLE IF EXISTS dialogue_sessions CASCADE;
+        DROP TABLE IF EXISTS user_stock_portfolio CASCADE;
         DROP TABLE IF EXISTS user_stock_watchlist CASCADE;
         DROP TABLE IF EXISTS stock_analysis_results CASCADE;
         DROP TABLE IF EXISTS wechat_users CASCADE;
@@ -394,6 +806,13 @@ def main():
     print(f"  用户: {user}")
     print(f"  密码: {'*' * len(password) if password else '(未设置)'}")
 
+    # 解析命令行参数
+    import sys
+    args = sys.argv[1:]
+    auto_create = False
+    if args and args[0] == "--create":
+        auto_create = True
+
     # 创建初始化器
     initializer = DatabaseInitializer(host, port, database, user, password)
 
@@ -407,32 +826,60 @@ def main():
         sys.exit(1)
 
     try:
-        # 显示菜单
-        while True:
-            print("\n请选择操作：")
-            print("  1. 创建所有表")
-            print("  2. 删除所有表（慎用！）")
-            print("  3. 显示所有表")
-            print("  4. 查看表结构")
-            print("  5. 退出")
+        if auto_create:
+            # 自动创建所有表
+            initializer.create_all_tables()
+        else:
+            # 显示菜单
+            while True:
+                print("\n请选择操作：")
+                print("  1. 创建所有表")
+                print("  2. 删除所有表（慎用！）")
+                print("  3. 显示所有表")
+                print("  4. 查看表结构")
+                print("  5. 迁移API Key到加密格式")
+                print("  6. 密钥轮换")
+                print("  7. 退出")
 
-            choice = input("\n请输入选项 (1-5): ").strip()
+                choice = input("\n请输入选项 (1-7): ").strip()
 
-            if choice == '1':
-                initializer.create_all_tables()
-            elif choice == '2':
-                initializer.drop_all_tables()
-            elif choice == '3':
-                initializer.show_tables()
-            elif choice == '4':
-                table_name = input("请输入表名: ").strip()
-                if table_name:
-                    initializer.get_table_info(table_name)
-            elif choice == '5':
-                print("退出程序")
-                break
-            else:
-                print("无效选项，请重新输入")
+                if choice == '1':
+                    initializer.create_all_tables()
+                elif choice == '2':
+                    initializer.drop_all_tables()
+                elif choice == '3':
+                    initializer.show_tables()
+                elif choice == '4':
+                    table_name = input("请输入表名: ").strip()
+                    if table_name:
+                        initializer.get_table_info(table_name)
+                elif choice == '5':
+                    encryption_key = os.getenv("DB_ENCRYPTION_KEY", "")
+                    if not encryption_key:
+                        print("[ERROR] 未设置DB_ENCRYPTION_KEY环境变量")
+                        print("请先在.env文件中设置DB_ENCRYPTION_KEY")
+                        continue
+                    confirm = input("确认将现有的明文API Key迁移为加密格式？(yes/no): ")
+                    if confirm.lower() == 'yes':
+                        initializer.migrate_api_keys_to_encrypted(encryption_key)
+                    else:
+                        print("操作已取消")
+                elif choice == '6':
+                    old_key = input("请输入旧密钥: ").strip()
+                    new_key = input("请输入新密钥: ").strip()
+                    if not old_key or not new_key:
+                        print("[ERROR] 必须提供旧密钥和新密钥")
+                        continue
+                    confirm = input(f"确认使用旧密钥轮换到新密钥？(yes/no): ")
+                    if confirm.lower() == 'yes':
+                        initializer.rotate_encryption_key(old_key, new_key)
+                    else:
+                        print("操作已取消")
+                elif choice == '7':
+                    print("退出程序")
+                    break
+                else:
+                    print("无效选项，请重新输入")
 
     finally:
         initializer.disconnect()

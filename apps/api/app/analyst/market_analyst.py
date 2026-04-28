@@ -178,6 +178,8 @@ class MarketAnalyst(BaseAnalyst):
 
         # 获取基于深度的提示词
         prompt_template = get_analyst_prompt("market", depth)
+        logger.debug(f"{ticker} LLM分析提示词: {prompt_template}")
+
         prompt = prompt_template.format(
             ticker=ticker,
             stock_name=stock_name
@@ -196,6 +198,7 @@ class MarketAnalyst(BaseAnalyst):
         prompt += "\n请基于以上数据提供专业的技术分析。\n"
         try:
             response, token_usage = await llm.chat(prompt)
+            logger.info(f"{ticker} LLM分析调用成功: {response}")
             return response, token_usage.get('total_tokens', 0)
         except Exception as e:
             logger.error(f"[{self.name}] LLM分析调用失败: {e}")
@@ -252,45 +255,21 @@ class MarketAnalyst(BaseAnalyst):
 
 ## 二、技术指标分析
 
-"""
+### 1. 核心技术指标评分
 
-        if "MA" in indicators:
-            report += f"""### 1. 移动平均线（MA）分析
-{timing_result.get('ma', '数据获取中...')}
+| 指标维度 | 评分 | 说明 |
+|---------|------|------|
+| 均线排列 | {timing_result.get('ma_alignment', 0):.4f} | 正值为多头排列，负值为空头排列 |
+| 创新高比例 | {timing_result.get('new_high_low_ratio', 0):.4f} | 正值创新高占优，负值创新低占优 |
+| 股价与10日线关系 | {timing_result.get('price_vs_ma10', 0):.4f} | 正值股价在均线上方，负值在下方 |
+| 量能配合度 | {timing_result.get('volume_price_sync', 0):.4f} | 正值量价配合良好，负值配合差 |
+| 换手率波动 | {timing_result.get('turnover_volatility', 0):.4f} | 正值换手率稳定，负值波动大 |
+| MACD强度 | {timing_result.get('macd_strength', 0):.4f} | 正值多头信号强，负值空头信号强 |
+| 布林带位置 | {timing_result.get('bollinger_position', 0):.4f} | 正值靠近下轨，负值靠近上轨 |
+| ATR变化 | {timing_result.get('atr_change', 0):.4f} | 正值波动率稳定，负值波动大 |
+| 主力资金流向 | {timing_result.get('main_flow', 0):.4f} | 正值资金流入，负值资金流出 |
 
-"""
-
-        if "MACD" in indicators:
-            report += f"""### 2. MACD指标分析
-{timing_result.get('macd', '数据获取中...')}
-
-"""
-
-        if "RSI" in indicators:
-            report += f"""### 3. RSI相对强弱指标
-{timing_result.get('rsi', '数据获取中...')}
-
-"""
-
-        if "BOLL" in indicators:
-            report += f"""### 4. 布林带（BOLL）分析
-{timing_result.get('bollinger', '数据获取中...')}
-
-"""
-
-        if "KDJ" in indicators and depth >= 3:
-            report += f"""### 5. KDJ随机指标
-{timing_result.get('kdj', '数据获取中...')}
-
-"""
-
-        if "WR" in indicators and depth >= 3:
-            report += f"""### 6. WR威廉指标
-{timing_result.get('wr', '数据获取中...')}
-
-"""
-
-        report += f"""---
+---
 
 ## 三、价格趋势分析
 
@@ -324,68 +303,10 @@ class MarketAnalyst(BaseAnalyst):
 - **建议**：技术面显示中性，建议观望等待明确信号
 
 """
-
-        if depth >= 4:
-            report += """---
-
-## 五、深度技术分析（高级）
-
-"""
-            if "CCI" in indicators:
-                report += f"""### CCI顺势指标
-{timing_result.get('cci', '数据获取中...')}
-
-"""
-
-            if "ADX" in indicators:
-                report += f"""### ADX平均趋向指标
-{timing_result.get('adx', '数据获取中...')}
-
-"""
-
-            ma_data = timing_result.get("ma", "")
-            if "多头" in str(ma_data):
-                report += "### 均线系统分析\n- 均线呈多头排列，中期趋势向好\n"
-            elif "空头" in str(ma_data):
-                report += "### 均线系统分析\n- 均线呈空头排列，中期趋势偏弱\n"
-            else:
-                report += "### 均线系统分析\n- 均线排列不明显，趋势不明\n"
-
-            report += """
-### 量价配合分析
-"""
-            volume_data = timing_result.get("volume", "")
-            if "放大" in str(volume_data):
-                report += "- 成交量有所放大，市场参与度提高\n"
-            elif "萎缩" in str(volume_data):
-                report += "- 成交量萎缩，市场活跃度下降\n"
-            else:
-                report += "- 成交量变化不明显\n"
-
-        if depth == 5:
-            report += """
-
----
-
-## 六、专家级技术分析
-
-"""
-            if "OBV" in indicators:
-                report += f"""### OBV能量潮指标
-{timing_result.get('obv', '数据获取中...')}
-
-"""
-
-            if "DMI" in indicators:
-                report += f"""### DMI动向指标
-{timing_result.get('dmi', '数据获取中...')}
-
-"""
-
             report += """
 ---
 
-## 七、风险提示
+## 五、风险提示
 
 - 技术分析仅供参考，不构成投资建议
 - 市场有风险，投资需谨慎

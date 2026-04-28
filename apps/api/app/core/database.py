@@ -160,3 +160,17 @@ def execute_delete(query: str, params: tuple = None) -> int:
             affected = cursor.rowcount
             conn.commit()
             return affected
+
+
+def execute_write(query: str, params: tuple = None) -> None:
+    """
+    执行写入操作（插入、更新、删除）
+
+    Args:
+        query: SQL语句
+        params: 参数
+    """
+    with db_manager.get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query, params or ())
+            conn.commit()

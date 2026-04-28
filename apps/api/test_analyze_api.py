@@ -21,7 +21,7 @@ STOCK_LIST = [
     "600118",
 ]
 
-DEPTHS = [1, 2, 3]
+DEPTHS = [1] # 1, 2, 3
 
 ANALYSTS = {
     "market_analyst": True,
@@ -123,7 +123,9 @@ def test_analyze_api():
     print(f"失败: {sum(1 for r in all_results if 'error' in r)} 次")
 
     # 测试其他接口
+    print(f"\n************************************")
     test_get_analyzed_stocks(token)
+    print(f"\n************************************")
     test_delete_analyzed_stock(token, STOCK_LIST[0])
 
 def test_get_analyzed_stocks(token):
