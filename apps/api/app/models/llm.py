@@ -68,7 +68,8 @@ class LLMPreset:
     @classmethod
     def from_db_row(cls, row: tuple) -> "LLMPreset":
         import json
-        models = row[11] if len(row) > 11 else []
+        # models 是第7个字段（索引6）
+        models = row[6] if len(row) > 6 else []
         if isinstance(models, str):
             models = json.loads(models)
         return cls(
@@ -79,11 +80,11 @@ class LLMPreset:
             base_url=row[4],
             default_model=row[5],
             models=models or [],
-            is_active=row[6],
-            is_system=row[7],
-            config=row[8],
-            created_at=row[9],
-            updated_at=row[10]
+            is_active=row[7],
+            is_system=row[8],
+            config=row[9],
+            created_at=row[10],
+            updated_at=row[11]
         )
 
 

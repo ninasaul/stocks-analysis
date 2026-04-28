@@ -111,17 +111,15 @@ class BaseAnalyst(ABC):
         """获取深度描述"""
         descriptions = {
             1: "快速分析",
-            2: "基础分析",
-            3: "标准分析",
-            4: "深度分析",
-            5: "全面分析"
+            2: "深度分析",
+            3: "全面分析"
         }
-        return descriptions.get(depth, "标准分析")
+        return descriptions.get(depth, "快速分析")
 
     def _get_depth_chinese_name(self, depth: int) -> str:
         """获取深度中文名称"""
         config = self.get_depth_config(depth)
-        return config.get("chinese_name", "标准分析")
+        return config.get("chinese_name", "快速分析")
 
     def _create_error_result(self, error_message: str) -> Dict[str, Any]:
         """创建错误结果"""

@@ -19,6 +19,7 @@ from .routers.stock_routes import router as stock_router
 from .routers.health_routes import router as health_router
 from .routers.trade_routes import router as trade_router
 from .routers.llm_routes import router as llm_router
+from .routers.llm_admin_routes import router as llm_admin_router
 
 app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION)
 
@@ -61,6 +62,7 @@ app.include_router(stock_router)
 app.include_router(trade_router)
 app.include_router(health_router)
 app.include_router(llm_router)
+app.include_router(llm_admin_router)
 
 # 全局实例
 stock_service = None
