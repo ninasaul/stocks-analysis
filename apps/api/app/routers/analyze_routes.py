@@ -11,7 +11,8 @@ from ..data.indicators import TimingScorer
 from ..agents.stock_picker import run_fundamental_check
 from ..agents.timer import TimerAgent
 from ..agents.debate import run_debate
-from ..core.config import get_llm_client, config
+from ..core.config import config
+from ..services.llm_service import LLMService
 from ..core.stock_service import StockService
 from ..core.logging import logger
 from ..analyst.depth_config import (
@@ -264,7 +265,11 @@ async def analyze_stock(
         logger.warning(f"用户 {current_user.id} {error_msg}")
         raise HTTPException(status_code=429, detail=error_msg)
 
-    llm = get_llm_client()
+    try:
+        llm = LLMService.get_user_default_client(current_user.id)
+    except ValueError:
+        logger.warning(f"用户 {current_user.id} 未设置LLM偏好，LLM服务不可用")
+        raise HTTPException(status_code=503, detail="LLM服务不可用")
     logger.debug(f"LLM 客户端初始化完成")
 
     logger.debug(f"获取股票 {ticker} 的历史数据")

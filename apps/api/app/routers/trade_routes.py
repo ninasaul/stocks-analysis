@@ -2,7 +2,6 @@
 from fastapi import APIRouter, Query, Depends
 
 from ..data.fetcher import fetch_stock_data
-from ..core.config import get_llm_client
 from ..core.logging import logger
 from ..reflection.reflector import Reflector
 from ..reflection.memory import SimpleMemory
@@ -10,6 +9,7 @@ from ..trading.manager import TradingManager
 from ..trading.strategy import TradingStrategy
 from ..user_management.models import User
 from ..core.auth import get_current_user
+from ..services.llm_service import LLMService
 
 router = APIRouter(prefix="/api", tags=["交易"])
 
@@ -53,7 +53,10 @@ async def execute_trade(
     
     # 4. 如果交易成功且不是 HOLD，进行反思
     if trade_result["success"] and signal != "HOLD":
-        llm = get_llm_client()
+        try:
+            llm = LLMService.get_user_default_client(current_user.id)
+        except ValueError:
+            raise HTTPException(status_code=503, detail="LLM服务不可用")
         reflector = Reflector(llm)
         
         trade_data = {
@@ -134,7 +137,10 @@ async def reflect_on_trade(
     latest_transaction = ticker_transactions[-1]
     
     # 执行反思
-    llm = get_llm_client()
+    try:
+        llm = LLMService.get_user_default_client(current_user.id)
+    except ValueError:
+        raise HTTPException(status_code=503, detail="LLM服务不可用")
     reflector = Reflector(llm)
     
     trade_data = {

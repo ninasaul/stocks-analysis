@@ -91,37 +91,10 @@ class FundamentalAnalyst(BaseAnalyst):
             ),
             "fundamental_data": fundamental_data,
             "score": self._calculate_fundamental_score(fundamental_data, metrics),
-            "thesis": fundamental_data.get("thesis", ""),
-            "risks": fundamental_data.get("risks", []),
-            "catalyst": fundamental_data.get("catalyst", ""),
-            "valuation": fundamental_data.get("valuation", {}),
-            "profitability": fundamental_data.get("profitability", {}),
-            "growth": fundamental_data.get("growth", {}),
-            "health": fundamental_data.get("health", {}),
             "analysis_depth": depth,
             "depth_name": self._get_depth_chinese_name(depth),
             "used_metrics": metrics or []
         }
-
-        if depth >= 4:
-            result["advanced_metrics"] = {
-                "roic": fundamental_data.get("profitability", {}).get("roic", 0),
-                "current_ratio": fundamental_data.get("health", {}).get("current_ratio", 0),
-                "quick_ratio": fundamental_data.get("health", {}).get("quick_ratio", 0),
-                "market_share": fundamental_data.get("market_share", ""),
-                "competitors": fundamental_data.get("competitors", []),
-                "moat": fundamental_data.get("moat", ""),
-                "business_model": fundamental_data.get("business_model", "")
-            }
-
-        if depth == 5:
-            result["expert_metrics"] = {
-                "gross_margin": fundamental_data.get("profitability", {}).get("gross_margin", 0),
-                "net_margin": fundamental_data.get("profitability", {}).get("net_margin", 0),
-                "operating_cash_flow": fundamental_data.get("cash_flow", {}).get("operating", 0),
-                "investing_cash_flow": fundamental_data.get("cash_flow", {}).get("investing", 0),
-                "financing_cash_flow": fundamental_data.get("cash_flow", {}).get("financing", 0)
-            }
 
         total_tokens = 0
         if self.should_use_llm(depth) and llm:
@@ -266,11 +239,6 @@ class FundamentalAnalyst(BaseAnalyst):
         Returns:
             基本面分析报告文本
         """
-        valuation = fundamental_data.get("valuation", {})
-        profitability = fundamental_data.get("profitability", {})
-        growth = fundamental_data.get("growth", {})
-        health = fundamental_data.get("health", {})
-
         depth_desc = self._get_depth_description(depth)
         metrics = metrics or self.get_fundamental_metrics(depth)
 
@@ -284,6 +252,7 @@ class FundamentalAnalyst(BaseAnalyst):
 
 - **公司名称**：{stock_name}
 - **股票代码**：{ticker}
+- **所属行业**：{fundamental_data.get('industry', 'N/A')}
 
 ---
 
@@ -294,18 +263,24 @@ class FundamentalAnalyst(BaseAnalyst):
 """
 
         if "PE" in metrics:
-            report += f"| 市盈率(PE) | {valuation.get('pe', 'N/A')} | 越低越有投资价值 |\n"
+            report += f"| 市盈率(PE) | {fundamental_data.get('pe', 'N/A')} | 越低越有投资价值 |\n"
         if "PB" in metrics:
-            report += f"| 市净率(PB) | {valuation.get('pb', 'N/A')} | 越低越有投资价值 |\n"
-        if "PS" in metrics:
-            report += f"| 市销率(PS) | {valuation.get('ps', 'N/A')} | 越低越有投资价值 |\n"
-        if "PCF" in metrics:
-            report += f"| 市现率(PCF) | {valuation.get('pcf', 'N/A')} | 越低越有投资价值 |\n"
+            report += f"| 市净率(PB) | {fundamental_data.get('pb', 'N/A')} | 越低越有投资价值 |\n"
 
-        report += f"| 股息率 | {valuation.get('dividend_yield', 'N/A')}% | 越高越好 |\n"
+        report += """
+
+### 估值评估
+"""
 
         if "PE" in metrics:
-            report += f"\n### 估值评估\n{self._evaluate_valuation(valuation)}\n"
+            pe = fundamental_data.get('pe')
+            if pe:
+                if pe < 10:
+                    report += "- 市盈率较低，估值相对合理，具有投资价值\n"
+                elif pe < 20:
+                    report += "- 市盈率适中，估值合理\n"
+                else:
+                    report += "- 市盈率较高，估值可能偏高\n"
 
         report += """
 
@@ -316,142 +291,82 @@ class FundamentalAnalyst(BaseAnalyst):
 ### 主要盈利指标
 
 """
+
         if "ROE" in metrics:
-            report += f"| 净资产收益率(ROE) | {profitability.get('roe', 'N/A')}% | 越高越好 |\n"
-        if "ROA" in metrics:
-            report += f"| 资产收益率(ROA) | {profitability.get('roa', 'N/A')}% | 越高越好 |\n"
+            report += f"| 净资产收益率(ROE) | {fundamental_data.get('roe', 'N/A')}% | 越高越好 |\n"
         if "GrossMargin" in metrics:
-            report += f"| 毛利率 | {profitability.get('gross_margin', 'N/A')}% | 越高越好 |\n"
-        if "NetMargin" in metrics:
-            report += f"| 净利率 | {profitability.get('net_margin', 'N/A')}% | 越高越好 |\n"
+            report += f"| 毛利率 | {fundamental_data.get('gross_profit_rate', 'N/A')}% | 越高越好 |\n"
+
+        report += """
+
+### 盈利评估
+"""
 
         if "ROE" in metrics:
-            report += f"\n### 盈利评估\n{self._evaluate_profitability(profitability)}\n"
-
-        report += """
-
----
-
-## 四、成长性分析
-
-### 主要成长指标
-
-"""
-        if "RevenueGrowth" in metrics:
-            report += f"| 营收增长率 | {growth.get('revenue_growth', 'N/A')}% | 越高越好 |\n"
-        if "ProfitGrowth" in metrics:
-            report += f"| 利润增长率 | {growth.get('profit_growth', 'N/A')}% | 越高越好 |\n"
-        if "AssetGrowth" in metrics:
-            report += f"| 资产增长率 | {growth.get('asset_growth', 'N/A')}% | 适度增长为宜 |\n"
-
-        if "RevenueGrowth" in metrics:
-            report += f"\n### 成长评估\n{self._evaluate_growth(growth)}\n"
-
-        report += """
-
----
-
-## 五、财务健康分析
-
-### 主要财务指标
-
-"""
-        if "DebtRatio" in metrics:
-            report += f"| 资产负债率 | {health.get('debt_ratio', 'N/A')}% | 越低越稳健 |\n"
-        if "CurrentRatio" in metrics:
-            report += f"| 流动比率 | {health.get('current_ratio', 'N/A')} | 大于2较好 |\n"
-        if "QuickRatio" in metrics:
-            report += f"| 速动比率 | {health.get('quick_ratio', 'N/A')} | 大于1较好 |\n"
-
-        if "DebtRatio" in metrics:
-            report += f"\n### 财务健康评估\n{self._evaluate_health(health)}\n"
-
-        if depth >= 4:
-            report += """
-
----
-
-## 六、深度基本面分析（高级）
-
-"""
-            if fundamental_data.get("market_share"):
-                report += f"### 行业地位评估\n- 市场占有率：{fundamental_data.get('market_share')}\n"
-            if fundamental_data.get("competitors"):
-                report += f"- 主要竞争对手：{fundamental_data.get('competitors')}\n"
-
-            report += "\n### 竞争优势分析\n"
-            if fundamental_data.get("moat"):
-                report += f"- 护城河：{fundamental_data.get('moat')}\n"
-            if fundamental_data.get("business_model"):
-                report += f"- 商业模式：{fundamental_data.get('business_model')}\n"
-
-            if "ROIC" in metrics:
-                roic = fundamental_data.get("profitability", {}).get("roic", 0)
-                report += f"- ROIC（投资资本回报率）：{roic}%\n"
-
-        if depth >= 3 and fundamental_data.get("thesis"):
-            report += f"""
-
----
-
-## 七、投资逻辑
-
-{fundamental_data.get('thesis', '暂无详细投资逻辑')}
-
-"""
-
-        if fundamental_data.get("risks"):
-            report += """---
-
-## 八、风险提示
-
-"""
-            for i, risk in enumerate(fundamental_data.get("risks", []), 1):
-                report += f"{i}. {risk}\n"
-
-        if depth == 5:
-            report += """
-
----
-
-## 九、现金流分析
-
-### 经营现金流
-"""
-            cash_flow = fundamental_data.get("cash_flow", {})
-            report += f"- 经营现金流：{cash_flow.get('operating', 'N/A')}\n"
-            report += f"- 投资现金流：{cash_flow.get('investing', 'N/A')}\n"
-            report += f"- 融资现金流：{cash_flow.get('financing', 'N/A')}\n"
-
-            report += """
-
----
-
-## 十、综合投资建议
-
-"""
-            pe = valuation.get("pe", 0)
-            if pe > 0:
-                if pe < 15:
-                    report += "### 估值建议\n- 当前估值偏低，具有投资价值\n"
-                elif 15 <= pe <= 30:
-                    report += "### 估值建议\n- 当前估值合理，处于合理区间\n"
+            roe = fundamental_data.get('roe')
+            if roe:
+                if roe > 15:
+                    report += "- 净资产收益率较高，盈利能力强\n"
+                elif roe > 10:
+                    report += "- 净资产收益率适中，盈利能力良好\n"
                 else:
-                    report += "### 估值建议\n- 当前估值偏高，注意风险\n"
+                    report += "- 净资产收益率较低，盈利能力一般\n"
 
-            report += "\n### 综合评级\n"
-            score = self._calculate_fundamental_score(fundamental_data, metrics)
-            if score >= 80:
-                report += "- **强烈推荐**：基本面优秀\n"
-            elif score >= 60:
-                report += "- **推荐**：基本面良好\n"
-            elif score >= 40:
-                report += "- **中性**：基本面一般\n"
+        report += """
+
+---
+
+## 四、财务健康分析
+
+### 主要健康指标
+
+"""
+
+        report += f"| 资产负债率 | {fundamental_data.get('asset_liability_ratio', 'N/A')}% | 越低越健康 |\n"
+
+        report += """
+
+### 健康评估
+"""
+
+        asset_liability_ratio = fundamental_data.get('asset_liability_ratio')
+        if asset_liability_ratio:
+            if asset_liability_ratio < 50:
+                report += "- 资产负债率较低，财务状况健康\n"
+            elif asset_liability_ratio < 70:
+                report += "- 资产负债率适中，财务状况良好\n"
             else:
-                report += "- **回避**：基本面较差\n"
+                report += "- 资产负债率较高，财务风险较大\n"
+
+        score_val = self._calculate_fundamental_score(fundamental_data, metrics)
+        report = f"""
+
+---
+
+## 五、综合评估
+
+### 基本面评分
+- **评分**：{score_val:.2f}/100
+
+### 投资建议
+"""
+
+        if score_val >= 80:
+            report += "- **建议买入**：基本面优秀，具有较高投资价值\n"
+        elif score_val >= 60:
+            report += "- **建议持有**：基本面良好，可以继续持有\n"
+        else:
+            report += "- **建议观望**：基本面一般，建议谨慎投资\n"
+
+        report += """
+
+### 风险提示
+- 本分析基于公开数据，仅供参考，不构成投资建议
+- 市场环境变化可能影响分析结果
+- 投资者应结合自身风险承受能力做出决策
+"""
 
         return report
-
     def _evaluate_valuation(self, valuation: Dict) -> str:
         """评估估值水平"""
         pe = valuation.get("pe", 0)

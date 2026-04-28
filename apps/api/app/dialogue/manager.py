@@ -1,9 +1,10 @@
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from datetime import datetime, timezone
 import asyncio
-from app.core.config import get_llm_client
 from app.core.logging import logger
 from app.core.stock_service import StockService
+from app.core.database import execute_query
+from app.services.llm_service import LLMManager
 import json
 import re
 
@@ -19,10 +20,12 @@ class DialogueManager:
 
     def __init__(self):
         if not hasattr(self, 'initialized'):
-            self.sessions: Dict[str, Dict] = {}  # 存储多个会话 {session_id: {"history": [...], "criteria": {...}}}
+            self.sessions: Dict[str, Dict] = {}  # 存储多个会话 {session_id: {"history": [...], "criteria": {...}, "user_id": int, "topic": str}}
             self.current_session_id: Optional[str] = None
             self.initialized = True
             logger.info("DialogueManager 初始化完成")
+            # 从数据库加载对话历史
+            # 注意：这里暂时不加载，因为需要用户上下文
 
     def _get_session(self, session_id: Optional[str]) -> Dict:
         """获取或创建会话"""
@@ -37,7 +40,7 @@ class DialogueManager:
         
         # 确保会话存在
         if session_id not in self.sessions:
-            self.sessions[session_id] = {"history": [], "criteria": {}}
+            self.sessions[session_id] = {"history": [], "criteria": {}, "user_id": None, "topic": ""}
         
         # 如果是新的会话ID，更新当前会话
         if session_id != self.current_session_id:
@@ -45,27 +48,177 @@ class DialogueManager:
         
         return self.sessions[session_id]
 
-    def add_user_message(self, message: str, session_id: Optional[str] = None) -> None:
+    def add_user_message(self, message: str, session_id: Optional[str] = None, user_id: Optional[int] = None) -> None:
         """添加用户消息到历史"""
         session = self._get_session(session_id)
+        
+        timestamp = datetime.now().astimezone().isoformat()
+        message_id = None
+        
+        # 如果提供了用户ID，保存消息到数据库
+        if user_id and session_id:
+            message_id = self._save_message_to_db(user_id, session_id, "user", message, timestamp)
         
         session["history"].append({
             "role": "user",
             "content": message,
-            "timestamp": datetime.now().astimezone().isoformat()
+            "timestamp": timestamp,
+            "id": message_id
         })
+        
+        # 如果是第一条消息，设置主题
+        if len(session["history"]) == 1 and message:
+            topic = message[:200]  # 截取前200个字符作为主题
+            session["topic"] = topic
+            # 如果提供了用户ID，保存到数据库
+            if user_id:
+                self._save_session_to_db(user_id, session_id, topic)
+        
         # logger.debug(f"添加用户消息: {message[:50]}...")
 
-    def add_assistant_message(self, message: str, session_id: Optional[str] = None) -> None:
+    def add_assistant_message(self, message: str, session_id: Optional[str] = None, user_id: Optional[int] = None) -> None:
         """添加助手消息到历史"""
         session = self._get_session(session_id)
         
+        timestamp = datetime.now().astimezone().isoformat()
+        message_id = None
+        
+        # 处理 LLM 响应可能是列表的情况
+        actual_message = message
+        if isinstance(message, list) and len(message) > 0:
+            # 取列表的第一个元素作为实际消息内容
+            if isinstance(message[0], str):
+                actual_message = message[0]
+        elif isinstance(message, tuple) and len(message) > 0:
+            # 处理 LLM 响应是元组的情况（通常包含消息内容和使用量信息）
+            if isinstance(message[0], str):
+                actual_message = message[0]
+        
+        # 确保消息是字符串类型
+        if not isinstance(actual_message, str):
+            actual_message = str(actual_message)
+        
+        # 如果提供了用户ID，保存消息到数据库
+        if user_id and session_id:
+            message_id = self._save_message_to_db(user_id, session_id, "assistant", actual_message, timestamp)
+        
         session["history"].append({
             "role": "assistant",
-            "content": message,
-            "timestamp": datetime.now().astimezone().isoformat()
+            "content": actual_message,
+            "timestamp": timestamp,
+            "id": message_id
         })
-        # logger.debug(f"添加助手消息: {message[:50]}...")
+        
+        # logger.debug(f"添加助手消息: {actual_message[:50]}...")
+
+    def _save_session_to_db(self, user_id: int, session_id: str, topic: str) -> None:
+        """保存会话到数据库"""
+        try:
+            # 检查会话是否已存在
+            check_query = """
+            SELECT id FROM dialogue_sessions
+            WHERE user_id = %s AND session_id = %s
+            """
+            existing = execute_query(check_query, (user_id, session_id))
+            
+            if existing:
+                # 更新会话
+                update_query = """
+                UPDATE dialogue_sessions
+                SET topic = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = %s AND session_id = %s
+                """
+                execute_query(update_query, (topic, user_id, session_id), fetch=False)
+            else:
+                # 创建新会话
+                insert_query = """
+                INSERT INTO dialogue_sessions (user_id, session_id, topic)
+                VALUES (%s, %s, %s)
+                """
+                execute_query(insert_query, (user_id, session_id, topic), fetch=False)
+            
+            logger.debug(f"会话 {session_id} 已保存到数据库")
+        except Exception as e:
+            logger.error(f"保存会话到数据库失败: {e}")
+
+    def _save_message_to_db(self, user_id: int, session_id: str, role: str, content: str, timestamp: str) -> Optional[int]:
+        """保存消息到数据库，返回消息ID"""
+        try:
+            # 获取会话ID
+            session_query = """
+            SELECT id FROM dialogue_sessions
+            WHERE user_id = %s AND session_id = %s
+            """
+            session_result = execute_query(session_query, (user_id, session_id))
+            
+            if session_result:
+                dialogue_session_id = session_result[0][0]
+                # 插入消息并返回ID
+                insert_query = """
+                INSERT INTO dialogue_messages (session_id, role, content, timestamp)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+                """
+                result = execute_query(insert_query, (dialogue_session_id, role, content, timestamp))
+                if result:
+                    message_id = result[0][0]
+                    logger.debug(f"消息已保存到数据库，ID: {message_id}")
+                    return message_id
+            else:
+                logger.warning(f"会话 {session_id} 不存在，无法保存消息")
+                return None
+        except Exception as e:
+            logger.error(f"保存消息到数据库失败: {e}")
+            return None
+
+    def load_sessions_from_db(self, user_id: int) -> None:
+        """从数据库加载用户的对话会话"""
+        try:
+            # 获取用户的所有会话
+            sessions_query = """
+            SELECT session_id, topic, created_at
+            FROM dialogue_sessions
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+            """
+            sessions_result = execute_query(sessions_query, (user_id,))
+            
+            for session_row in sessions_result:
+                session_id = session_row[0]
+                topic = session_row[1]
+                
+                # 获取会话的消息
+                messages_query = """
+                SELECT id, role, content, timestamp
+                FROM dialogue_messages
+                WHERE session_id = (
+                    SELECT id FROM dialogue_sessions
+                    WHERE user_id = %s AND session_id = %s
+                )
+                ORDER BY timestamp ASC
+                """
+                messages_result = execute_query(messages_query, (user_id, session_id))
+                
+                history = []
+                for message_row in messages_result:
+                    history.append({
+                        "role": message_row[1],
+                        "content": message_row[2],
+                        "timestamp": message_row[3].isoformat() if hasattr(message_row[3], 'isoformat') else message_row[3],
+                        "id": message_row[0]
+                    })
+                
+                # 保存到内存
+                self.sessions[session_id] = {
+                    "history": history,
+                    "criteria": {},
+                    "user_id": user_id,
+                    "topic": topic
+                }
+            
+            logger.info(f"从数据库加载了 {len(sessions_result)} 个会话")
+        except Exception as e:
+            logger.error(f"从数据库加载会话失败: {e}")
 
     def update_criteria(self, criteria: Dict[str, Any], session_id: Optional[str] = None) -> None:
         """更新用户选股条件"""
@@ -207,9 +360,9 @@ class DialogueManager:
 
         return "".join(prompt_parts)
 
-    async def get_response(self, user_message: str, context: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None, mode: str = "prompt") -> Dict[str, Any]:
+    async def get_response(self, user_message: str, context: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None, mode: str = "prompt", user_id: Optional[int] = None, llm_client=None) -> Dict[str, Any]:
         """获取 LLM 响应"""
-        self.add_user_message(user_message, session_id)
+        self.add_user_message(user_message, session_id, user_id)
 
         # 提取选股条件（仅在 prompt 模式下）
         if mode == "prompt":
@@ -229,19 +382,41 @@ class DialogueManager:
             logger.debug(f"直接对话模式: {prompt[:200]}...")
 
         try:
-            llm_client = get_llm_client()
+            if llm_client is None:
+                llm_client = LLMManager.get_default_client(user_id)
+                if not llm_client:
+                    logger.error(f"获取LLM客户端失败，用户: {user_id}")
+                    response = "抱歉，当前LLM服务不可用，请稍后再试。"
+                    self.add_assistant_message(response, session_id, user_id)
+                    return {
+                        "response": response,
+                        "extension_questions": []
+                    }
             response = await llm_client.chat(prompt)
-            self.add_assistant_message(response, session_id)
-            logger.info(f"LLM 响应成功")
+            
+            # 处理 LLM 响应可能是列表的情况
+            actual_response = response
+            if isinstance(response, list) and len(response) > 0:
+                if isinstance(response[0], str):
+                    actual_response = response[0]
+                elif isinstance(response[0], tuple) and len(response[0]) > 0:
+                    actual_response = str(response[0][0]) if response[0][0] else ""
+            
+            # 确保是字符串
+            if not isinstance(actual_response, str):
+                actual_response = str(actual_response)
+            
+            self.add_assistant_message(actual_response, session_id, user_id)
+            logger.info(f"user_id: {user_id} LLM 响应成功")
             
             # 提取延伸问题（仅在 prompt 模式下）
             if mode == "prompt":
-                extension_questions = self._extract_extension_questions(response)
+                extension_questions = self._extract_extension_questions(actual_response)
             else:
                 extension_questions = []
             
             return {
-                "response": response,
+                "response": actual_response,
                 "extension_questions": extension_questions
             }
         except Exception as e:
@@ -254,8 +429,20 @@ class DialogueManager:
     def _extract_extension_questions(self, response: str) -> List[str]:
         """从响应中提取延伸问题"""
         import re
+        # 处理 response 可能是列表的情况
+        actual_response = response
+        if isinstance(response, list) and len(response) > 0:
+            if isinstance(response[0], str):
+                actual_response = response[0]
+            elif isinstance(response[0], tuple) and len(response[0]) > 0:
+                actual_response = str(response[0][0]) if response[0][0] else ""
+        
+        # 确保是字符串
+        if not isinstance(actual_response, str):
+            actual_response = str(actual_response)
+        
         # 匹配【延伸问题】部分
-        match = re.search(r'【延伸问题】\n(.*?)(?=\n\n|$)', response, re.DOTALL)
+        match = re.search(r'【延伸问题】\n(.*?)(?=\n\n|$)', actual_response, re.DOTALL)
         if match:
             questions_text = match.group(1)
             # 提取每个问题
@@ -263,9 +450,9 @@ class DialogueManager:
             return questions[:5]  # 最多返回5个问题
         return []
 
-    async def get_streaming_response(self, user_message: str, context: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None, mode: str = "prompt") -> AsyncGenerator[Dict[str, Any], None]:
+    async def get_streaming_response(self, user_message: str, context: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None, mode: str = "prompt", user_id: Optional[int] = None, llm_client=None) -> AsyncGenerator[Dict[str, Any], None]:
         """获取 LLM 流式响应"""
-        self.add_user_message(user_message, session_id)
+        self.add_user_message(user_message, session_id, user_id)
 
         # 提取选股条件（仅在 prompt 模式下）
         if mode == "prompt":
@@ -286,27 +473,35 @@ class DialogueManager:
             logger.debug(f"直接对话模式: {prompt[:200]}...")
 
         try:
-            llm_client = get_llm_client()
-            
-            # 发送一些提示信息（仅在 prompt 模式下）
-            if mode == "prompt":
-                yield {"chunk": "正在分析您的选股条件...", "extension_questions": []}
-                await asyncio.sleep(0.2)
-                yield {"chunk": "\n\n", "extension_questions": []}
-                await asyncio.sleep(0.2)
-                yield {"chunk": "我需要思考一下...", "extension_questions": []}
-                await asyncio.sleep(0.2)
-                yield {"chunk": "\n\n", "extension_questions": []}
+            if llm_client is None:
+                llm_client = LLMManager.get_default_client(user_id)
+                if not llm_client:
+                    logger.error(f"获取LLM客户端失败，用户: {user_id}")
+                    response = "抱歉，当前LLM服务不可用，请稍后再试。"
+                    self.add_assistant_message(response, session_id, user_id)
+                    yield response
+                    return
             
             # 使用真正的流式LLM调用
             full_response = ""
             async for chunk in llm_client.stream_chat(prompt):
                 if chunk:
-                    yield {"chunk": chunk, "extension_questions": []}
-                    full_response += chunk
+                    # 处理 chunk 可能是列表的情况
+                    actual_chunk = chunk
+                    if isinstance(chunk, list) and len(chunk) > 0:
+                        if isinstance(chunk[0], str):
+                            actual_chunk = chunk[0]
+                        elif isinstance(chunk[0], tuple) and len(chunk[0]) > 0:
+                            actual_chunk = str(chunk[0][0]) if chunk[0][0] else ""
+                    
+                    # 确保是字符串
+                    if not isinstance(actual_chunk, str):
+                        actual_chunk = str(actual_chunk)
+                    yield {"chunk": actual_chunk, "extension_questions": []}
+                    full_response += actual_chunk
             
-            self.add_assistant_message(full_response, session_id)
-            logger.info(f"LLM 流式响应成功")
+            self.add_assistant_message(full_response, session_id, user_id)
+            logger.info(f"user_id: {user_id} LLM 流式响应成功")
             
             # 提取延伸问题（仅在 prompt 模式下）
             if mode == "prompt":
@@ -330,11 +525,34 @@ class DialogueManager:
         session = self._get_session(session_id)
         return session.get("criteria", {}).copy()
 
-    def clear_history(self, session_id: Optional[str] = None) -> bool:
+    def clear_history(self, session_id: Optional[str] = None, user_id: Optional[int] = None) -> bool:
         """清除对话历史"""
         if session_id:
             # 清除指定会话
             if session_id in self.sessions:
+                # 从数据库删除
+                if user_id:
+                    try:
+                        # 删除会话的消息
+                        delete_messages_query = """
+                        DELETE FROM dialogue_messages
+                        WHERE session_id = (
+                            SELECT id FROM dialogue_sessions
+                            WHERE user_id = %s AND session_id = %s
+                        )
+                        """
+                        execute_query(delete_messages_query, (user_id, session_id), fetch=False)
+                        
+                        # 删除会话
+                        delete_session_query = """
+                        DELETE FROM dialogue_sessions
+                        WHERE user_id = %s AND session_id = %s
+                        """
+                        execute_query(delete_session_query, (user_id, session_id), fetch=False)
+                        logger.info(f"从数据库删除会话 {session_id}")
+                    except Exception as e:
+                        logger.error(f"从数据库删除会话失败: {e}")
+                
                 del self.sessions[session_id]
                 if session_id == self.current_session_id:
                     self.current_session_id = None
@@ -343,10 +561,113 @@ class DialogueManager:
         else:
             # 清除当前会话
             if self.current_session_id and self.current_session_id in self.sessions:
+                # 从数据库删除
+                if user_id:
+                    try:
+                        # 删除会话的消息
+                        delete_messages_query = """
+                        DELETE FROM dialogue_messages
+                        WHERE session_id = (
+                            SELECT id FROM dialogue_sessions
+                            WHERE user_id = %s AND session_id = %s
+                        )
+                        """
+                        execute_query(delete_messages_query, (user_id, self.current_session_id), fetch=False)
+                        
+                        # 删除会话
+                        delete_session_query = """
+                        DELETE FROM dialogue_sessions
+                        WHERE user_id = %s AND session_id = %s
+                        """
+                        execute_query(delete_session_query, (user_id, self.current_session_id), fetch=False)
+                        logger.info(f"从数据库删除会话 {self.current_session_id}")
+                    except Exception as e:
+                        logger.error(f"从数据库删除会话失败: {e}")
+                
                 del self.sessions[self.current_session_id]
                 self.current_session_id = None
                 logger.info("当前会话历史已清除")
                 return True
         return False
+
+    def update_topic(self, session_id: str, topic: str, user_id: int) -> bool:
+        """更新会话主题"""
+        if session_id in self.sessions:
+            self.sessions[session_id]["topic"] = topic
+            # 同步到数据库
+            try:
+                update_query = """
+                UPDATE dialogue_sessions
+                SET topic = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = %s AND session_id = %s
+                """
+                execute_query(update_query, (topic, user_id, session_id), fetch=False)
+                logger.info(f"会话 {session_id} 主题已更新为: {topic}")
+                return True
+            except Exception as e:
+                logger.error(f"更新会话主题失败: {e}")
+        return False
+
+    def get_sessions(self, user_id: int) -> List[Dict[str, Any]]:
+        """获取用户的所有会话"""
+        # 从数据库获取
+        try:
+            query = """
+            SELECT session_id, topic, created_at, updated_at
+            FROM dialogue_sessions
+            WHERE user_id = %s
+            ORDER BY updated_at DESC
+            """
+            result = execute_query(query, (user_id,))
+            
+            sessions = []
+            for row in result:
+                sessions.append({
+                    "session_id": row[0],
+                    "topic": row[1],
+                    "created_at": row[2].isoformat() if hasattr(row[2], 'isoformat') else row[2],
+                    "updated_at": row[3].isoformat() if hasattr(row[3], 'isoformat') else row[3]
+                })
+            return sessions
+        except Exception as e:
+            logger.error(f"获取用户会话列表失败: {e}")
+            return []
+
+    def delete_message(self, session_id: str, message_id: int, user_id: int) -> bool:
+        """删除会话中的某条消息"""
+        if session_id not in self.sessions:
+            logger.warning(f"会话 {session_id} 不存在")
+            return False
+        
+        session = self.sessions[session_id]
+        history = session.get("history", [])
+        
+        # 在历史记录中查找消息
+        message_found = False
+        for i, msg in enumerate(history):
+            if msg.get("id") == message_id:
+                # 从内存中删除
+                history.pop(i)
+                message_found = True
+                logger.info(f"从会话 {session_id} 中删除了ID为 {message_id} 的消息")
+                break
+        
+        if not message_found:
+            logger.warning(f"消息ID {message_id} 在会话 {session_id} 中未找到")
+            return False
+        
+        # 从数据库中删除
+        try:
+            delete_query = """
+            DELETE FROM dialogue_messages
+            WHERE id = %s
+            """
+            execute_query(delete_query, (message_id,), fetch=False)
+            logger.info(f"从数据库删除了ID为 {message_id} 的消息")
+        except Exception as e:
+            logger.error(f"从数据库删除消息失败: {e}")
+            return False
+        
+        return True
 
 dialogue_manager = DialogueManager()

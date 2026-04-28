@@ -11,7 +11,7 @@ load_dotenv()
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
 
 # 日志格式
-LOG_FORMAT = '%(levelname)s - %(asctime)s.%(msecs)03d - %(funcName)s:%(lineno)d - %(message)s'
+LOG_FORMAT = '%(levelname)s - %(asctime)s.%(msecs)03d - %(filename)s - %(funcName)s:%(lineno)d - %(message)s'
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 # 创建 logs 目录
