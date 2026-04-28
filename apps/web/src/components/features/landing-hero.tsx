@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { FileTextIcon, MessagesSquareIcon, HistoryIcon, SparklesIcon } from "lucide-react";
 import { landingCopy, subscriptionCopy } from "@/lib/copy";
@@ -308,6 +308,7 @@ function LandingReportPreview() {
 }
 
 function LandingFeaturesSection() {
+  const router = useRouter();
   const [analysisFeature, strategyFeature, reviewFeature, governanceFeature] = landingCopy.features;
   const AnalysisIcon = featureIcons[0] ?? FileTextIcon;
   const StrategyIcon = featureIcons[1] ?? FileTextIcon;
@@ -372,7 +373,7 @@ function LandingFeaturesSection() {
               </CardContent>
               <CardFooter className="mt-auto">
                 <div className="w-full space-y-2">
-                  <Button size="sm" className="w-full" render={<Link href="/app/analyze" />}>
+                  <Button type="button" size="sm" className="w-full" onClick={() => router.push("/app/analyze")}>
                     {landingCopy.featuresAnalyzeCta}
                   </Button>
                   <p className="text-muted-foreground text-center text-xs leading-relaxed">
@@ -497,6 +498,8 @@ function LandingFeaturesSection() {
 }
 
 function LandingPricingSection() {
+  const router = useRouter();
+
   return (
     <section
       id="landing-pricing"
@@ -551,10 +554,11 @@ function LandingPricingSection() {
                       ))}
                     </ul>
                     <Button
+                      type="button"
                       className="w-full"
                       size={featured ? "lg" : "default"}
                       variant={freeTier ? "outline" : "default"}
-                      render={<Link href="/subscription" />}
+                      onClick={() => router.push("/app/account/subscription")}
                     >
                       {item.cta}
                     </Button>
@@ -571,9 +575,10 @@ function LandingPricingSection() {
             <span className="text-foreground font-medium tabular-nums">{GUEST_QUOTA.dailyPickerSessions}</span> 次。
             {landingCopy.pricingBelowPlansNote}{" "}
             <Button
+              type="button"
               variant="link"
               className="text-muted-foreground hover:text-foreground h-auto p-0 align-baseline text-xs md:text-sm"
-              render={<Link href="/subscription" />}
+              onClick={() => router.push("/app/account/subscription")}
             >
               {landingCopy.pricingCta}
             </Button>
@@ -585,6 +590,8 @@ function LandingPricingSection() {
 }
 
 export function LandingHero() {
+  const router = useRouter();
+
   return (
     <div className="bg-background">
       <section
@@ -614,7 +621,7 @@ export function LandingHero() {
                 "landing-hero-in landing-hero-in-delay-2 mt-7 flex w-full flex-col items-center justify-center gap-3 sm:flex-row sm:flex-wrap lg:justify-start",
               )}
             >
-              <Button className="min-w-44 px-8 shadow-sm" size="lg" render={<Link href="/app/analyze" />}>
+              <Button type="button" className="min-w-44 px-8 shadow-sm" size="lg" onClick={() => router.push("/app/analyze")}>
                 {landingCopy.heroCtaPrimary}
               </Button>
             </div>

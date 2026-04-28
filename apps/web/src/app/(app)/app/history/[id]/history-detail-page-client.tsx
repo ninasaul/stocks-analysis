@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useMemo } from "react";
 import { useArchiveStore } from "@/stores/use-archive-store";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
@@ -44,6 +43,7 @@ function formatPricePlain(n: number) {
 }
 
 export function HistoryDetailPageClient() {
+  const router = useRouter();
   const archiveHydrated = useStoreHydrated(useArchiveStore);
   const archives = useArchiveStore((s) => s.archives);
   const params = useParams();
@@ -68,16 +68,16 @@ export function HistoryDetailPageClient() {
       description="查看单条存档的结论、风险边界与执行计划。"
       actions={
         <>
-          <Button variant="outline" size="sm" render={<Link href="/app/history" />}>
+          <Button type="button" variant="outline" size="sm" onClick={() => router.push("/app/history")}>
             返回列表
           </Button>
           {olderEntry ? (
-            <Button variant="outline" size="sm" render={<Link href={`/app/history/${olderEntry.id}`} />}>
+            <Button type="button" variant="outline" size="sm" onClick={() => router.push(`/app/history/${olderEntry.id}`)}>
               上一条
             </Button>
           ) : null}
           {newerEntry ? (
-            <Button variant="outline" size="sm" render={<Link href={`/app/history/${newerEntry.id}`} />}>
+            <Button type="button" variant="outline" size="sm" onClick={() => router.push(`/app/history/${newerEntry.id}`)}>
               下一条
             </Button>
           ) : null}
@@ -90,7 +90,7 @@ export function HistoryDetailPageClient() {
             <EmptyTitle>未找到记录</EmptyTitle>
             <EmptyDescription>该记录不存在或已被清理，请返回列表重新选择。</EmptyDescription>
           </EmptyHeader>
-          <Button render={<Link href="/app/history" />}>返回列表</Button>
+          <Button type="button" onClick={() => router.push("/app/history")}>返回列表</Button>
         </Empty>
       ) : (
         <div className="flex flex-col gap-5">

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
@@ -1168,7 +1167,7 @@ function AnalyzePageContent() {
             <span className="block">支持代码或简称搜索；使用 CN.600519 可指定市场。</span>
           </InfoTip>
         </div>
-        <Button type="button" variant="outline" className="shrink-0" render={<Link href="/app/pick" />}>
+        <Button type="button" variant="outline" className="shrink-0" onClick={() => router.push("/app/pick")}>
           选股
         </Button>
       </div>
@@ -1716,7 +1715,7 @@ function AnalyzePageContent() {
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
             <AlertDialogCancel>关闭</AlertDialogCancel>
-            <Button type="button" variant="secondary" onClick={() => router.push("/subscription")}>
+            <Button type="button" variant="secondary" onClick={() => router.push("/app/account/subscription")}>
               {subscriptionTierPublicCopy.ctaViewPlansShort}
             </Button>
           </AlertDialogFooter>

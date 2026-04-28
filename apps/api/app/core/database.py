@@ -100,8 +100,10 @@ def execute_query(query: str, params: tuple = None, fetch: bool = True):
         with conn.cursor() as cursor:
             cursor.execute(query, params or ())
             # 如果是写操作（INSERT/UPDATE/DELETE），自动提交
-            query_upper = query.strip().upper()
-            if query_upper.startswith("INSERT") or query_upper.startswith("UPDATE") or query_upper.startswith("DELETE"):
+            # 使用正则表达式匹配，避免多行字符串的问题
+            import re
+            query_cleaned = re.sub(r'\s+', ' ', query.strip()).upper()
+            if query_cleaned.startswith(("INSERT", "UPDATE", "DELETE")):
                 conn.commit()
             if fetch:
                 return cursor.fetchall()

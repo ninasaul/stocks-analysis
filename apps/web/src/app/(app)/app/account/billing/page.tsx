@@ -1,11 +1,15 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { useSubscriptionStore, type SubscriptionOrder } from "@/stores/use-subscription-store";
+import { useAuthStore } from "@/stores/use-auth-store";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
+import { requestBillingOrders, requestCurrentMembership, type BillingOrderApiResult } from "@/lib/api/subscription";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Spinner } from "@/components/ui/spinner";
 import { PageLoadingState } from "@/components/features/page-state";
 
 function orderStatusLabel(status: SubscriptionOrder["status"]): string {
@@ -53,14 +57,119 @@ function formatPlacedAt(iso: string): string {
 }
 
 export default function AccountBillingPage() {
+  const router = useRouter();
+  const authHydrated = useStoreHydrated(useAuthStore);
   const subHydrated = useStoreHydrated(useSubscriptionStore);
+  const session = useAuthStore((s) => s.session);
+  const syncSession = useAuthStore((s) => s.syncSession);
   const orders = useSubscriptionStore((s) => s.orders);
   const currentPlanId = useSubscriptionStore((s) => s.currentPlanId);
   const periodEnd = useSubscriptionStore((s) => s.periodEnd);
   const billingCycle = useSubscriptionStore((s) => s.billingCycle);
   const getPlan = useSubscriptionStore((s) => s.getPlan);
+  const [membershipLoading, setMembershipLoading] = useState(false);
+  const [membershipError, setMembershipError] = useState<string | null>(null);
+  const [remoteMembership, setRemoteMembership] = useState<{
+    limit: number;
+    used: number;
+    remaining: number;
+  } | null>(null);
+  const [orderLoading, setOrderLoading] = useState(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
+  const [remoteOrders, setRemoteOrders] = useState<SubscriptionOrder[]>([]);
 
-  if (!subHydrated) {
+  const displayOrders = useMemo(() => (remoteOrders.length > 0 ? remoteOrders : orders), [remoteOrders, orders]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!authHydrated || session !== "user") {
+      return () => {
+        cancelled = true;
+      };
+    }
+    void (async () => {
+      setMembershipLoading(true);
+      setMembershipError(null);
+      try {
+        await syncSession();
+        const latest = useAuthStore.getState();
+        if (latest.session !== "user" || !latest.accessToken) {
+          throw new Error("登录状态已失效，请重新登录");
+        }
+        const membership = await requestCurrentMembership(latest.accessToken);
+        if (!cancelled) {
+          setRemoteMembership({
+            limit: membership.api_call_limit,
+            used: membership.api_call_used,
+            remaining: membership.api_call_remaining,
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMembershipError(error instanceof Error ? error.message : "获取用量失败");
+        }
+      } finally {
+        if (!cancelled) {
+          setMembershipLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authHydrated, session, syncSession]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!authHydrated || session !== "user") {
+      return () => {
+        cancelled = true;
+      };
+    }
+    void (async () => {
+      setOrderLoading(true);
+      setOrderError(null);
+      try {
+        await syncSession();
+        const latest = useAuthStore.getState();
+        if (latest.session !== "user" || !latest.accessToken) {
+          throw new Error("登录状态已失效，请重新登录");
+        }
+        const backendOrders = await requestBillingOrders(latest.accessToken);
+        if (!cancelled) {
+          setRemoteOrders(
+            backendOrders.map((item: BillingOrderApiResult) => {
+              const amountSource = item.amount_label ?? (typeof item.amount === "number" ? String(item.amount) : item.amount ?? "");
+              const amount = String(amountSource || "").trim();
+              const currency = (item.currency || "CNY").toUpperCase();
+              return {
+                id: String(item.id),
+                placedAt: item.created_at ?? item.placed_at ?? new Date().toISOString(),
+                planName: item.plan_name ?? "专业版",
+                amountLabel: amount.startsWith("¥") || amount.startsWith("$") ? amount : currency === "CNY" ? `¥${amount}` : `${currency} ${amount}`,
+                status: item.status,
+              };
+            }),
+          );
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setOrderError(error instanceof Error ? error.message : "获取订单失败");
+        }
+      } finally {
+        if (!cancelled) {
+          setOrderLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authHydrated, session, syncSession]);
+
+  if (!subHydrated || !authHydrated) {
     return (
       <PageLoadingState title="正在加载账单" description="请稍候，正在同步订单记录。" />
     );
@@ -98,7 +207,7 @@ export default function AccountBillingPage() {
           )}
         </CardContent>
         <CardFooter>
-          <Button variant="outline" render={<Link href="/subscription" prefetch />}>
+          <Button type="button" variant="outline" onClick={() => router.push("/app/account/subscription")}>
             订阅与用量
           </Button>
         </CardFooter>
@@ -106,17 +215,51 @@ export default function AccountBillingPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle>用量总览</CardTitle>
+          <CardDescription>同步后端会员用量计数，优先展示服务端统计结果。</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          {membershipLoading ? (
+            <p className="text-muted-foreground inline-flex items-center gap-2">
+              <Spinner />
+              正在同步用量...
+            </p>
+          ) : null}
+          {membershipError ? <p className="text-sm text-destructive">{membershipError}</p> : null}
+          {remoteMembership ? (
+            <>
+              <p>
+                本周期额度：<span className="font-medium tabular-nums">{remoteMembership.limit}</span>
+              </p>
+              <p>
+                已使用：<span className="font-medium tabular-nums">{remoteMembership.used}</span>，剩余{" "}
+                <span className="font-medium tabular-nums">{remoteMembership.remaining}</span>
+              </p>
+            </>
+          ) : (
+            <p className="text-muted-foreground">登录后可查看实时接口调用用量。</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>订单记录</CardTitle>
-          <CardDescription>
-            以下为本地演示环境生成的订单快照；正式环境以支付渠道与后台对账为准。
-          </CardDescription>
+          <CardDescription>优先展示后端账单订单；接口不可用时回退本地记录。</CardDescription>
         </CardHeader>
         <CardContent>
-          {orders.length === 0 ? (
+          {orderLoading ? (
+            <p className="text-muted-foreground inline-flex items-center gap-2 text-sm">
+              <Spinner />
+              正在同步后端订单...
+            </p>
+          ) : null}
+          {orderError ? <p className="text-sm text-destructive">{orderError}</p> : null}
+          {displayOrders.length === 0 ? (
             <p className="text-muted-foreground text-sm">暂无订单记录。开通或续费专业版后，将在此展示最近订单。</p>
           ) : (
             <ul className="divide-border flex flex-col divide-y rounded-md border">
-              {orders.map((o) => (
+              {displayOrders.map((o) => (
                 <li key={o.id} className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0 space-y-1">
                     <p className="text-sm font-medium">{o.planName}</p>

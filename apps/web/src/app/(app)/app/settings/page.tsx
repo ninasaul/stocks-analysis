@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo } from "react";
 import { MoonIcon, SunIcon, SunMoonIcon } from "lucide-react";
 import { useTheme } from "@/components/providers/theme-provider";
@@ -52,6 +52,7 @@ function appearanceModeLabel(theme: "light" | "dark" | "system"): string {
 }
 
 export default function SettingsBasicPage() {
+  const router = useRouter();
   const { theme, setTheme, resolvedTheme } = useTheme();
   const authHydrated = useStoreHydrated(useAuthStore);
   const subHydrated = useStoreHydrated(useSubscriptionStore);
@@ -150,13 +151,13 @@ export default function SettingsBasicPage() {
           <CardDescription>管理分析参数、通知和大模型配置。</CardDescription>
         </CardHeader>
         <CardFooter className="flex flex-wrap gap-2">
-          <Button variant="outline" render={<Link href="/app/settings/analysis" prefetch />}>
+          <Button type="button" variant="outline" onClick={() => router.push("/app/settings/analysis")}>
             分析设置
           </Button>
-          <Button variant="outline" render={<Link href="/app/settings/notifications" prefetch />}>
+          <Button type="button" variant="outline" onClick={() => router.push("/app/settings/notifications")}>
             通知设置
           </Button>
-          <Button variant="outline" render={<Link href="/app/settings/llm" prefetch />}>
+          <Button type="button" variant="outline" onClick={() => router.push("/app/settings/llm")}>
             大模型配置
           </Button>
         </CardFooter>
@@ -189,10 +190,10 @@ export default function SettingsBasicPage() {
           )}
         </CardContent>
         <CardFooter className="flex flex-wrap gap-2">
-          <Button variant="outline" render={<Link href="/app/account" prefetch />}>
+          <Button type="button" variant="outline" onClick={() => router.push("/app/account")}>
             我的账号
           </Button>
-          <Button variant="outline" render={<Link href="/subscription" prefetch />}>
+          <Button type="button" variant="outline" onClick={() => router.push("/app/account/subscription")}>
             订阅与用量
           </Button>
         </CardFooter>

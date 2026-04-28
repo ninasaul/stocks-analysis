@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { accountCopy } from "@/lib/copy";
@@ -152,7 +151,7 @@ export default function AccountPage() {
             ) : null}
           </CardContent>
           <CardFooter>
-            <Button variant="outline" render={<Link href="/subscription" />}>
+            <Button type="button" variant="outline" onClick={() => router.push("/app/account/subscription")}>
               查看订阅与用量
             </Button>
           </CardFooter>

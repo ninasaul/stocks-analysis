@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -75,10 +74,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Badge variant="outline" className="hidden text-xs sm:inline-flex">
                 {planName}
               </Badge>
-              <Button size="sm" variant="ghost" render={<Link href="/app/account" />}>
+              <Button type="button" size="sm" variant="ghost" onClick={() => router.push("/app/account")}>
                 我的账号
               </Button>
-              <Button size="sm" variant="secondary" render={<Link href="/subscription" />}>
+              <Button type="button" size="sm" variant="secondary" onClick={() => router.push("/app/account/subscription")}>
                 {subscriptionTierPublicCopy.ctaViewPlansShort}
               </Button>
             </div>

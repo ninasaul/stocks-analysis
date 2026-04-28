@@ -6,7 +6,7 @@ export const subscriptionTierPublicCopy = {
   proTierName: "专业版",
   subscriptionPageTitle: "订阅与会员",
   plansSectionTitle: "套餐与价格",
-  /** 与 `/subscription` 对齐的长按钮/链接 */
+  /** 与 `/app/account/subscription` 对齐的长按钮/链接 */
   ctaViewPlans: "查看订阅与价格",
   /** 页眉、对话框等窄位入口 */
   ctaViewPlansShort: "订阅与价格",
@@ -315,7 +315,7 @@ export const marketingFooterCopy = {
       title: "账户",
       links: [
         { href: "/login", label: "登录" },
-        { href: "/subscription", label: "订阅与配额" },
+        { href: "/app/account/subscription", label: "订阅与配额" },
         { href: "/app/analyze", label: "进入工作台" },
         { href: "/#landing-faq", label: "常见问题" },
       ],
