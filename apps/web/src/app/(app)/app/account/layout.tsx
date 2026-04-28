@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { AppPageLayout } from "@/components/features/app-page-layout";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -25,6 +24,7 @@ const sections = [
 ] as const;
 
 export default function AccountLayout({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const pathname = usePathname();
   const activeSectionLabel =
     sections.find((s) => s.isActive(pathname))?.label ?? "我的账号";
@@ -58,13 +58,8 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
                       "h-auto min-h-8 shrink-0 flex-col gap-0.5 px-3 py-2 text-left font-normal whitespace-normal lg:w-full",
                       "items-start justify-start",
                     )}
-                    render={
-                      <Link
-                        href={item.href}
-                        prefetch
-                        aria-current={active ? "page" : undefined}
-                      />
-                    }
+                    aria-current={active ? "page" : undefined}
+                    onClick={() => router.push(item.href)}
                   >
                     <span className="text-sm font-medium">{item.label}</span>
                     <span className="hidden text-xs text-muted-foreground lg:block">{item.hint}</span>

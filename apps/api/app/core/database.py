@@ -99,9 +99,14 @@ def execute_query(query: str, params: tuple = None, fetch: bool = True):
     with db_manager.get_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(query, params or ())
+            # 如果是写操作（INSERT/UPDATE/DELETE），自动提交
+            # 使用正则表达式匹配，避免多行字符串的问题
+            import re
+            query_cleaned = re.sub(r'\s+', ' ', query.strip()).upper()
+            if query_cleaned.startswith(("INSERT", "UPDATE", "DELETE")):
+                conn.commit()
             if fetch:
                 return cursor.fetchall()
-            conn.commit()
             return None
 
 

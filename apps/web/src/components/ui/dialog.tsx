@@ -43,12 +43,9 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
-  closeSrOnlyLabel = "Close",
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
-  /** Screen reader label for the corner close control (visible icon unchanged). */
-  closeSrOnlyLabel?: string
 }) {
   return (
     <DialogPortal>
@@ -75,7 +72,7 @@ function DialogContent({
           >
             <XIcon
             />
-            <span className="sr-only">{closeSrOnlyLabel}</span>
+            <span className="sr-only">Close</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Popup>

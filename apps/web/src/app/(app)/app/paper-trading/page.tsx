@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChartLineIcon, CircleHelpIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -164,6 +164,7 @@ function InfoTip({ label, children }: { label: string; children: ReactNode }) {
 }
 
 export default function PaperTradingPage() {
+  const router = useRouter();
   const hydrated = useStoreHydrated(usePaperTradingStore);
   const authSession = useAuthStore((s) => s.session);
   const cashCny = usePaperTradingStore((s) => s.cashCny);
@@ -412,7 +413,7 @@ export default function PaperTradingPage() {
       }
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" render={<Link href="/app/analyze" />}>
+          <Button type="button" variant="outline" onClick={() => router.push("/app/analyze")}>
             去预测
           </Button>
           <Button type="button" variant="outline" onClick={() => setResetOpen(true)}>
@@ -658,12 +659,13 @@ export default function PaperTradingPage() {
                           </p>
                         </div>
                         <Button
+                          type="button"
                           size="sm"
                           variant="ghost"
-                          render={
-                            <Link
-                              href={`/app/analyze?stockCode=${encodeURIComponent(`${selected.market}.${selected.symbol}`)}`}
-                            />
+                          onClick={() =>
+                            router.push(
+                              `/app/analyze?stockCode=${encodeURIComponent(`${selected.market}.${selected.symbol}`)}`,
+                            )
                           }
                         >
                           <ChartLineIcon />

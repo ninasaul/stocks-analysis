@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { loginCopy } from "@/lib/copy";
@@ -64,7 +63,7 @@ export function WechatLoginCallback() {
       {err ? (
         <>
           <p className="text-destructive text-center text-sm">{err}</p>
-          <Button render={<Link href="/login" />}>返回登录</Button>
+          <Button type="button" onClick={() => router.push("/login")}>返回登录</Button>
         </>
       ) : (
         <p className="text-muted-foreground text-sm">{msg ?? "处理中…"}</p>

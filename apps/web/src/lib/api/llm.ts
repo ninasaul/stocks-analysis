@@ -27,6 +27,14 @@ export type LlmSettingsPayload = {
 
 export type LlmSettingsWithConfigId = LlmSettingsPayload & {
   configId?: number;
+  configName?: string;
+};
+
+export type UserLlmConfigItem = {
+  id: number;
+  name: string;
+  isActive: boolean;
+  provider: LlmProviderOption;
 };
 
 export type LlmConfigTestResult = {
@@ -64,6 +72,13 @@ type UserConfigPayload = {
     maxTokens?: number;
     max_tokens?: number;
     seed?: number;
+  };
+};
+
+type PreferencePayload = {
+  has_preference?: boolean;
+  preference?: {
+    user_config_id?: number;
   };
 };
 
@@ -111,13 +126,28 @@ async function requestWithCandidates<T>(
 }
 
 export async function requestLlmSettings(authenticatedFetch: FetchLike): Promise<LlmSettingsPayload> {
-  const listResponse = await authenticatedFetch(joinUrl("/api/llm/user/configs"), { method: "GET" });
-  if (!listResponse.ok) {
-    throw new Error(await parseApiError(listResponse));
+  const preference = await requestUserLlmPreference(authenticatedFetch);
+  let config: UserConfigPayload | undefined;
+
+  if (preference.configId) {
+    try {
+      config = await requestLlmConfigById(preference.configId, authenticatedFetch);
+    } catch {
+      config = undefined;
+    }
+  } else {
+    const list = await requestUserLlmConfigs(authenticatedFetch);
+    if (list.length > 0) {
+      config = await requestLlmConfigById(list[0].id, authenticatedFetch);
+    }
   }
-  const listPayload = (await listResponse.json()) as { configs?: UserConfigPayload[] };
-  const active = (listPayload.configs ?? []).find((item) => item.is_active !== false);
-  const config = active ?? listPayload.configs?.[0];
+
+  if (!config) {
+    const list = await requestUserLlmConfigs(authenticatedFetch);
+    if (list.length > 0) {
+      config = await requestLlmConfigById(list[0].id, authenticatedFetch);
+    }
+  }
 
   if (!config) {
     return {
@@ -143,6 +173,7 @@ export async function requestLlmSettings(authenticatedFetch: FetchLike): Promise
     maxTokens: Number(config.config?.maxTokens ?? config.config?.max_tokens ?? 2048),
     seed: Number(config.config?.seed ?? 42),
     configId: config.id,
+    configName: config.name,
   } as LlmSettingsWithConfigId;
 }
 
@@ -150,9 +181,10 @@ export async function requestSaveLlmSettings(
   payload: LlmSettingsPayload,
   authenticatedFetch: FetchLike,
   configId?: number,
+  configName?: string,
 ): Promise<LlmSettingsWithConfigId> {
   const requestPayload = {
-    name: "default-web-config",
+    name: configName ?? "",
     provider: payload.provider,
     api_key: payload.apiKey,
     base_url: payload.baseUrl,
@@ -186,14 +218,106 @@ export async function requestSaveLlmSettings(
     enabled: Boolean(savedConfig.is_active ?? savedConfig.config?.enabled ?? payload.enabled),
     provider: (savedConfig.provider as LlmProviderOption | undefined) ?? payload.provider,
     baseUrl: String(savedConfig.base_url ?? payload.baseUrl),
-    apiKey: String(savedConfig.api_key ?? payload.apiKey),
+    apiKey: payload.apiKey,
     model: String(savedConfig.model ?? payload.model),
     temperature: Number(savedConfig.config?.temperature ?? payload.temperature),
     topP: Number(savedConfig.config?.topP ?? savedConfig.config?.top_p ?? payload.topP),
     maxTokens: Number(savedConfig.config?.maxTokens ?? savedConfig.config?.max_tokens ?? payload.maxTokens),
     seed: Number(savedConfig.config?.seed ?? payload.seed),
     configId: savedConfigId,
+    configName: savedConfig.name,
   };
+}
+
+export async function requestLlmConfigById(configId: number, authenticatedFetch: FetchLike): Promise<UserConfigPayload | undefined> {
+  const response = await authenticatedFetch(joinUrl(`/api/llm/user/configs/${configId}`), { method: "GET" });
+  if (!response.ok) {
+    throw new Error(await parseApiError(response));
+  }
+  const payload = (await response.json()) as { config?: UserConfigPayload };
+  return payload.config;
+}
+
+export async function requestUserLlmConfig(configId: number, authenticatedFetch: FetchLike): Promise<LlmSettingsWithConfigId> {
+  const config = await requestLlmConfigById(configId, authenticatedFetch);
+  if (!config) {
+    throw new Error("配置不存在");
+  }
+
+  return {
+    enabled: Boolean(config.is_active ?? config.config?.enabled ?? true),
+    provider: config.provider ?? "custom",
+    baseUrl: String(config.base_url ?? ""),
+    apiKey: String(config.api_key ?? ""),
+    model: String(config.model ?? ""),
+    temperature: Number(config.config?.temperature ?? 0.1),
+    topP: Number(config.config?.topP ?? config.config?.top_p ?? 1),
+    maxTokens: Number(config.config?.maxTokens ?? config.config?.max_tokens ?? 2048),
+    seed: Number(config.config?.seed ?? 42),
+    configId: config.id,
+    configName: config.name,
+  };
+}
+
+export async function requestUserLlmConfigs(
+  authenticatedFetch: FetchLike,
+): Promise<UserLlmConfigItem[]> {
+  const response = await authenticatedFetch(joinUrl("/api/llm/user/configs"), { method: "GET" });
+  if (!response.ok) {
+    throw new Error(await parseApiError(response));
+  }
+  const payload = (await response.json()) as { configs?: UserConfigPayload[] };
+  return (payload.configs ?? []).map((item) => ({
+    id: item.id,
+    name: String(item.name ?? `配置-${item.id}`),
+    isActive: Boolean(item.is_active ?? false),
+    provider: item.provider ?? "custom",
+  }));
+}
+
+export async function requestUserLlmPreference(
+  authenticatedFetch: FetchLike,
+): Promise<{ configId?: number }> {
+  const response = await authenticatedFetch(joinUrl("/api/llm/user/preference"), { method: "GET" });
+  if (!response.ok) {
+    throw new Error(await parseApiError(response));
+  }
+  const payload = (await response.json()) as PreferencePayload;
+  return {
+    configId: payload.preference?.user_config_id,
+  };
+}
+
+export async function requestSetUserLlmPreference(configId: number, authenticatedFetch: FetchLike): Promise<void> {
+  const body = JSON.stringify({ user_config_id: configId });
+  const candidates: CandidateRequest[] = [
+    {
+      path: "/api/llm/user/preference",
+      init: { method: "PUT", headers: { "Content-Type": "application/json" }, body },
+    },
+    {
+      path: "/api/llm/user/preference",
+      init: { method: "POST", headers: { "Content-Type": "application/json" }, body },
+    },
+  ];
+  let response: Response | null = null;
+  for (const candidate of candidates) {
+    response = await authenticatedFetch(joinUrl(candidate.path), candidate.init);
+    if (response.ok) return;
+    if (!canFallback(response.status)) break;
+  }
+  if (response) {
+    throw new Error(await parseApiError(response));
+  }
+}
+
+export async function requestDeleteUserLlmPreference(authenticatedFetch: FetchLike): Promise<void> {
+  const response = await authenticatedFetch(joinUrl("/api/llm/user/preference"), {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw new Error(await parseApiError(response));
+  }
 }
 
 export async function requestLlmModels(

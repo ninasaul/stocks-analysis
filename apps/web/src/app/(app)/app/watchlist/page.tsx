@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChartLineIcon, EllipsisVerticalIcon, Trash2Icon } from "lucide-react";
@@ -383,7 +382,7 @@ export default function WatchlistPage() {
           : "同一搜索框可筛选自选或在匹配结果中回车加入自选；游客模式数据保存在当前浏览器。"
       }
       actions={
-        <Button variant="outline" render={<Link href="/app/analyze" />}>
+        <Button type="button" variant="outline" onClick={() => router.push("/app/analyze")}>
           去预测
         </Button>
       }

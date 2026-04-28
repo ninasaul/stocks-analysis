@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -632,7 +631,10 @@ function ChatTimelineSection({
       <div className="relative h-full min-h-0 flex-1">
         <ScrollArea
           className="size-full overscroll-contain"
-          viewportRef={chatViewportRef}
+          ref={(root) => {
+            chatViewportRef.current =
+              root?.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]') ?? null;
+          }}
           role="log"
           aria-live="polite"
           aria-relevant="additions text"
@@ -1796,7 +1798,7 @@ export default function PickPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>关闭</AlertDialogCancel>
-            <Button type="button" render={<Link href="/app/account/subscription" />}>
+            <Button type="button" onClick={() => router.push("/app/account/subscription")}>
               {subscriptionTierPublicCopy.ctaViewPlansShort}
             </Button>
           </AlertDialogFooter>

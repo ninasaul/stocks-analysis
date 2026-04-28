@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useSubscriptionStore, type SubscriptionOrder } from "@/stores/use-subscription-store";
 import { useAuthStore } from "@/stores/use-auth-store";
@@ -57,6 +57,7 @@ function formatPlacedAt(iso: string): string {
 }
 
 export default function AccountBillingPage() {
+  const router = useRouter();
   const authHydrated = useStoreHydrated(useAuthStore);
   const subHydrated = useStoreHydrated(useSubscriptionStore);
   const session = useAuthStore((s) => s.session);
@@ -206,7 +207,7 @@ export default function AccountBillingPage() {
           )}
         </CardContent>
         <CardFooter>
-          <Button variant="outline" render={<Link href="/app/account/subscription" prefetch />}>
+          <Button type="button" variant="outline" onClick={() => router.push("/app/account/subscription")}>
             订阅与用量
           </Button>
         </CardFooter>

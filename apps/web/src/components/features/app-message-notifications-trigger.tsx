@@ -1,12 +1,13 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { BellIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
 import { selectUnreadMessageCount, useMessagesStore } from "@/stores/use-messages-store";
 
 export function AppMessageNotificationsTrigger() {
+  const router = useRouter();
   const messagesHydrated = useStoreHydrated(useMessagesStore);
   const unread = useMessagesStore(selectUnreadMessageCount);
 
@@ -17,10 +18,12 @@ export function AppMessageNotificationsTrigger() {
 
   return (
     <Button
+      type="button"
       size="icon-sm"
       variant="ghost"
       className="relative"
-      render={<Link href="/app/messages" prefetch aria-label={label} />}
+      aria-label={label}
+      onClick={() => router.push("/app/messages")}
     >
       <BellIcon className="size-4" aria-hidden />
       {messagesHydrated && unread > 0 ? (

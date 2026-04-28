@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -23,6 +22,7 @@ const labels: Record<string, string> = {
 };
 
 export function AppBreadcrumb() {
+  const router = useRouter();
   const pathname = usePathname();
   const segments = pathname.split("/").filter(Boolean);
 
@@ -69,7 +69,11 @@ export function AppBreadcrumb() {
               {c.current ? (
                 <BreadcrumbPage>{c.label}</BreadcrumbPage>
               ) : (
-                <BreadcrumbLink render={<Link href={c.href} />}>{c.label}</BreadcrumbLink>
+                <BreadcrumbLink
+                  render={<button type="button" onClick={() => router.push(c.href)} />}
+                >
+                  {c.label}
+                </BreadcrumbLink>
               )}
             </BreadcrumbItem>
           </span>

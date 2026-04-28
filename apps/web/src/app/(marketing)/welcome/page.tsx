@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import {
   Card,
   CardContent,
@@ -8,7 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { subscriptionTierPublicCopy, welcomeCopy } from "@/lib/copy";
@@ -57,13 +56,13 @@ export default function WelcomePage() {
         <AlertTitle>合规边界</AlertTitle>
         <AlertDescription className="leading-relaxed">
           不提供交易执行、不读取券商账户、不对收益作出承诺。输出均为研究结论与风险提示；详见
-          <Button variant="link" className="mx-1 h-auto p-0 text-sm align-baseline" render={<Link href="/terms" />}>
+          <a className={buttonVariants({ variant: "link", className: "mx-1 h-auto p-0 text-sm align-baseline" })} href="/terms">
             服务条款
-          </Button>
+          </a>
           与
-          <Button variant="link" className="mx-1 h-auto p-0 text-sm align-baseline" render={<Link href="/privacy" />}>
+          <a className={buttonVariants({ variant: "link", className: "mx-1 h-auto p-0 text-sm align-baseline" })} href="/privacy">
             隐私政策
-          </Button>
+          </a>
           。
         </AlertDescription>
       </Alert>
@@ -78,9 +77,9 @@ export default function WelcomePage() {
                 <CardDescription className="text-pretty">{m.desc}</CardDescription>
               </CardHeader>
               <CardFooter className="mt-auto">
-                <Button size="sm" render={<Link href={m.href} />}>
+                <a className={buttonVariants({ size: "sm" })} href={m.href}>
                   {m.cta}
-                </Button>
+                </a>
               </CardFooter>
             </Card>
           ))}
@@ -107,10 +106,10 @@ export default function WelcomePage() {
       </Card>
 
       <div className="flex flex-wrap gap-2">
-        <Button render={<Link href="/" />}>返回首页</Button>
-        <Button variant="secondary" render={<Link href="/app/analyze" />}>
+        <a className={buttonVariants()} href="/">返回首页</a>
+        <a className={buttonVariants({ variant: "secondary" })} href="/app/analyze">
           进入工作台
-        </Button>
+        </a>
       </div>
     </div>
   );

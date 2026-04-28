@@ -1,4 +1,3 @@
-import Link from "next/link";
 import Image from "next/image";
 import { marketingFooterCopy } from "@/lib/copy";
 
@@ -10,7 +9,7 @@ export function ComplianceFooter() {
       <div className="mx-auto max-w-6xl px-4 pt-12 pb-10 md:px-6">
         <div className="flex flex-col gap-8 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
           <div className="min-w-0 w-full max-w-md space-y-3 lg:max-w-2xl lg:flex-1">
-            <Link
+            <a
               href="/"
               className="focus-visible:ring-ring/50 inline-flex items-center gap-2 rounded-md outline-none focus-visible:ring-2"
               aria-label="返回首页"
@@ -30,7 +29,7 @@ export function ComplianceFooter() {
                 className="hidden dark:block"
               />
               <span className="text-foreground text-sm font-semibold tracking-tight">智谱投研</span>
-            </Link>
+            </a>
             <p className="text-muted-foreground text-sm leading-relaxed">{marketingFooterCopy.brandTagline}</p>
             <p className="text-muted-foreground text-xs leading-relaxed">{marketingFooterCopy.brandDisclaimer}</p>
           </div>
@@ -45,12 +44,12 @@ export function ComplianceFooter() {
                 <ul className="mt-2 space-y-1.5">
                   {column.links.map((item) => (
                     <li key={`${column.title}-${item.href}-${item.label}`}>
-                      <Link
+                      <a
                         href={item.href}
                         className="text-muted-foreground hover:text-foreground text-xs transition-colors"
                       >
                         {item.label}
-                      </Link>
+                      </a>
                     </li>
                   ))}
                 </ul>
@@ -64,12 +63,12 @@ export function ComplianceFooter() {
             © {year} 智谱投研。保留所有权利。
           </p>
           <nav className="flex flex-wrap gap-x-6 gap-y-2 text-xs" aria-label="法律链接">
-            <Link href="/terms" className="text-muted-foreground hover:text-foreground transition-colors">
+            <a href="/terms" className="text-muted-foreground hover:text-foreground transition-colors">
               服务条款
-            </Link>
-            <Link href="/privacy" className="text-muted-foreground hover:text-foreground transition-colors">
+            </a>
+            <a href="/privacy" className="text-muted-foreground hover:text-foreground transition-colors">
               隐私政策
-            </Link>
+            </a>
           </nav>
         </div>
       </div>

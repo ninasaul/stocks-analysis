@@ -1,5 +1,4 @@
 import Image from "next/image";
-import Link from "next/link";
 import { FallingPattern } from "@/components/features/falling-pattern";
 import { ThemeSwitcher } from "@/components/features/theme-switcher";
 
@@ -21,7 +20,7 @@ export default function AuthLayout({
       </a>
       <header className="sticky top-0 z-30">
         <div className="flex w-full items-center justify-between gap-3 px-4 py-3 md:px-6">
-          <Link
+          <a
             href="/"
             className="focus-visible:ring-ring/50 inline-flex items-center gap-2 rounded-lg px-1 py-1 outline-none transition-opacity hover:opacity-80 focus-visible:ring-2"
             aria-label="返回首页"
@@ -43,7 +42,7 @@ export default function AuthLayout({
               priority
             />
             <span className="text-sm font-semibold tracking-tight md:text-base">智谱投研</span>
-          </Link>
+          </a>
           <ThemeSwitcher />
         </div>
       </header>

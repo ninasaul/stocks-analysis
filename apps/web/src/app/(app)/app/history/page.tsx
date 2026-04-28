@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, type ReactNode } from "react";
 import { CircleHelpIcon } from "lucide-react";
 import { historyCopy } from "@/lib/copy";
@@ -184,6 +184,8 @@ function ListSummaryCards({ stats }: { stats: HistoryStats }) {
 }
 
 function ArchiveTableCard({ archives }: { archives: ArchiveEntry[] }) {
+  const router = useRouter();
+
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center">
@@ -237,7 +239,7 @@ function ArchiveTableCard({ archives }: { archives: ArchiveEntry[] }) {
                   <RenderExpectedReturn archive={archive} />
                 </TableCell>
                 <TableCell className="text-right">
-                  <Button size="sm" variant="ghost" render={<Link href={`/app/history/${archive.id}`} />}>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => router.push(`/app/history/${archive.id}`)}>
                     详情
                   </Button>
                 </TableCell>
@@ -251,6 +253,8 @@ function ArchiveTableCard({ archives }: { archives: ArchiveEntry[] }) {
 }
 
 function ListTabContent({ archives, stats }: { archives: ArchiveEntry[]; stats: HistoryStats | null }) {
+  const router = useRouter();
+
   return (
     <TabsContent value="list" className="mt-3 flex flex-col gap-4">
       {stats ? <ListSummaryCards stats={stats} /> : null}
@@ -260,7 +264,7 @@ function ListTabContent({ archives, stats }: { archives: ArchiveEntry[]; stats: 
             <EmptyTitle>暂无记录</EmptyTitle>
             <EmptyDescription>完成一次股票预测后，将在此出现条目。</EmptyDescription>
           </EmptyHeader>
-          <Button render={<Link href="/app/analyze" />}>去分析</Button>
+          <Button type="button" onClick={() => router.push("/app/analyze")}>去分析</Button>
         </Empty>
       ) : (
         <ArchiveTableCard archives={archives} />
