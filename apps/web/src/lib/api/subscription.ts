@@ -23,6 +23,17 @@ export type MembershipApiResult = {
   updated_at: string;
 };
 
+export type BillingOrderApiResult = {
+  id: string | number;
+  created_at?: string;
+  placed_at?: string;
+  plan_name?: string;
+  amount_label?: string;
+  amount?: number | string;
+  currency?: string;
+  status: "paid" | "pending" | "failed" | "cancelled";
+};
+
 type ApiErrorPayload = {
   message?: string;
   error?: string;
@@ -78,6 +89,32 @@ export async function requestCurrentMembership(accessToken: string): Promise<Mem
     const response = await fetch(joinUrl(path), { method: "GET", headers });
     if (response.ok) {
       return (await response.json()) as MembershipApiResult;
+    }
+    lastErrorResponse = response;
+    if (response.status !== 404) {
+      break;
+    }
+  }
+  throw new Error(await parseApiError(lastErrorResponse));
+}
+
+export async function requestBillingOrders(accessToken: string): Promise<BillingOrderApiResult[]> {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+  };
+  const candidates = [
+    "/api/users/me/billing/orders",
+    "/api/billing/orders",
+    "/users/me/billing/orders",
+    "/billing/orders",
+  ];
+  let lastErrorResponse: Response | null = null;
+  for (const path of candidates) {
+    const response = await fetch(joinUrl(path), { method: "GET", headers });
+    if (response.ok) {
+      const payload = (await response.json()) as BillingOrderApiResult[] | { items?: BillingOrderApiResult[] };
+      if (Array.isArray(payload)) return payload;
+      return Array.isArray(payload.items) ? payload.items : [];
     }
     lastErrorResponse = response;
     if (response.status !== 404) {

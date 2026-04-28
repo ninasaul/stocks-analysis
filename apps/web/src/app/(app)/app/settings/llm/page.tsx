@@ -1,8 +1,10 @@
 "use client";
 
-import { useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import Image from "next/image";
 import {
+  CircleHelpIcon,
+  CircleAlertIcon,
   ChevronDownIcon,
   DownloadIcon,
   EyeIcon,
@@ -14,15 +16,33 @@ import {
 import { toast } from "sonner";
 import { useLlmRuntimeOptionsStore } from "@/stores/use-llm-runtime-options-store";
 import type { LlmProviderOption, LlmRuntimeOptionsState } from "@/stores/use-llm-runtime-options-store";
+import { useAuthStore } from "@/stores/use-auth-store";
+import { useStoreHydrated } from "@/hooks/use-store-hydrated";
+import {
+  requestDeleteLlmConfig,
+  requestLlmSettings,
+  requestSaveLlmSettings,
+  requestTestLlmConfig,
+  requestUpdateLlmEnabledOnly,
+} from "@/lib/api/llm";
 import { useTheme } from "@/components/providers/theme-provider";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Field,
   FieldContent,
   FieldDescription,
   FieldGroup,
-  FieldLegend,
   FieldLabel,
   FieldSet,
   FieldTitle,
@@ -45,6 +65,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const PROVIDER_OPTIONS: { value: LlmProviderOption; label: string }[] = [
   { value: "default", label: "跟随服务端默认" },
@@ -97,6 +118,34 @@ const PROVIDER_ENDPOINT_HINTS: Partial<Record<LlmProviderOption, { url: string; 
   openrouter: { url: "https://openrouter.ai/api/v1" },
 };
 
+function sanitizeBaseUrlInput(input: string): string {
+  let value = input
+    .replace(/\u3000/g, " ")
+    .trim()
+    .replace(/^['"`]+|['"`]+$/g, "")
+    .replace(/\s+/g, "");
+  if (!value) return "";
+
+  if (!/^https?:\/\//i.test(value) && /^[a-z0-9.-]+\.[a-z]{2,}/i.test(value)) {
+    value = `https://${value}`;
+  }
+
+  try {
+    const parsed = new URL(value);
+    parsed.hash = "";
+    parsed.search = "";
+    let pathname = parsed.pathname.replace(/\/+$/, "");
+    pathname = pathname
+      .replace(/\/models$/i, "")
+      .replace(/\/chat\/completions$/i, "")
+      .replace(/\/v1beta\/openai\/chat\/completions$/i, "/v1beta/openai");
+    parsed.pathname = pathname || "";
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return value.replace(/\/+$/, "");
+  }
+}
+
 function normalizeImportedSettings(input: unknown): LlmRuntimeOptionsState {
   const raw = (input ?? {}) as Partial<LlmRuntimeOptionsState> & Record<string, unknown>;
   const provider: LlmProviderOption =
@@ -138,7 +187,25 @@ export default function SettingsLlmPage() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [loadingModels, setLoadingModels] = useState(false);
+  const [validatingBeforeSave, setValidatingBeforeSave] = useState(false);
+  const [syncingRemote, setSyncingRemote] = useState(false);
+  const [savingRemote, setSavingRemote] = useState(false);
+  const [testingRemote, setTestingRemote] = useState(false);
+  const [syncingToggleRemote, setSyncingToggleRemote] = useState(false);
+  const [remoteSynced, setRemoteSynced] = useState(false);
+  const [remoteConfigId, setRemoteConfigId] = useState<number | undefined>(undefined);
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
+  const [lastSavedSignature, setLastSavedSignature] = useState<string>("");
+  const [errorDialogOpen, setErrorDialogOpen] = useState(false);
+  const [errorDialogTitle, setErrorDialogTitle] = useState("操作失败");
+  const [errorDialogMessage, setErrorDialogMessage] = useState("");
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [resettingRemote, setResettingRemote] = useState(false);
+  const authHydrated = useStoreHydrated(useAuthStore);
+  const session = useAuthStore((s) => s.session);
+  const accessToken = useAuthStore((s) => s.accessToken);
+  const syncSession = useAuthStore((s) => s.syncSession);
+  const authenticatedFetch = useAuthStore((s) => s.authenticatedFetch);
   const enabled = useLlmRuntimeOptionsStore((s) => s.enabled);
   const provider = useLlmRuntimeOptionsStore((s) => s.provider);
   const baseUrl = useLlmRuntimeOptionsStore((s) => s.baseUrl);
@@ -165,8 +232,89 @@ export default function SettingsLlmPage() {
   const { resolvedTheme } = useTheme();
   const logoTheme = resolvedTheme === "dark" ? "dark" : "light";
   const selectedProviderLogo = PROVIDER_LOGO_NAME[provider];
+  const canSyncRemote = authHydrated && session === "user";
+  const authIdentity = `${session}:${accessToken ?? ""}`;
+  const trimmedBaseUrl = baseUrl.trim();
+  const trimmedApiKey = apiKey.trim();
+  const trimmedModel = model.trim();
+  const requiredConfigHints = useMemo(() => {
+    if (!enabled) return [] as string[];
+    const missing: string[] = [];
+    if (!trimmedBaseUrl) missing.push("请填写请求地址");
+    if (!trimmedApiKey) missing.push("请填写 API Key");
+    if (!trimmedModel) missing.push("请填写模型名称");
+    return missing;
+  }, [enabled, trimmedApiKey, trimmedBaseUrl, trimmedModel]);
+  const hasRequiredConfig = requiredConfigHints.length === 0;
+  const canFetchModels = enabled && Boolean(trimmedBaseUrl) && Boolean(trimmedApiKey);
+  const canSaveRemote = canSyncRemote && !savingRemote && (!enabled || hasRequiredConfig);
+  const canTestRemote = canSyncRemote && !testingRemote && !!remoteConfigId;
+  const currentSignature = useMemo(
+    () =>
+      JSON.stringify({
+        enabled,
+        provider,
+        baseUrl: trimmedBaseUrl,
+        apiKey: trimmedApiKey,
+        model: trimmedModel,
+        temperature,
+        topP,
+        maxTokens,
+        seed,
+      }),
+    [enabled, provider, trimmedBaseUrl, trimmedApiKey, trimmedModel, temperature, topP, maxTokens, seed],
+  );
+  const hasUnsavedChanges = Boolean(lastSavedSignature) && currentSignature !== lastSavedSignature;
+  const showError = useCallback((message: string, title = "操作失败") => {
+    setErrorDialogTitle(title);
+    setErrorDialogMessage(message);
+    setErrorDialogOpen(true);
+  }, []);
+  const handleEnabledChange = useCallback(
+    async (nextChecked: boolean) => {
+      const nextEnabled = Boolean(nextChecked);
+      setEnabled(nextEnabled);
 
-  const applyImportedSettings = (snapshot: LlmRuntimeOptionsState) => {
+      if (!canSyncRemote || !remoteConfigId) {
+        return;
+      }
+
+      setSyncingToggleRemote(true);
+      try {
+        await syncSession();
+        const saved = await requestUpdateLlmEnabledOnly(remoteConfigId, nextEnabled, authenticatedFetch);
+        setRemoteConfigId(saved.configId);
+        setLastSavedSignature(
+          JSON.stringify({
+            enabled: Boolean(saved.enabled),
+            provider: saved.provider,
+            baseUrl: String(saved.baseUrl ?? "").trim(),
+            apiKey: String(saved.apiKey ?? "").trim(),
+            model: String(saved.model ?? "").trim(),
+            temperature: Number(saved.temperature ?? 0.1),
+            topP: Number(saved.topP ?? 1),
+            maxTokens: Number(saved.maxTokens ?? 2048),
+            seed: Number(saved.seed ?? 42),
+          }),
+        );
+      } catch (error) {
+        setEnabled(!nextEnabled);
+        showError(error instanceof Error ? error.message : "开关状态同步失败，请稍后重试。", "同步失败");
+      } finally {
+        setSyncingToggleRemote(false);
+      }
+    },
+    [
+      authenticatedFetch,
+      canSyncRemote,
+      remoteConfigId,
+      setEnabled,
+      showError,
+      syncSession,
+    ],
+  );
+
+  const applyImportedSettings = useCallback((snapshot: LlmRuntimeOptionsState) => {
     setEnabled(snapshot.enabled);
     setProvider(snapshot.provider);
     setBaseUrl(snapshot.baseUrl);
@@ -176,7 +324,7 @@ export default function SettingsLlmPage() {
     setTopP(snapshot.topP);
     setMaxTokens(snapshot.maxTokens);
     setSeed(snapshot.seed);
-  };
+  }, [setApiKey, setBaseUrl, setEnabled, setMaxTokens, setModel, setProvider, setSeed, setTemperature, setTopP]);
 
   const handleExport = () => {
     const payload = {
@@ -214,7 +362,7 @@ export default function SettingsLlmPage() {
       applyImportedSettings(normalized);
       toast.success("已导入参数模板并完成边界修正。");
     } catch {
-      toast.error("导入失败，请检查 JSON 格式后重试。");
+      showError("导入失败，请检查 JSON 格式后重试。", "导入失败");
     } finally {
       event.target.value = "";
     }
@@ -222,25 +370,26 @@ export default function SettingsLlmPage() {
 
   const handleFetchModels = async () => {
     if (!enabled) {
-      toast.error("请先启用自定义参数。");
+      showError("请先启用自定义参数。", "无法拉取模型");
       return;
     }
-    if (!baseUrl.trim()) {
-      toast.error("请先填写请求地址。");
+    if (!trimmedBaseUrl) {
+      showError("请先填写请求地址。", "无法拉取模型");
       return;
     }
-    if (!apiKey.trim()) {
-      toast.error("请先填写 API Key。");
+    if (!trimmedApiKey) {
+      showError("请先填写 API Key。", "无法拉取模型");
       return;
     }
     setLoadingModels(true);
     try {
-      const normalizedBase = baseUrl.trim().replace(/\/+$/, "");
+      let list: string[] = [];
+      const normalizedBase = trimmedBaseUrl.replace(/\/+$/, "");
       const modelUrl = normalizedBase.endsWith("/models") ? normalizedBase : `${normalizedBase}/models`;
       const response = await fetch(modelUrl, {
         method: "GET",
         headers: {
-          Authorization: `Bearer ${apiKey.trim()}`,
+          Authorization: `Bearer ${trimmedApiKey}`,
           "Content-Type": "application/json",
         },
       });
@@ -250,6 +399,7 @@ export default function SettingsLlmPage() {
       const payload = (await response.json()) as {
         data?: Array<{ id?: string }>;
         models?: Array<{ id?: string; name?: string }>;
+        items?: Array<{ id?: string; name?: string }>;
       };
       const fromData = Array.isArray(payload.data)
         ? payload.data.map((x) => String(x?.id ?? "").trim()).filter(Boolean)
@@ -259,27 +409,307 @@ export default function SettingsLlmPage() {
             .map((x) => String(x?.id ?? x?.name ?? "").trim())
             .filter(Boolean)
         : [];
-      const list = [...new Set([...fromData, ...fromModels])];
+      const fromItems = Array.isArray(payload.items)
+        ? payload.items
+            .map((x) => String(x?.id ?? x?.name ?? "").trim())
+            .filter(Boolean)
+        : [];
+      list = [...new Set([...fromData, ...fromModels, ...fromItems])];
       if (!list.length) {
         throw new Error("empty_models");
       }
       setFetchedModels(list);
       toast.success(`已拉取 ${list.length} 个模型。`);
     } catch {
-      toast.error("模型列表拉取失败，请检查请求地址、API Key 或跨域策略。");
+      showError("模型列表拉取失败，请检查请求地址与 API Key 是否有效。", "拉取失败");
     } finally {
       setLoadingModels(false);
     }
   };
 
+  const fetchModelsDirectly = useCallback(async () => {
+    const normalizedBase = trimmedBaseUrl.replace(/\/+$/, "");
+    const modelUrl = normalizedBase.endsWith("/models") ? normalizedBase : `${normalizedBase}/models`;
+    const response = await fetch(modelUrl, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${trimmedApiKey}`,
+        "Content-Type": "application/json",
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const payload = (await response.json()) as {
+      data?: Array<{ id?: string }>;
+      models?: Array<{ id?: string; name?: string }>;
+      items?: Array<{ id?: string; name?: string }>;
+    };
+    const fromData = Array.isArray(payload.data)
+      ? payload.data.map((x) => String(x?.id ?? "").trim()).filter(Boolean)
+      : [];
+    const fromModels = Array.isArray(payload.models)
+      ? payload.models
+          .map((x) => String(x?.id ?? x?.name ?? "").trim())
+          .filter(Boolean)
+      : [];
+    const fromItems = Array.isArray(payload.items)
+      ? payload.items
+          .map((x) => String(x?.id ?? x?.name ?? "").trim())
+          .filter(Boolean)
+      : [];
+    return [...new Set([...fromData, ...fromModels, ...fromItems])];
+  }, [trimmedApiKey, trimmedBaseUrl]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!canSyncRemote || remoteSynced) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void (async () => {
+      setSyncingRemote(true);
+      try {
+        await syncSession();
+        const remote = await requestLlmSettings(authenticatedFetch);
+        if (cancelled) return;
+        applyImportedSettings(normalizeImportedSettings(remote));
+        setRemoteConfigId((remote as { configId?: number }).configId);
+        setLastSavedSignature(
+          JSON.stringify({
+            enabled: Boolean(remote.enabled),
+            provider: remote.provider,
+            baseUrl: String(remote.baseUrl ?? "").trim(),
+            apiKey: String(remote.apiKey ?? "").trim(),
+            model: String(remote.model ?? "").trim(),
+            temperature: Number(remote.temperature ?? 0.1),
+            topP: Number(remote.topP ?? 1),
+            maxTokens: Number(remote.maxTokens ?? 2048),
+            seed: Number(remote.seed ?? 42),
+          }),
+        );
+        setRemoteSynced(true);
+      } catch {
+        if (!cancelled) {
+          setRemoteSynced(true);
+        }
+      } finally {
+        if (!cancelled) {
+          setSyncingRemote(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyImportedSettings, authenticatedFetch, canSyncRemote, remoteSynced, syncSession]);
+
+  useEffect(() => {
+    setFetchedModels([]);
+  }, [provider]);
+
+  useEffect(() => {
+    setRemoteSynced(false);
+    setRemoteConfigId(undefined);
+    setLastSavedSignature("");
+  }, [canSyncRemote, authIdentity]);
+
+  const persistRemoteConfig = useCallback(async () => {
+    if (!canSyncRemote) {
+      showError("请先登录后再保存到后端。", "无法保存");
+      return false;
+    }
+    if (enabled) {
+      if (!hasRequiredConfig) {
+        showError("请先补全必填项，再保存到后端。", "无法保存");
+        return false;
+      }
+      setValidatingBeforeSave(true);
+      try {
+        const models = await fetchModelsDirectly();
+        if (!models.length) {
+          showError("保存前校验失败：模型列表为空，请检查请求地址与 API Key。", "校验失败");
+          return false;
+        }
+        if (trimmedModel && !models.includes(trimmedModel)) {
+          showError("保存前校验失败：当前模型不在可用列表中，请确认模型名称。", "校验失败");
+          return false;
+        }
+      } catch {
+        showError("保存前校验失败：无法连通供应商模型接口，请检查请求地址与 API Key。", "校验失败");
+        return false;
+      } finally {
+        setValidatingBeforeSave(false);
+      }
+    }
+    setSavingRemote(true);
+    try {
+      await syncSession();
+      const saved = await requestSaveLlmSettings(
+        {
+          enabled,
+          provider,
+          baseUrl,
+          apiKey,
+          model,
+          temperature,
+          topP,
+          maxTokens,
+          seed,
+        },
+        authenticatedFetch,
+        remoteConfigId,
+      );
+      applyImportedSettings(normalizeImportedSettings(saved));
+      setRemoteConfigId(saved.configId);
+      setLastSavedSignature(
+        JSON.stringify({
+          enabled: Boolean(saved.enabled),
+          provider: saved.provider,
+          baseUrl: String(saved.baseUrl ?? "").trim(),
+          apiKey: String(saved.apiKey ?? "").trim(),
+          model: String(saved.model ?? "").trim(),
+          temperature: Number(saved.temperature ?? 0.1),
+          topP: Number(saved.topP ?? 1),
+          maxTokens: Number(saved.maxTokens ?? 2048),
+          seed: Number(saved.seed ?? 42),
+        }),
+      );
+      toast.success("已保存并同步后端大模型配置。");
+      return true;
+    } catch (error) {
+      showError(error instanceof Error ? error.message : "保存失败，请稍后重试。", "保存失败");
+      return false;
+    } finally {
+      setSavingRemote(false);
+    }
+  }, [
+    apiKey,
+    applyImportedSettings,
+    authenticatedFetch,
+    baseUrl,
+    canSyncRemote,
+    enabled,
+    fetchModelsDirectly,
+    hasRequiredConfig,
+    maxTokens,
+    model,
+    provider,
+    remoteConfigId,
+    seed,
+    showError,
+    syncSession,
+    temperature,
+    topP,
+    trimmedModel,
+  ]);
+
+  const handleSaveRemote = async () => {
+    await persistRemoteConfig();
+  };
+
+  const handleConfirmReset = async () => {
+    setResetConfirmOpen(false);
+    if (canSyncRemote && remoteConfigId) {
+      setResettingRemote(true);
+      try {
+        await syncSession();
+        await requestDeleteLlmConfig(remoteConfigId, authenticatedFetch);
+        toast.success("已清空后端自定义配置。");
+      } catch (error) {
+        showError(error instanceof Error ? error.message : "清空后端配置失败，请稍后重试。", "恢复默认失败");
+        setResettingRemote(false);
+        return;
+      } finally {
+        setResettingRemote(false);
+      }
+    }
+    resetToDefaults();
+    setRemoteConfigId(undefined);
+    setLastSavedSignature("");
+    setFetchedModels([]);
+  };
+
+  const handleTestRemote = async () => {
+    if (!remoteConfigId) {
+      showError("请先保存到后端，再进行连通性测试。", "无法测试");
+      return;
+    }
+    if (hasUnsavedChanges) {
+      const saved = await persistRemoteConfig();
+      if (!saved) return;
+    }
+    setTestingRemote(true);
+    try {
+      await syncSession();
+      const result = await requestTestLlmConfig(remoteConfigId, authenticatedFetch);
+      if (result.success) {
+        toast.success(result.message || "配置可用，连通性测试通过。");
+      } else {
+        showError(result.message || "连通性测试未通过。", "测试失败");
+      }
+    } catch (error) {
+      showError(error instanceof Error ? error.message : "测试失败，请稍后重试。", "测试失败");
+    } finally {
+      setTestingRemote(false);
+    }
+  };
+
   return (
-    <Card role="region" aria-labelledby="settings-subsection-llm">
+    <>
+      <Card role="region" aria-labelledby="settings-subsection-llm">
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1 space-y-1">
-          <CardTitle id="settings-subsection-llm">大模型配置</CardTitle>
-          <CardDescription>配置本机使用的模型、地址与 API Key。</CardDescription>
+          <div className="inline-flex items-center gap-1.5">
+            <CardTitle id="settings-subsection-llm">大模型配置</CardTitle>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label="查看大模型配置说明"
+                    className="text-muted-foreground -my-0.5 shrink-0"
+                  >
+                    <CircleHelpIcon />
+                  </Button>
+                }
+              />
+              <TooltipContent side="top" align="start" className="max-w-sm">
+                配置本机使用的模型、请求地址与 API Key。
+              </TooltipContent>
+            </Tooltip>
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {enabled ? (
+            <Button
+              type="button"
+              variant="default"
+              size="xs"
+              className="shrink-0"
+              disabled={!canSaveRemote || validatingBeforeSave}
+              onClick={handleSaveRemote}
+            >
+              {validatingBeforeSave ? "校验中..." : savingRemote ? "保存中..." : "保存到后端"}
+            </Button>
+          ) : null}
+          {enabled ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="shrink-0"
+              disabled={!canTestRemote}
+              onClick={handleTestRemote}
+            >
+              {testingRemote ? "测试中..." : "测试连接"}
+            </Button>
+          ) : null}
           <Button type="button" variant="outline" size="xs" className="shrink-0" onClick={handleImportClick}>
             <UploadIcon data-icon="inline-start" />
             导入 JSON
@@ -288,12 +718,39 @@ export default function SettingsLlmPage() {
             <DownloadIcon data-icon="inline-start" />
             导出 JSON
           </Button>
-          <Button type="button" variant="outline" size="xs" className="shrink-0" onClick={() => resetToDefaults()}>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            className="shrink-0"
+            disabled={resettingRemote}
+            onClick={() => setResetConfirmOpen(true)}
+          >
             恢复默认
           </Button>
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
+        {!canSyncRemote ? (
+          <Alert>
+            <CircleAlertIcon />
+            <AlertDescription>当前为本地配置模式，登录后可读取并保存后端 `/api/llm/**` 配置。</AlertDescription>
+          </Alert>
+        ) : null}
+        {syncingRemote ? (
+          <Alert>
+            <CircleAlertIcon />
+            <AlertDescription>正在读取后端大模型配置...</AlertDescription>
+          </Alert>
+        ) : null}
+        {enabled && !hasRequiredConfig ? (
+          <Alert className="border-amber-500/40 text-amber-700 dark:text-amber-300">
+            <CircleAlertIcon />
+            <AlertDescription className="text-amber-700 dark:text-amber-300">
+              {requiredConfigHints.join("；")}。补全后可保存到后端。
+            </AlertDescription>
+          </Alert>
+        ) : null}
         <input
           ref={fileInputRef}
           type="file"
@@ -304,21 +761,19 @@ export default function SettingsLlmPage() {
         <Field orientation="horizontal">
           <FieldContent>
             <FieldTitle id="settings-llm-enable">启用自定义参数</FieldTitle>
-            <FieldDescription>关闭时使用默认模板；API Key 仅保存在当前浏览器。</FieldDescription>
+            <FieldDescription>关闭后自动回退到系统默认模型参数；你填写的 API Key 仅保存在当前浏览器本地。</FieldDescription>
           </FieldContent>
           <Switch
             checked={enabled}
-            onCheckedChange={(next) => setEnabled(Boolean(next))}
+            onCheckedChange={handleEnabledChange}
             aria-labelledby="settings-llm-enable"
+            disabled={syncingToggleRemote}
           />
         </Field>
 
         <Separator />
 
         <FieldSet className="gap-4 border-0 p-0">
-          <FieldLegend variant="label" className="px-0">
-            连接
-          </FieldLegend>
           <FieldGroup className="gap-4 sm:grid sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="settings-llm-provider">模型供应商</FieldLabel>
@@ -381,37 +836,31 @@ export default function SettingsLlmPage() {
             </Field>
 
             <Field>
-              <FieldLabel htmlFor="settings-llm-base-url">请求地址</FieldLabel>
-              <FieldDescription>
-                {endpointHint
-                  ? `常用地址：${endpointHint.url}${endpointHint.note ? `；${endpointHint.note}` : ""}`
-                  : "可填写 OpenAI 兼容网关地址。"}
-              </FieldDescription>
-              <Input
-                id="settings-llm-base-url"
-                type="url"
-                placeholder={endpointHint?.url ?? "例如 https://api.openai.com/v1"}
-                value={baseUrl}
-                onChange={(event) => setBaseUrl(event.target.value)}
-                disabled={!enabled}
-                autoComplete="off"
-                inputMode="url"
-              />
-            </Field>
-
-            <Field>
               <FieldLabel htmlFor="settings-llm-api-key">API Key</FieldLabel>
               <InputGroup>
                 <InputGroupInput
                   id="settings-llm-api-key"
+                  name="llm-api-key-manual-input"
                   type={showApiKey ? "text" : "password"}
                   placeholder="例如 sk-..."
                   value={apiKey}
                   onChange={(event) => setApiKey(event.target.value)}
                   disabled={!enabled}
-                  autoComplete="new-password"
+                  autoComplete="off"
+                  data-form-type="other"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  spellCheck={false}
                 />
                 <InputGroupAddon align="inline-end">
+                  <InputGroupButton
+                    size="icon-xs"
+                    aria-label="清空 API Key"
+                    disabled={!enabled || !trimmedApiKey}
+                    onClick={() => setApiKey("")}
+                  >
+                    ×
+                  </InputGroupButton>
                   <InputGroupButton
                     size="icon-xs"
                     aria-label={showApiKey ? "隐藏 API Key" : "显示 API Key"}
@@ -424,6 +873,57 @@ export default function SettingsLlmPage() {
               </InputGroup>
             </Field>
             <Field>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5">
+                  <FieldLabel htmlFor="settings-llm-base-url" className="mb-0">
+                    请求地址
+                  </FieldLabel>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label="查看请求地址说明"
+                          className="text-muted-foreground -my-0.5 shrink-0"
+                        >
+                          <CircleHelpIcon />
+                        </Button>
+                      }
+                    />
+                    <TooltipContent side="top" align="start" className="max-w-sm">
+                      {endpointHint
+                        ? `常用地址：${endpointHint.url}${endpointHint.note ? `；${endpointHint.note}` : ""}`
+                        : "可填写 OpenAI 兼容网关地址。"}
+                    </TooltipContent>
+                  </Tooltip>
+                </span>
+                {endpointHint?.url ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    disabled={!enabled}
+                    onClick={() => setBaseUrl(endpointHint.url)}
+                  >
+                    填入推荐地址
+                  </Button>
+                ) : null}
+              </div>
+              <Input
+                id="settings-llm-base-url"
+                type="url"
+                placeholder={endpointHint?.url ?? "例如 https://api.openai.com/v1"}
+                value={baseUrl}
+                onChange={(event) => setBaseUrl(sanitizeBaseUrlInput(event.target.value))}
+                onBlur={(event) => setBaseUrl(sanitizeBaseUrlInput(event.target.value))}
+                disabled={!enabled}
+                autoComplete="off"
+                inputMode="url"
+              />
+            </Field>
+            <Field>
               <div className="flex items-center justify-between gap-2">
                 <FieldLabel htmlFor="settings-llm-model-preset" className="mb-0">
                   主流模型模板
@@ -432,7 +932,7 @@ export default function SettingsLlmPage() {
                   type="button"
                   variant="outline"
                   size="xs"
-                  disabled={!enabled || loadingModels}
+                  disabled={!canFetchModels || loadingModels}
                   onClick={handleFetchModels}
                 >
                   <RefreshCwIcon data-icon="inline-start" className={loadingModels ? "animate-spin" : ""} />
@@ -443,11 +943,7 @@ export default function SettingsLlmPage() {
                 value={selectedPresetValue}
                 onValueChange={(v) => {
                   if (!v) return;
-                  if (v === "__custom") {
-                    setModel("");
-                    return;
-                  }
-                  setModel(v);
+                  if (v !== "__custom") setModel(v);
                 }}
                 disabled={!enabled}
               >
@@ -597,6 +1093,38 @@ export default function SettingsLlmPage() {
           </CollapsibleContent>
         </Collapsible>
       </CardContent>
-    </Card>
+      </Card>
+      <AlertDialog open={errorDialogOpen} onOpenChange={setErrorDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{errorDialogTitle}</AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-wrap break-all">
+              {errorDialogMessage}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setErrorDialogOpen(false)}>我知道了</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认恢复默认配置？</AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-wrap break-all">
+              该操作会清空当前用户的后端自定义大模型配置，并将页面参数恢复为默认值。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction variant="outline" onClick={() => setResetConfirmOpen(false)}>
+              取消
+            </AlertDialogAction>
+            <AlertDialogAction variant="destructive" onClick={handleConfirmReset}>
+              确认清空
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

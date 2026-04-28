@@ -83,6 +83,7 @@ import {
   ANALYZE_SYMBOL_MOCK_UNIVERSE,
   type AnalyzeSymbolSearchItem,
 } from "@/lib/analyze-symbol-search";
+import { requestAddStockPortfolio, requestStockPortfolio } from "@/lib/api/stocks";
 import {
   Item,
   ItemActions,
@@ -96,6 +97,7 @@ import { AppPageLayout } from "@/components/features/app-page-layout";
 import { PageErrorState } from "@/components/features/page-state";
 import { AnalyzeRunConfigDialog } from "@/components/features/analyze-run-config-dialog";
 import { PickerChatEmpty, PickerChatMessage } from "@/components/features/picker-chat-message";
+import { useAuthStore } from "@/stores/use-auth-store";
 
 function isActionActive(actionId: string, s: PreferenceSnapshot) {
   if (actionId.startsWith("toggle_sector_")) {
@@ -331,6 +333,15 @@ function formatMarketShortLabel(market: "CN" | "HK" | "US") {
   if (market === "CN") return "A股";
   if (market === "HK") return "港股";
   return "美股";
+}
+
+function inferExchange(market: "CN" | "HK" | "US", code: string): string {
+  const normalized = code.trim().toUpperCase();
+  if (market === "HK") return "HK";
+  if (market === "US") return "US";
+  if (normalized.startsWith("SZ") || normalized.startsWith("00") || normalized.startsWith("30")) return "SZ";
+  if (normalized.startsWith("BJ") || normalized.startsWith("8") || normalized.startsWith("4")) return "BJ";
+  return "SH";
 }
 
 function upsertWatchlistStock(stock: ExtractedStock) {
@@ -733,6 +744,7 @@ function ChatTimelineSection({
 
 export default function PickPage() {
   const router = useRouter();
+  const authSession = useAuthStore((s) => s.session);
   const sessionId = usePickerStore((s) => s.sessionId);
   const messages = usePickerStore((s) => s.messages);
   const dialogueMode = usePickerStore((s) => s.dialogueMode);
@@ -1164,8 +1176,61 @@ export default function PickPage() {
   }, [toolbar_actions]);
 
   useEffect(() => {
-    setWatchlistKeys(loadWatchlistKeysFromStorage());
-  }, []);
+    if (authSession !== "user") {
+      setWatchlistKeys(loadWatchlistKeysFromStorage());
+      return;
+    }
+    let canceled = false;
+    void requestStockPortfolio()
+      .then((list) => {
+        if (canceled) return;
+        const keys = new Set<string>();
+        for (const item of list) {
+          keys.add(`${item.market}.${item.symbol.trim().toUpperCase()}`);
+        }
+        setWatchlistKeys(keys);
+      })
+      .catch(() => {
+        if (canceled) return;
+        setWatchlistKeys(loadWatchlistKeysFromStorage());
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [authSession]);
+
+  const handleAddWatchlistStock = useCallback(
+    (stock: ExtractedStock) => {
+      const code = stock.code.trim().toUpperCase();
+      if (!code) return;
+      const market = inferMarketFromCode(code);
+      const key = `${market}.${code}`;
+      if (watchlistKeys.has(key)) return;
+
+      if (authSession === "user") {
+        void requestAddStockPortfolio({
+          symbol: code,
+          name: stock.name || code,
+          market,
+          exchange: inferExchange(market, code),
+        })
+          .then(() => {
+            setWatchlistKeys((prev) => new Set(prev).add(key));
+            toast.success("已加入自选");
+          })
+          .catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : "加入自选失败";
+            toast.error(message);
+          });
+        return;
+      }
+
+      upsertWatchlistStock(stock);
+      setWatchlistKeys(loadWatchlistKeysFromStorage());
+      toast.success("已加入自选");
+    },
+    [authSession, watchlistKeys],
+  );
 
   const switchConversation = useCallback(
     (conversationId: string) => {
@@ -1378,8 +1443,7 @@ export default function PickPage() {
                 openAnalysisConfig(stock);
               }}
               onAddWatchlistStock={(stock) => {
-                upsertWatchlistStock(stock);
-                setWatchlistKeys(loadWatchlistKeysFromStorage());
+                handleAddWatchlistStock(stock);
               }}
               isInWatchlist={(code) => {
                 const market = inferMarketFromCode(code);
@@ -1492,8 +1556,7 @@ export default function PickPage() {
                                             disabled={alreadyInWatchlist}
                                             aria-label={alreadyInWatchlist ? "已在自选" : `将 ${stock.name} 加入自选`}
                                             onClick={() => {
-                                              upsertWatchlistStock(stock);
-                                              setWatchlistKeys(loadWatchlistKeysFromStorage());
+                                              handleAddWatchlistStock(stock);
                                             }}
                                           >
                                             {alreadyInWatchlist ? <CheckIcon /> : <PlusIcon />}
@@ -1733,7 +1796,7 @@ export default function PickPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>关闭</AlertDialogCancel>
-            <Button type="button" render={<Link href="/subscription" />}>
+            <Button type="button" render={<Link href="/app/account/subscription" />}>
               {subscriptionTierPublicCopy.ctaViewPlansShort}
             </Button>
           </AlertDialogFooter>
@@ -1784,7 +1847,7 @@ export default function PickPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>关闭</AlertDialogCancel>
-            <Button type="button" variant="secondary" onClick={() => router.push("/subscription")}>
+            <Button type="button" variant="secondary" onClick={() => router.push("/app/account/subscription")}>
               {subscriptionTierPublicCopy.ctaViewPlansShort}
             </Button>
           </AlertDialogFooter>

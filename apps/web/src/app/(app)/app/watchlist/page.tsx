@@ -12,7 +12,12 @@ import {
   parseAnalyzeSearchInput,
   type AnalyzeSymbolSearchItem,
 } from "@/lib/analyze-symbol-search";
-import { requestStockSearch } from "@/lib/api/stocks";
+import {
+  requestAddStockPortfolio,
+  requestDeleteStockPortfolio,
+  requestStockPortfolio,
+  requestStockSearch,
+} from "@/lib/api/stocks";
 import { buildMockBaseQuote } from "@/lib/mock-base-quote";
 import { AppPageLayout } from "@/components/features/app-page-layout";
 import { StockSearchCombobox } from "@/components/features/stock-search-combobox";
@@ -25,6 +30,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/use-auth-store";
 
@@ -93,6 +108,16 @@ function formatSignedPct(n: number) {
   return `${fixed}%`;
 }
 
+function inferExchange(market: AnalysisInput["market"], symbol: string): string {
+  const normalized = symbol.trim().toUpperCase();
+  if (market === "HK") return "HK";
+  if (market === "US") return "US";
+  // A股按代码段粗略映射交易所，未知时回退 SH。
+  if (normalized.startsWith("SZ") || normalized.startsWith("00") || normalized.startsWith("30")) return "SZ";
+  if (normalized.startsWith("BJ") || normalized.startsWith("8") || normalized.startsWith("4")) return "BJ";
+  return "SH";
+}
+
 /** A 股常用配色：涨红跌绿；零轴为中性灰。 */
 function quoteToneClass(changePct: number) {
   if (changePct > 0) return "text-red-600 dark:text-red-500";
@@ -107,10 +132,49 @@ export default function WatchlistPage() {
   const [entries, setEntries] = useState<WatchlistEntry[]>([]);
   const [remoteSearching, setRemoteSearching] = useState(false);
   const [remoteSearchItems, setRemoteSearchItems] = useState<AnalyzeSymbolSearchItem[]>([]);
+  const [portfolioLoading, setPortfolioLoading] = useState(false);
+  const [portfolioSyncError, setPortfolioSyncError] = useState<string | null>(null);
+  const [deleteTargetKey, setDeleteTargetKey] = useState<string | null>(null);
 
   const keySet = useMemo(() => new Set(entries.map((e) => entryKey(e))), [entries]);
 
+  const deleteTargetEntry = useMemo(
+    () => (deleteTargetKey ? entries.find((e) => entryKey(e) === deleteTargetKey) : undefined),
+    [deleteTargetKey, entries],
+  );
+
   useEffect(() => {
+    let canceled = false;
+    if (authSession === "user") {
+      setPortfolioLoading(true);
+      setPortfolioSyncError(null);
+      void requestStockPortfolio()
+        .then((list) => {
+          if (canceled) return;
+          const dedup = new Map<string, WatchlistEntry>();
+          for (const item of list) {
+            dedup.set(entryKey(item), {
+              market: item.market,
+              symbol: item.symbol.trim(),
+              name: item.name.trim() || item.symbol.trim(),
+            });
+          }
+          setEntries(Array.from(dedup.values()));
+          setPortfolioLoading(false);
+        })
+        .catch((error: unknown) => {
+          if (canceled) return;
+          const message = error instanceof Error ? error.message : "同步失败";
+          setPortfolioSyncError(message);
+          setPortfolioLoading(false);
+        });
+      return () => {
+        canceled = true;
+      };
+    }
+
+    setPortfolioSyncError(null);
+    setPortfolioLoading(false);
     try {
       const rawV2 = window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V2);
       if (rawV2) {
@@ -134,7 +198,9 @@ export default function WatchlistPage() {
             dedup.set(entryKey(e), e);
           }
           setEntries([...dedup.values()]);
-          return;
+          return () => {
+            canceled = true;
+          };
         }
       }
 
@@ -161,15 +227,19 @@ export default function WatchlistPage() {
     } catch {
       // Ignore invalid local storage payload.
     }
-  }, []);
+    return () => {
+      canceled = true;
+    };
+  }, [authSession]);
 
   useEffect(() => {
+    if (authSession === "user") return;
     try {
       window.localStorage.setItem(WATCHLIST_STORAGE_KEY_V2, JSON.stringify(entries));
     } catch {
       // Ignore local storage write failures.
     }
-  }, [entries]);
+  }, [authSession, entries]);
 
   const searchItems = useMemo(() => {
     const byKey = new Map<string, AnalyzeSymbolSearchItem>();
@@ -256,16 +326,50 @@ export default function WatchlistPage() {
 
   const addEntry = useCallback((entry: WatchlistEntry) => {
     const k = entryKey(entry);
-    setEntries((prev) => {
-      if (prev.some((e) => entryKey(e) === k)) return prev;
-      return [entry, ...prev];
-    });
+    if (authSession === "user") {
+      setPortfolioSyncError(null);
+      void requestAddStockPortfolio({
+        market: entry.market,
+        symbol: entry.symbol,
+        name: entry.name,
+        exchange: inferExchange(entry.market, entry.symbol),
+      })
+        .then(() => {
+          setEntries((prev) => {
+            if (prev.some((e) => entryKey(e) === k)) return prev;
+            return [entry, ...prev];
+          });
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : "添加自选失败";
+          setPortfolioSyncError(message);
+        });
+    } else {
+      setEntries((prev) => {
+        if (prev.some((e) => entryKey(e) === k)) return prev;
+        return [entry, ...prev];
+      });
+    }
     setQuery("");
-  }, []);
+  }, [authSession]);
 
   const removeEntry = useCallback((k: string) => {
+    if (authSession === "user") {
+      const target = entries.find((e) => entryKey(e) === k);
+      if (!target) return;
+      setPortfolioSyncError(null);
+      void requestDeleteStockPortfolio(target.symbol)
+        .then(() => {
+          setEntries((prev) => prev.filter((e) => entryKey(e) !== k));
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : "删除自选失败";
+          setPortfolioSyncError(message);
+        });
+      return;
+    }
     setEntries((prev) => prev.filter((e) => entryKey(e) !== k));
-  }, []);
+  }, [authSession, entries]);
 
   const listEmpty = entries.length === 0;
   const filterEmpty = !listEmpty && q.length > 0 && filteredEntries.length === 0;
@@ -273,7 +377,11 @@ export default function WatchlistPage() {
   return (
     <AppPageLayout
       title="自选"
-      description="同一搜索框可筛选自选或在匹配结果中回车加入自选；数据保存在当前浏览器。"
+      description={
+        authSession === "user"
+          ? "已接入账户自选股接口，增删将实时同步到后端。"
+          : "同一搜索框可筛选自选或在匹配结果中回车加入自选；游客模式数据保存在当前浏览器。"
+      }
       actions={
         <Button variant="outline" render={<Link href="/app/analyze" />}>
           去预测
@@ -304,6 +412,10 @@ export default function WatchlistPage() {
           if (resolved) addEntry(resolved);
         }}
       />
+      {portfolioLoading ? (
+        <p className="text-muted-foreground text-sm">正在同步自选股...</p>
+      ) : null}
+      {portfolioSyncError ? <p className="text-sm text-red-600 dark:text-red-500">{portfolioSyncError}</p> : null}
 
       {listEmpty ? (
         <Empty className="border">
@@ -358,7 +470,7 @@ export default function WatchlistPage() {
                           <ChartLineIcon />
                           分析
                         </DropdownMenuItem>
-                        <DropdownMenuItem variant="destructive" onClick={() => removeEntry(k)}>
+                        <DropdownMenuItem variant="destructive" onClick={() => setDeleteTargetKey(k)}>
                           <Trash2Icon />
                           删除
                         </DropdownMenuItem>
@@ -383,6 +495,32 @@ export default function WatchlistPage() {
           })}
         </ul>
       )}
+
+      <AlertDialog open={deleteTargetKey !== null} onOpenChange={(open) => !open && setDeleteTargetKey(null)}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>移除自选？</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTargetEntry
+                ? `确定从自选列表移除「${deleteTargetEntry.name}」（${compactBoardCode(deleteTargetEntry.market, deleteTargetEntry.symbol)}）吗？`
+                : "确定从自选列表移除此标的吗？"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                const key = deleteTargetKey;
+                setDeleteTargetKey(null);
+                if (key !== null) removeEntry(key);
+              }}
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppPageLayout>
   );
 }

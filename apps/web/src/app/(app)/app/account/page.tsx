@@ -152,7 +152,7 @@ export default function AccountPage() {
             ) : null}
           </CardContent>
           <CardFooter>
-            <Button variant="outline" render={<Link href="/subscription" />}>
+            <Button variant="outline" render={<Link href="/app/account/subscription" />}>
               查看订阅与用量
             </Button>
           </CardFooter>

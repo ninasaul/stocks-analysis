@@ -554,7 +554,7 @@ function LandingPricingSection() {
                       className="w-full"
                       size={featured ? "lg" : "default"}
                       variant={freeTier ? "outline" : "default"}
-                      render={<Link href="/subscription" />}
+                      render={<Link href="/app/account/subscription" />}
                     >
                       {item.cta}
                     </Button>
@@ -573,7 +573,7 @@ function LandingPricingSection() {
             <Button
               variant="link"
               className="text-muted-foreground hover:text-foreground h-auto p-0 align-baseline text-xs md:text-sm"
-              render={<Link href="/subscription" />}
+              render={<Link href="/app/account/subscription" />}
             >
               {landingCopy.pricingCta}
             </Button>

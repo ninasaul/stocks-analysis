@@ -40,7 +40,7 @@ const modules = [
   {
     title: "订阅与套餐",
     desc: `手机号、验证码与微信等登录方式；${subscriptionTierPublicCopy.freeTierName}与${subscriptionTierPublicCopy.proTierName}的日配额、价格说明、支付开通与订单记录见订阅页，并与股票预测、选股对话的日限额一致。`,
-    href: "/subscription",
+    href: "/app/account/subscription",
     cta: subscriptionTierPublicCopy.ctaViewPlans,
   },
 ] as const;

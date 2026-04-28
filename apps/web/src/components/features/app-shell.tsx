@@ -78,7 +78,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Button size="sm" variant="ghost" render={<Link href="/app/account" />}>
                 我的账号
               </Button>
-              <Button size="sm" variant="secondary" render={<Link href="/subscription" />}>
+              <Button size="sm" variant="secondary" render={<Link href="/app/account/subscription" />}>
                 {subscriptionTierPublicCopy.ctaViewPlansShort}
               </Button>
             </div>

@@ -1716,7 +1716,7 @@ function AnalyzePageContent() {
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
             <AlertDialogCancel>关闭</AlertDialogCancel>
-            <Button type="button" variant="secondary" onClick={() => router.push("/subscription")}>
+            <Button type="button" variant="secondary" onClick={() => router.push("/app/account/subscription")}>
               {subscriptionTierPublicCopy.ctaViewPlansShort}
             </Button>
           </AlertDialogFooter>

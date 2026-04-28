@@ -192,7 +192,7 @@ export default function SettingsBasicPage() {
           <Button variant="outline" render={<Link href="/app/account" prefetch />}>
             我的账号
           </Button>
-          <Button variant="outline" render={<Link href="/subscription" prefetch />}>
+          <Button variant="outline" render={<Link href="/app/account/subscription" prefetch />}>
             订阅与用量
           </Button>
         </CardFooter>
