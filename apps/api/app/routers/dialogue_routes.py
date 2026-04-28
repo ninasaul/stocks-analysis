@@ -155,8 +155,22 @@ async def dialogue_stream(
 
     async def stream_generator():
         async for item in dialogue_manager.get_streaming_response(message, None, session_id, mode, current_user.id, llm_client):
-            # 以SSE格式发送数据
-            yield f"data: {json.dumps({'chunk': item.get('chunk', ''), 'extension_questions': item.get('extension_questions', [])})}\n\n"
+            # 确保数据可序列化
+            chunk = item.get('chunk', '')
+            extension_questions = item.get('extension_questions', [])
+            
+            # 处理 chunk 类型
+            if not isinstance(chunk, str):
+                chunk = str(chunk) if chunk else ''
+            
+            # 处理 extension_questions 中的不可序列化对象
+            try:
+                # 使用 default=str 处理不可序列化的对象
+                yield f"data: {json.dumps({'chunk': chunk, 'extension_questions': extension_questions}, default=str)}\n\n"
+            except Exception as e:
+                logger.error(f"JSON序列化失败: {e}")
+                # 返回安全的默认值
+                yield f"data: {json.dumps({'chunk': chunk, 'extension_questions': []})}\n\n"
     
     return StreamingResponse(
         stream_generator(),

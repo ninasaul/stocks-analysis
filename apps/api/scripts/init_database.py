@@ -450,6 +450,7 @@ class DatabaseInitializer:
         
         self.create_users_table()
         self.create_memberships_table()
+        self.create_admins_table()  # 新增：创建管理员表
         self.create_api_call_logs_table()
         self.create_refresh_tokens_table()
         self.create_token_blacklist_table()

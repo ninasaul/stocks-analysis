@@ -285,22 +285,31 @@ class LLMService:
         encryption_key = get_encryption_key()
         use_encryption = should_encrypt()
         
-        # 加密API Key（如果启用加密）
-        encrypted_api_key = api_key
-        if api_key and use_encryption:
-            query = "SELECT pgp_sym_encrypt(%s, %s)::bytea"
-            rows = execute_query(query, (api_key, encryption_key))
-            encrypted_api_key = rows[0][0] if rows else None
+        # 加密API Key（如果启用加密且api_key不为空）
+        encrypted_api_key = None
+        if api_key and api_key.strip():
+            if use_encryption:
+                query = "SELECT pgp_sym_encrypt(%s, %s)::bytea"
+                rows = execute_query(query, (api_key.strip(), encryption_key))
+                encrypted_api_key = rows[0][0] if rows else None
+            else:
+                encrypted_api_key = api_key.strip()
         
         query = """
         INSERT INTO llm_presets (name, display_name, api_key, base_url, default_model, models, is_active, is_system, config)
         VALUES (%s, %s, %s, %s, %s, %s, %s, false, %s)
         RETURNING id
         """
-        rows = execute_query(query, (name, display_name, encrypted_api_key, base_url, default_model, json.dumps(models or []), is_active, json.dumps(config) if config else None))
-        if rows:
-            return LLMService.get_preset_by_id(rows[0][0])
-        return None
+        try:
+            rows = execute_query(query, (name, display_name, encrypted_api_key, base_url, default_model, json.dumps(models or []), is_active, json.dumps(config) if config else None))
+            if rows:
+                logger.debug(f"创建预设成功，ID: {rows[0][0]}")
+                return LLMService.get_preset_by_id(rows[0][0])
+            logger.error(f"创建预设失败：INSERT 未返回 ID")
+            return None
+        except Exception as e:
+            logger.error(f"创建预设失败：{e}")
+            raise
 
     @staticmethod
     def update_preset(

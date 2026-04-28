@@ -81,8 +81,9 @@ def test_get_llm_preset():
 def test_create_llm_preset():
     """测试创建预设"""
     print("测试: POST /api/llm/presets")
+    # 使用时间戳确保名称唯一
     test_preset = {
-        "name": "test-new-preset",
+        "name": f"test-new-preset_{int(time.time() * 1000)}",
         "display_name": "测试新预设",
         "base_url": "https://test.new",
         "default_model": "test-model",
@@ -124,15 +125,17 @@ def test_update_llm_preset():
 def test_delete_llm_preset():
     """测试删除预设"""
     print("测试: DELETE /api/llm/presets/{preset_id}")
-    # 先创建一个可删除的预设
+    # 先创建一个可删除的预设，使用时间戳确保名称唯一
     test_preset = {
-        "name": "test-deletable-preset",
+        "name": f"test-deletable-preset_{int(time.time() * 1000)}",
         "display_name": "可删除测试预设",
         "base_url": "https://test.delete",
         "default_model": "test-model",
         "api_key": "test-key"
     }
     create_response = client.post("/api/llm/presets", json=test_preset, headers=get_auth_headers())
+    print(f"创建响应: {create_response.json()}")
+    assert create_response.status_code == 200
     preset_id = create_response.json()["preset"]["id"]
     
     # 测试删除
@@ -220,10 +223,24 @@ def test_update_user_config():
     create_response = client.post("/api/llm/user/configs", json=test_config, headers=get_auth_headers())
     config_id = create_response.json()["config"]["id"]
     
+    # 更新前：从数据库查询原始数据
+    from app.core.database import execute_query
+    before_result = execute_query("SELECT name, api_key, base_url, model FROM user_llm_configs WHERE id = %s", (config_id,))
+    assert len(before_result) == 1, "更新前数据库查询失败"
+    before_data = {
+        "name": before_result[0][0],
+        "api_key": before_result[0][1],
+        "base_url": before_result[0][2],
+        "model": before_result[0][3]
+    }
+    print(f"  更新前数据: {before_data}")
+    
     # 测试更新
     update_data = {
         "name": f"更新后的配置名称_{int(time.time() * 1000)}",
-        "api_key": "updated-test-key"
+        "api_key": "updated-test-key",
+        "base_url": "https://updated.test",
+        "model": "updated-test-model"
     }
     response = client.put(f"/api/llm/user/configs/{config_id}", json=update_data, headers=get_auth_headers())
     assert response.status_code == 200
@@ -231,6 +248,29 @@ def test_update_user_config():
     assert "config" in data
     assert data["config"]["name"] == update_data["name"]
     assert data["message"] == "更新成功"
+    
+    # 更新后：从数据库查询验证更新结果
+    after_result = execute_query("SELECT name, api_key, base_url, model FROM user_llm_configs WHERE id = %s", (config_id,))
+    assert len(after_result) == 1, "更新后数据库查询失败"
+    after_data = {
+        "name": after_result[0][0],
+        "api_key": after_result[0][1],
+        "base_url": after_result[0][2],
+        "model": after_result[0][3]
+    }
+    print(f"  更新后数据: {after_data}")
+    
+    # 对比验证
+    assert before_data["name"] != after_data["name"], "名称未更新"
+    assert before_data["api_key"] != after_data["api_key"], "API Key未更新"
+    assert before_data["base_url"] != after_data["base_url"], "基础URL未更新"
+    assert before_data["model"] != after_data["model"], "模型未更新"
+    
+    # 验证更新后的数据与期望一致
+    assert after_data["name"] == update_data["name"], "更新后的名称不匹配"
+    assert after_data["base_url"] == update_data["base_url"], "更新后的基础URL不匹配"
+    assert after_data["model"] == update_data["model"], "更新后的模型不匹配"
+    
     print("9 [OK] 更新用户配置测试通过")
 
 

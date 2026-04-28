@@ -99,9 +99,12 @@ def execute_query(query: str, params: tuple = None, fetch: bool = True):
     with db_manager.get_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(query, params or ())
+            # 如果是写操作（INSERT/UPDATE/DELETE），自动提交
+            query_upper = query.strip().upper()
+            if query_upper.startswith("INSERT") or query_upper.startswith("UPDATE") or query_upper.startswith("DELETE"):
+                conn.commit()
             if fetch:
                 return cursor.fetchall()
-            conn.commit()
             return None
 
 
