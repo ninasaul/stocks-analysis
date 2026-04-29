@@ -22,8 +22,7 @@ from ..analyst.depth_config import (
     AnalystType,
     get_all_depths_info
 )
-from ..reflection.reflector import Reflector
-from ..reflection.memory import SimpleMemory
+from ..reflection.reflect_generator import generate_full_reflection
 from ..user_management.models import User
 from ..user_management.services import MembershipService
 from ..core.auth import get_current_user
@@ -93,7 +92,6 @@ def save_analysis_result(user_id: int, ticker: str, result: dict) -> bool:
 router = APIRouter(prefix="/api", tags=["股票分析"])
 
 timer_agent = TimerAgent()
-reflector_memory = SimpleMemory()
 stock_service = None
 
 
@@ -403,45 +401,17 @@ async def analyze_stock(
             if is_llm_error(str(e)):
                 raise HTTPException(status_code=503, detail=f"LLM模型服务不可用: {str(e)}")
 
-        if depth >= 3:
-            try:
-                logger.debug(f"启动反思分析: {ticker}")
-                reflector = Reflector(llm)
-                # 准备分析师的LLM分析结果作为反思依据
-                analyst_insights = {
-                    "market_analysis": market_llm_analysis,
-                    "fundamental_analysis": fundamental_llm_analysis,
-                    "news_analysis": news_llm_analysis
-                }
-                reflection, reflection_tokens = await reflector.reflect_on_decision({
-                    "ticker": ticker,
-                    "name": stock_name,
-                    "timing": timing_result,
-                    "fundamental": fundamental_result,
-                    "news": news_result,
-                    "debate": debate_result,
-                    "signal": final_signal,
-                    "score": final_score,
-                    "analyst_insights": analyst_insights
-                })
-                token_usage["reflection"] = reflection_tokens
-                if "error" in reflection:
-                    reflection_error = reflection["error"]
-                    if is_llm_error(reflection_error):
-                        raise HTTPException(status_code=503, detail=f"LLM模型服务不可用: {reflection_error}")
-                logger.info(f"反思分析完成: {ticker}, token消耗: {reflection_tokens}")
-
-                reflector_memory.add_situations([
-                    (f"分析 {ticker}", reflection)
-                ])
-                logger.debug(f"反思结果已存储到内存")
-            except HTTPException:
-                raise
-            except Exception as e:
-                reflection_error = f"反思分析失败: {str(e)}"
-                logger.error(f"反思分析错误: {reflection_error}")
-                if is_llm_error(str(e)):
-                    raise HTTPException(status_code=503, detail=f"LLM模型服务不可用: {str(e)}")
+    # 生成反思内容（亏损记录汇总）
+    full_reflection = {}
+    if depth >= 3:
+        try:
+            from datetime import date
+            today_date = date.today().strftime("%Y-%m-%d")
+            full_reflection = await generate_full_reflection(
+                current_user.id, ticker, today_date, final_signal
+            )
+        except Exception as e:
+            logger.error(f"生成反思汇总失败: {str(e)}")
 
     price_range = market_result.get("price_range", {})
     if "error" in market_result:
@@ -569,9 +539,15 @@ async def analyze_stock(
             "final_score": debate_result.get("final_score") if debate_result else None
         } if debate_result else None,
         "reflection": {
-            "lessons_learned": reflection.get("lessons", "") if reflection else "",
-            "improvements": reflection.get("improvements", []) if reflection else []
-        } if reflection else None,
+            "record_match": {
+                "status": full_reflection.get("record_match", {}).get("status", ""),
+                "currrent_direction": full_reflection.get("record_match", {}).get("currrent_direction", ""),
+                "loss_record": full_reflection.get("record_match", {}).get("loss_record", ""),
+                "record": full_reflection.get("record_match", {}).get("record", [])
+            },
+            "lessons": full_reflection.get("lessons", ""),
+            "suggestion": full_reflection.get("suggestion", "")
+        } if full_reflection else None,
         "basis_and_risks": {
             "investment_thesis": fundamental_result.get("thesis", ""),
             "key_risks": fundamental_result.get("risks", []),
