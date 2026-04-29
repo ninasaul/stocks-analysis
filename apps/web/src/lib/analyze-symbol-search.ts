@@ -38,14 +38,31 @@ export function formatAnalyzeBoardSymbol(market: AnalysisInput["market"], symbol
 export function parseAnalyzeSearchInput(raw: string, fallbackMarket: AnalysisInput["market"]) {
   const trimmed = raw.trim();
   if (!trimmed) return null;
+  // 兼容展示态输入：例如「神州高铁（SZ:000008）」或「Apple (US:AAPL)」
+  const displayWrapped = trimmed.match(/[（(]\s*(SH|SZ|BJ|HK|US|CN)\s*[:.]\s*([^)）]+)\s*[)）]\s*$/i);
+  if (displayWrapped) {
+    const board = displayWrapped[1].toUpperCase();
+    const symbol = displayWrapped[2].trim().toUpperCase();
+    const market: AnalysisInput["market"] =
+      board === "HK" ? "HK" : board === "US" ? "US" : board === "CN" ? "CN" : "CN";
+    return { market, symbol };
+  }
+  const boardPrefixed = trimmed.match(/^(SH|SZ|BJ|HK|US|CN)[:.]([A-Z0-9.-]+)$/i);
+  if (boardPrefixed) {
+    const board = boardPrefixed[1].toUpperCase();
+    const symbol = boardPrefixed[2].trim().toUpperCase();
+    const market: AnalysisInput["market"] =
+      board === "HK" ? "HK" : board === "US" ? "US" : board === "CN" ? "CN" : "CN";
+    return { market, symbol };
+  }
   const prefixed = trimmed.match(/^(CN|HK|US)\.(.+)$/i);
   if (prefixed) {
     return {
       market: prefixed[1].toUpperCase() as AnalysisInput["market"],
-      symbol: prefixed[2].trim(),
+      symbol: prefixed[2].trim().toUpperCase(),
     };
   }
-  return { market: fallbackMarket, symbol: trimmed };
+  return { market: fallbackMarket, symbol: trimmed.toUpperCase() };
 }
 
 export function fuzzyAnalyzeSymbolScore(item: AnalyzeSymbolSearchItem, query: string) {

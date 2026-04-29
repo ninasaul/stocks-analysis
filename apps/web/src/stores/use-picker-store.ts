@@ -223,7 +223,7 @@ const startActions: SuggestedAction[] = [
 ];
 
 const starterAssistantMessage =
-  "你好，我是选股对话助手。你可以先「随便问问」市场与策略问题，或直接选择「帮我选股」进入 D1-D8 结构化流程。";
+  "你好，我是智谱投研选股助手。你可以先用「随便问问」咨询市场、策略与术语，也可以直接点「帮我选股」进入 D1-D8 偏好收集流程，我会根据你的条件生成候选标的。";
 const INITIAL_SESSION_ID = "pick-session-initial";
 const INITIAL_MESSAGE_ID = "pick-msg-initial";
 const INITIAL_MESSAGE_CREATED_AT = 1713326400000; // 2024-04-17 16:00:00 UTC+8

@@ -636,6 +636,7 @@ export function AnalyzeRunConfigDialog({
                       listId={`${fieldId}-search-listbox`}
                       formatCode={(item) => `${item.market}.${item.symbol}`}
                       onSelect={applySearchItem}
+                      openOnFocus={false}
                       onResolveEnter={(rawQuery, activeItem) => {
                         if (activeItem) {
                           applySearchItem(activeItem);

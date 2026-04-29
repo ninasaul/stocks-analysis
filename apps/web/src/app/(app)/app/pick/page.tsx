@@ -179,6 +179,7 @@ type ConversationListItem = {
 type ExtractedStock = {
   name: string;
   code: string;
+  displayCode?: string;
 };
 
 const MAX_DRAFT_CHARS = 600;
@@ -299,16 +300,99 @@ function toMessageTime(timestamp?: string) {
 
 function extractStocksFromText(content: string): ExtractedStock[] {
   const result: ExtractedStock[] = [];
-  const pattern =
-    /([A-Za-z\u4E00-\u9FFF][A-Za-z0-9\u4E00-\u9FFF·\- ]{0,30})\s*[（(]\s*([A-Za-z]{1,5}(?:\.[A-Za-z]{1,2})?|\d{5,6})\s*[)）]/g;
-  let match: RegExpExecArray | null = pattern.exec(content);
+  // Strict code format: 6 digits + "." + 2 letters (normalized to uppercase)
+  const strictCodePattern = /\b(\d{6}\.[A-Za-z]{2})\b/g;
+  const withBracketNamePattern =
+    /\b(\d{6}\.[A-Za-z]{2})\b\s*[（(]\s*([A-Za-z0-9\u4E00-\u9FFF·\- ]{1,40})\s*[)）]/g;
+  const withSpaceNamePattern = /\b(\d{6}\.[A-Za-z]{2})\b[\s,，:：]+([A-Za-z0-9\u4E00-\u9FFF·\- ]{1,40})/g;
+  const nameFirstWithBracketCodePattern =
+    /([A-Za-z0-9\u4E00-\u9FFF·\- ]{1,40})\s*[（(]\s*(\d{6}\.[A-Za-z]{2})\s*[)）]/g;
+  const legacyNameFirstNoSuffixPattern =
+    /([A-Za-z0-9\u4E00-\u9FFF·\- ]{1,40})\s*[（(]\s*(\d{6})\s*[)）]/g;
+  const legacyCodeFirstNoSuffixPattern =
+    /\b(\d{6})\b\s*[（(]\s*([A-Za-z0-9\u4E00-\u9FFF·\- ]{1,40})\s*[)）]/g;
+  const legacyBareCodePattern = /\b(\d{6})\b/g;
+
+  let match: RegExpExecArray | null = withBracketNamePattern.exec(content);
+  while (match) {
+    const rawCode = String(match[1] ?? "").trim().toUpperCase();
+    const name = String(match[2] ?? "").trim();
+    const code = rawCode.split(".")[0]?.trim().toUpperCase() ?? "";
+    const displayCode = rawCode;
+    if (name && code) {
+      result.push({ name, code, displayCode });
+    }
+    match = withBracketNamePattern.exec(content);
+  }
+
+  match = withSpaceNamePattern.exec(content);
+  while (match) {
+    const rawCode = String(match[1] ?? "").trim().toUpperCase();
+    const name = String(match[2] ?? "").trim();
+    const code = rawCode.split(".")[0]?.trim().toUpperCase() ?? "";
+    const displayCode = rawCode;
+    if (name && code) {
+      result.push({ name, code, displayCode });
+    }
+    match = withSpaceNamePattern.exec(content);
+  }
+
+  // Compatibility: 洋河股份（002304.SZ）
+  match = nameFirstWithBracketCodePattern.exec(content);
   while (match) {
     const name = String(match[1] ?? "").trim();
-    const code = String(match[2] ?? "").trim().toUpperCase();
+    const rawCode = String(match[2] ?? "").trim().toUpperCase();
+    const code = rawCode.split(".")[0]?.trim().toUpperCase() ?? "";
+    const displayCode = rawCode;
     if (name && code) {
-      result.push({ name, code });
+      result.push({ name, code, displayCode });
     }
-    match = pattern.exec(content);
+    match = nameFirstWithBracketCodePattern.exec(content);
+  }
+
+  // Legacy compatibility: 洋河股份（002304）
+  match = legacyNameFirstNoSuffixPattern.exec(content);
+  while (match) {
+    const name = String(match[1] ?? "").trim();
+    const rawCode = String(match[2] ?? "").trim().toUpperCase();
+    const code = rawCode;
+    if (name && code) {
+      result.push({ name, code, displayCode: rawCode });
+    }
+    match = legacyNameFirstNoSuffixPattern.exec(content);
+  }
+
+  // Legacy compatibility: 002304（洋河股份）
+  match = legacyCodeFirstNoSuffixPattern.exec(content);
+  while (match) {
+    const rawCode = String(match[1] ?? "").trim().toUpperCase();
+    const name = String(match[2] ?? "").trim();
+    const code = rawCode;
+    if (name && code) {
+      result.push({ name, code, displayCode: rawCode });
+    }
+    match = legacyCodeFirstNoSuffixPattern.exec(content);
+  }
+
+  // Fallback when only code is present without explicit name
+  match = strictCodePattern.exec(content);
+  while (match) {
+    const rawCode = String(match[1] ?? "").trim().toUpperCase();
+    const code = rawCode.split(".")[0]?.trim().toUpperCase() ?? "";
+    if (code) {
+      result.push({ name: rawCode, code, displayCode: rawCode });
+    }
+    match = strictCodePattern.exec(content);
+  }
+
+  // Legacy fallback when only 6-digit code is present
+  match = legacyBareCodePattern.exec(content);
+  while (match) {
+    const rawCode = String(match[1] ?? "").trim().toUpperCase();
+    if (rawCode) {
+      result.push({ name: rawCode, code: rawCode, displayCode: rawCode });
+    }
+    match = legacyBareCodePattern.exec(content);
   }
   return result;
 }
@@ -339,10 +423,31 @@ function extractUniqueStocksFromMessages(messages: PickerMessage[]): ExtractedSt
   const byCode = new Map<string, ExtractedStock>();
   for (const message of messages) {
     for (const stock of extractStocksFromText(message.content)) {
-      if (!byCode.has(stock.code)) byCode.set(stock.code, stock);
+      if (!byCode.has(stock.code)) {
+        byCode.set(stock.code, stock);
+        continue;
+      }
+      const existing = byCode.get(stock.code);
+      if (existing && !existing.displayCode && stock.displayCode?.includes(".")) {
+        byCode.set(stock.code, stock);
+      }
     }
   }
   return Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code, "en"));
+}
+
+function normalizeStockCode(raw: string): { code: string; displayCode: string } | null {
+  const normalized = raw.trim().toUpperCase();
+  if (/^\d{6}\.[A-Z]{2}$/.test(normalized)) {
+    return {
+      code: normalized.split(".")[0] ?? normalized,
+      displayCode: normalized,
+    };
+  }
+  if (/^\d{6}$/.test(normalized)) {
+    return { code: normalized, displayCode: normalized };
+  }
+  return null;
 }
 
 function inferMarketFromCode(code: string): "CN" | "HK" | "US" {
@@ -974,10 +1079,31 @@ export default function PickPage() {
     () => toolbar_actions.filter((a) => selectedSuggestedActionIds.includes(a.action_id)),
     [selectedSuggestedActionIds, toolbar_actions],
   );
-  const currentConversationExtractedStocks = useMemo(
-    () => extractUniqueStocksFromMessages(messages),
-    [messages],
-  );
+  const currentConversationExtractedStocks = useMemo(() => {
+    const byCode = new Map<string, ExtractedStock>();
+    for (const stock of extractUniqueStocksFromMessages(messages)) {
+      const normalizedCode = normalizeStockCode(stock.displayCode ?? stock.code);
+      if (!normalizedCode) continue;
+      byCode.set(normalizedCode.code, {
+        ...stock,
+        code: normalizedCode.code,
+        displayCode: normalizedCode.displayCode,
+      });
+    }
+    for (const candidate of candidate_stocks) {
+      const normalized = normalizeStockCode(String(candidate.code ?? ""));
+      const name = String(candidate.name ?? "").trim();
+      if (!normalized) continue;
+      if (!byCode.has(normalized.code)) {
+        byCode.set(normalized.code, {
+          code: normalized.code,
+          displayCode: normalized.displayCode,
+          name: name || normalized.displayCode,
+        });
+      }
+    }
+    return Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code, "en"));
+  }, [candidate_stocks, messages]);
   const analysisSymbolSearchItems = useMemo<AnalyzeSymbolSearchItem[]>(() => {
     const byKey = new Map<string, AnalyzeSymbolSearchItem>();
     for (const item of ANALYZE_SYMBOL_MOCK_UNIVERSE) byKey.set(item.key, item);
@@ -1559,14 +1685,11 @@ export default function PickPage() {
                               >
                                 <ItemHeader className="min-w-0">
                                   <ItemContent>
-                                    <ItemTitle className="max-w-32 text-xs sm:max-w-28">
-                                      <span className="truncate">{stock.name}</span>
+                                    <ItemTitle className="max-w-44 text-[11px] font-normal leading-tight sm:max-w-36">
+                                      <span className="truncate">{`${stock.displayCode ?? stock.code}（${stock.name}）`}</span>
                                     </ItemTitle>
-                                    <ItemDescription className="flex items-center gap-1.5 text-[11px] leading-tight">
-                                      <Badge variant="outline" className="h-4 px-1 text-[10px]">
-                                        {formatMarketShortLabel(market)}
-                                      </Badge>
-                                      <span>{stock.code}</span>
+                                    <ItemDescription className="text-[10px] leading-tight">
+                                      {formatMarketShortLabel(market)}
                                     </ItemDescription>
                                   </ItemContent>
                                   <ItemActions className="gap-1 opacity-0 transition-opacity group-hover/stock-item:opacity-100 group-focus-within/stock-item:opacity-100">

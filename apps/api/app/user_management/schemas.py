@@ -24,6 +24,8 @@ class UserUpdate(BaseModel):
     """用户更新请求模型"""
     email: Optional[EmailStr] = Field(None, description="邮箱")
     phone: Optional[str] = Field(None, max_length=20, description="手机号")
+    display_name: Optional[str] = Field(None, max_length=100, description="展示昵称")
+    avatar_url: Optional[str] = Field(None, max_length=255, description="头像地址")
     status: Optional[UserStatus] = Field(None, description="用户状态")
 
 
