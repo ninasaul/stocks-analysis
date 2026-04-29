@@ -2,6 +2,7 @@
 from typing import Dict, Any
 from fastapi import HTTPException
 import logging
+from ..llm.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
 
@@ -53,12 +54,15 @@ class Reflector:
 请提供详细、准确且可操作的分析结果。
 """
 
-    async def reflect_on_decision(self, decision_data: Dict[str, Any]) -> tuple:
+    async def reflect_on_decision(self, decision_data: Dict[str, Any], user_id: int = None, preset_id: int = None, user_config_id: int = None) -> tuple:
         """
         对交易决策进行反思
         
         Args:
             decision_data: 包含决策相关数据的字典
+            user_id: 用户ID（用于记录使用量）
+            preset_id: 预设ID（用于记录使用量）
+            user_config_id: 用户配置ID（用于记录使用量）
         
         Returns:
             (反思结果, token消耗)，如果失败则包含error字段
@@ -96,10 +100,20 @@ JSON 格式示例：
         
         # 调用 LLM 进行反思
         try:
-            response, token_usage = await self.llm.chat(
-                self.reflection_prompt + "\n" + prompt,
-                response_format="json"
-            )
+            if user_id:
+                response, token_usage = await LLMService.wrap_chat(
+                    llm_client=self.llm,
+                    user_id=user_id,
+                    prompt=self.reflection_prompt + "\n" + prompt,
+                    response_format="json",
+                    preset_id=preset_id,
+                    user_config_id=user_config_id
+                )
+            else:
+                response, token_usage = await self.llm.chat(
+                    self.reflection_prompt + "\n" + prompt,
+                    response_format="json"
+                )
             result = self._safe_parse_json(response)
             return result, token_usage.get('total_tokens', 0)
         except Exception as e:

@@ -7,6 +7,7 @@ from .depth_config import (
 )
 from .prompts import get_analyst_prompt
 from ..core.logging import logger
+from ..llm.llm_service import LLMService
 
 
 class NewsAnalyst(BaseAnalyst):
@@ -24,8 +25,12 @@ class NewsAnalyst(BaseAnalyst):
         depth: int = 1,
         llm=None,
         market: str = "A股",
+        sentiment_analysis: bool = False,
+        user_id: int = None,
+        preset_id: int = None,
+        user_config_id: int = None,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> tuple:
         """
         执行新闻分析
 
@@ -35,24 +40,28 @@ class NewsAnalyst(BaseAnalyst):
             depth: 分析深度 (1-3)
             llm: LLM客户端（可选）
             market: 市场类型（A股、港股、美股）
+            sentiment_analysis: 是否执行详细情绪分析
+            user_id: 用户ID（用于记录使用量）
+            preset_id: 预设ID（用于记录使用量）
+            user_config_id: 用户配置ID（用于记录使用量）
             **kwargs: 其他参数
 
         Returns:
-            新闻分析结果，包含新闻事件分析和市场情绪评估
+            (新闻分析结果, token消耗)
         """
         self.tool_call_count = 0
-        logger.info(f"📰 [{self.name}] 开始分析 {stock_name}({ticker})，深度={depth} ({self._get_depth_chinese_name(depth)})")
+        logger.info(f"📰 [{self.name}] 开始分析 {stock_name}({ticker})，深度={depth}，情绪分析={sentiment_analysis}")
 
         try:
-            max_news = self.get_max_news_count(depth)
-            logger.debug(f"[{self.name}] 深度{depth}允许的最大新闻数量: {max_news}")
-
-            result = await self._perform_news_analysis(ticker, stock_name, depth, llm, market, max_news)
+            result, total_tokens = await self._perform_news_analysis(
+                ticker, stock_name, depth, llm, market, sentiment_analysis, 
+                user_id=user_id, preset_id=preset_id, user_config_id=user_config_id
+            )
             logger.info(f"✅ [{self.name}] {stock_name}({ticker}) 分析完成，情绪={result.get('sentiment', 'N/A')}")
-            return result
+            return result, total_tokens
         except Exception as e:
             logger.error(f"❌ [{self.name}] {stock_name}({ticker}) 分析失败: {e}")
-            return self._create_error_result(f"新闻分析失败: {str(e)}")
+            return self._create_error_result(f"新闻分析失败: {str(e)}"), 0
 
     async def _perform_news_analysis(
         self,
@@ -61,8 +70,11 @@ class NewsAnalyst(BaseAnalyst):
         depth: int,
         llm=None,
         market: str = "A股",
-        max_news: int = 10
-    ) -> Dict[str, Any]:
+        sentiment_analysis: bool = False,
+        user_id: int = None,
+        preset_id: int = None,
+        user_config_id: int = None
+    ) -> tuple:
         """
         执行新闻分析
 
@@ -72,11 +84,16 @@ class NewsAnalyst(BaseAnalyst):
             depth: 分析深度
             llm: LLM客户端
             market: 市场类型
-            max_news: 最大新闻数量
+            sentiment_analysis: 是否执行详细情绪分析
+            user_id: 用户ID（用于记录使用量）
+            preset_id: 预设ID（用于记录使用量）
+            user_config_id: 用户配置ID（用于记录使用量）
 
         Returns:
-            新闻分析结果
+            (新闻分析结果, token消耗)
         """
+        max_news = self.get_max_news_count(depth)
+        logger.debug(f"[{self.name}] 深度{depth}允许的最大新闻数量: {max_news}")
         news_data = self._fetch_news(ticker, stock_name, max_news)
 
         if not news_data or len(news_data) == 0:
@@ -90,7 +107,7 @@ class NewsAnalyst(BaseAnalyst):
                 "market_impact": "无法评估",
                 "analysis_depth": depth,
                 "depth_name": self._get_depth_chinese_name(depth)
-            }
+            }, 0
 
         sentiment, sentiment_score = self._analyze_sentiment(news_data)
         key_events = self._extract_key_events(news_data)
@@ -113,22 +130,25 @@ class NewsAnalyst(BaseAnalyst):
             "max_news_count": max_news
         }
 
-        if self.should_enable_sentiment_analysis(depth):
+        if sentiment_analysis:
             result["sentiment_analysis"] = self._detailed_sentiment_analysis(news_data)
 
         if self.should_enable_risk_assessment(depth):
             result["risk_assessment"] = self._assess_news_risk(news_data, sentiment, market_impact)
 
+        total_tokens = 0
         if self.should_use_llm(depth) and llm:
             try:
-                llm_analysis = await self._generate_llm_news_analysis(
-                    ticker, stock_name, news_data, sentiment, sentiment_score, depth, llm
+                llm_analysis, tokens = await self._generate_llm_news_analysis(
+                    ticker, stock_name, news_data, sentiment, sentiment_score, depth, llm, 
+                    user_id=user_id, preset_id=preset_id, user_config_id=user_config_id
                 )
                 result["llm_analysis"] = llm_analysis
+                total_tokens = tokens
             except Exception as e:
                 logger.warning(f"[{self.name}] LLM分析失败: {e}")
 
-        return result
+        return result, total_tokens
 
     def _detailed_sentiment_analysis(self, news_data: List[Dict]) -> Dict[str, Any]:
         """
@@ -366,8 +386,11 @@ class NewsAnalyst(BaseAnalyst):
         sentiment: str,
         sentiment_score: float,
         depth: int,
-        llm
-    ) -> str:
+        llm,
+        user_id: int = None,
+        preset_id: int = None,
+        user_config_id: int = None
+    ) -> tuple:
         """
         使用LLM生成新闻分析
 
@@ -379,12 +402,15 @@ class NewsAnalyst(BaseAnalyst):
             sentiment_score: 情绪分数
             depth: 分析深度
             llm: LLM客户端
+            user_id: 用户ID（用于记录使用量）
+            preset_id: 预设ID（用于记录使用量）
+            user_config_id: 用户配置ID（用于记录使用量）
 
         Returns:
-            LLM生成的新闻分析文本
+            (LLM生成的新闻分析文本, token消耗)
         """
         if not llm:
-            return ""
+            return "", 0
 
         # 获取基于深度的提示词
         prompt_template = get_analyst_prompt("news", depth)
@@ -403,11 +429,20 @@ class NewsAnalyst(BaseAnalyst):
         prompt += f"\n近期新闻：\n{news_summary}\n"
         prompt += "\n请基于以上新闻数据提供专业的新闻分析。\n"
         try:
-            response = await llm.chat(prompt)
-            return response
+            if user_id:
+                response, token_usage = await LLMService.wrap_chat(
+                    llm_client=llm,
+                    user_id=user_id,
+                    prompt=prompt,
+                    preset_id=preset_id,
+                    user_config_id=user_config_id
+                )
+            else:
+                response, token_usage = await llm.chat(prompt)
+            return response, token_usage.get('total_tokens', 0)
         except Exception as e:
             logger.error(f"[{self.name}] LLM分析调用失败: {e}")
-            return ""
+            return "", 0
 
     def _generate_news_report(
         self,

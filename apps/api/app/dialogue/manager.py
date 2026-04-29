@@ -4,7 +4,7 @@ import asyncio
 from app.core.logging import logger
 from app.core.stock_service import StockService
 from app.core.database import execute_query
-from app.services.llm_service import LLMManager
+from app.llm.llm_service import LLMManager
 import json
 import re
 

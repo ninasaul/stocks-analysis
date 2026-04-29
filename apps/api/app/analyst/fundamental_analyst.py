@@ -1,5 +1,8 @@
 """基本面分析师模块 - 负责财务数据和估值分析"""
 from typing import Dict, Any, Optional, List
+import json
+import re
+
 from .base_analyst import BaseAnalyst
 from .depth_config import (
     get_fundamental_metrics_for_depth,
@@ -7,7 +10,8 @@ from .depth_config import (
 )
 from .prompts import get_analyst_prompt
 from ..core.logging import logger
-from ..data.fetcher import fetch_fundamental
+from ..core.stock_service import StockService
+from ..llm.llm_service import LLMService
 
 
 class FundamentalAnalyst(BaseAnalyst):
@@ -24,6 +28,10 @@ class FundamentalAnalyst(BaseAnalyst):
         stock_name: str,
         depth: int = 1,
         llm=None,
+        risk_assessment: bool = False,
+        user_id: int = None,
+        preset_id: int = None,
+        user_config_id: int = None,
         **kwargs
     ) -> tuple:
         """
@@ -34,19 +42,25 @@ class FundamentalAnalyst(BaseAnalyst):
             stock_name: 股票名称
             depth: 分析深度 (1-3)
             llm: LLM客户端（可选）
+            risk_assessment: 是否执行风险评估
+            user_id: 用户ID（用于记录使用量）
+            preset_id: 预设ID（用于记录使用量）
+            user_config_id: 用户配置ID（用于记录使用量）
             **kwargs: 其他参数
 
         Returns:
             (基本面分析结果, token消耗)
         """
         self.tool_call_count = 0
-        logger.info(f"📊 [{self.name}] 开始分析 {stock_name}({ticker})，深度={depth} ({self._get_depth_chinese_name(depth)})")
+        logger.info(f"📊 [{self.name}] 开始分析 {stock_name}({ticker})，深度={depth}，风险评估={risk_assessment}")
 
         try:
             metrics = self.get_fundamental_metrics(depth)
             logger.debug(f"[{self.name}] 深度{depth}使用的基本面指标: {metrics}")
 
-            result, total_tokens = await self._perform_fundamental_analysis(ticker, stock_name, depth, llm, metrics)
+            result, total_tokens = await self._perform_fundamental_analysis(
+                ticker, stock_name, depth, llm, metrics, risk_assessment, user_id, preset_id, user_config_id
+            )
             logger.info(f"✅ [{self.name}] {stock_name}({ticker}) 分析完成, token消耗: {total_tokens}")
             return result, total_tokens
         except Exception as e:
@@ -59,7 +73,11 @@ class FundamentalAnalyst(BaseAnalyst):
         stock_name: str,
         depth: int,
         llm=None,
-        metrics: List[str] = None
+        metrics: List[str] = None,
+        risk_assessment: bool = False,
+        user_id: int = None,
+        preset_id: int = None,
+        user_config_id: int = None
     ) -> tuple:
         """
         执行基本面分析
@@ -69,12 +87,16 @@ class FundamentalAnalyst(BaseAnalyst):
             stock_name: 股票名称
             depth: 分析深度
             llm: LLM客户端
-            metrics: 要使用的基本面指标列表
+            metrics: 要分析的基本面指标列表
+            risk_assessment: 是否执行风险评估
+            user_id: 用户ID（用于记录使用量）
+            preset_id: 预设ID（用于记录使用量）
+            user_config_id: 用户配置ID（用于记录使用量）
 
         Returns:
             (基本面分析结果, token消耗)
         """
-        fundamental_data = fetch_fundamental(ticker)
+        fundamental_data = StockService().fetch_fundamental(ticker)
 
         if not fundamental_data:
             return {
@@ -96,16 +118,32 @@ class FundamentalAnalyst(BaseAnalyst):
             "used_metrics": metrics or []
         }
 
+        if risk_assessment:
+            result["risk_assessment"] = self._assess_fundamental_risk(fundamental_data)
+
         total_tokens = 0
         if self.should_use_llm(depth) and llm:
             try:
                 llm_analysis, tokens = await self._generate_llm_analysis(
-                    ticker, stock_name, fundamental_data, depth, llm, metrics
+                    ticker, stock_name, fundamental_data, depth, llm, metrics, user_id, preset_id, user_config_id
                 )
                 result["llm_analysis"] = llm_analysis
                 total_tokens = tokens
             except Exception as e:
                 logger.warning(f"[{self.name}] LLM分析失败: {e}")
+
+        # 行业景气度评估（仅在深度>=2且有LLM时）
+        if depth >= 2 and llm and user_id:
+            industry = fundamental_data.get("industry", "")
+            if industry:
+                try:
+                    sentiment_score, sentiment_tokens = await self._calculate_industry_sentiment(
+                        industry, llm, user_id, preset_id, user_config_id
+                    )
+                    result["industry_sentiment"] = sentiment_score
+                    total_tokens += sentiment_tokens
+                except Exception as e:
+                    logger.warning(f"[{self.name}] 行业景气度评估失败: {e}")
 
         return result, total_tokens
 
@@ -114,52 +152,115 @@ class FundamentalAnalyst(BaseAnalyst):
         计算基本面评分
 
         Args:
-            fundamental_data: 基本面数据
+            fundamental_data: 基本面数据（扁平化结构，来自 stock_service.fetch_fundamental）
             metrics: 要使用的基本面指标列表
 
         Returns:
             基本面评分 (0-100)
         """
         score = 50
-        metrics = metrics or ["PE", "PB", "ROE"]
+        # 默认使用指定的基本面指标列表
+        metrics = metrics or ["PE", "PB", "ROE", "GROSS_PROFIT_RATE", "ASSET_LIABILITY_RATIO"]
 
-        valuation = fundamental_data.get("valuation", {})
-        if "PE" in metrics and valuation:
-            pe = valuation.get("pe", 0)
-            if 10 <= pe <= 30:
+        # PE 市盈率评分
+        if "PE" in metrics:
+            pe = fundamental_data.get("pe", 0)
+            if pe and 10 <= pe <= 30:
                 score += 10
-            elif 5 <= pe < 10 or 30 < pe <= 50:
+            elif pe and (5 <= pe < 10 or 30 < pe <= 50):
                 score += 5
 
-        profitability = fundamental_data.get("profitability", {})
-        if "ROE" in metrics and profitability:
-            roe = profitability.get("roe", 0)
-            if roe > 15:
+        # PB 市净率评分
+        if "PB" in metrics:
+            pb = fundamental_data.get("pb", 0)
+            if pb and 1 <= pb <= 3:
+                score += 10
+            elif pb and (0.5 <= pb < 1 or 3 < pb <= 5):
+                score += 5
+
+        # ROE 净资产收益率评分
+        if "ROE" in metrics:
+            roe = fundamental_data.get("roe", 0)
+            if roe and roe > 15:
                 score += 15
-            elif 10 <= roe <= 15:
+            elif roe and 10 <= roe <= 15:
                 score += 10
-            elif 5 <= roe < 10:
+            elif roe and 5 <= roe < 10:
                 score += 5
 
-        growth = fundamental_data.get("growth", {})
-        if "RevenueGrowth" in metrics and growth:
-            revenue_growth = growth.get("revenue_growth", 0)
-            if revenue_growth > 20:
+        # GROSS_PROFIT_RATE 毛利率评分
+        if "GROSS_PROFIT_RATE" in metrics:
+            gross_profit_rate = fundamental_data.get("gross_profit_rate", 0)
+            if gross_profit_rate and gross_profit_rate > 30:
                 score += 15
-            elif 10 <= revenue_growth <= 20:
+            elif gross_profit_rate and 20 <= gross_profit_rate <= 30:
                 score += 10
-            elif 5 <= revenue_growth < 10:
+            elif gross_profit_rate and 10 <= gross_profit_rate < 20:
                 score += 5
 
-        health = fundamental_data.get("health", {})
-        if "DebtRatio" in metrics and health:
-            debt_ratio = health.get("debt_ratio", 0)
-            if debt_ratio < 50:
+        # ASSET_LIABILITY_RATIO 资产负债率评分
+        if "ASSET_LIABILITY_RATIO" in metrics:
+            asset_liability_ratio = fundamental_data.get("asset_liability_ratio", 0)
+            if asset_liability_ratio and asset_liability_ratio < 50:
                 score += 10
-            elif 50 <= debt_ratio < 70:
+            elif asset_liability_ratio and 50 <= asset_liability_ratio < 70:
                 score += 5
 
         return min(100, max(0, score))
+
+    def _assess_fundamental_risk(self, fundamental_data: Dict) -> Dict[str, Any]:
+        """
+        评估基本面风险
+
+        Args:
+            fundamental_data: 基本面数据
+
+        Returns:
+            风险评估结果
+        """
+        risk_items = []
+        risk_level = "低"
+
+        pe = fundamental_data.get("pe", 0)
+        if pe and pe > 50:
+            risk_items.append({"type": "估值风险", "description": f"PE={pe:.2f}偏高，可能存在估值泡沫风险", "severity": "高"})
+            risk_level = "高"
+        elif pe and pe > 30:
+            risk_items.append({"type": "估值风险", "description": f"PE={pe:.2f}较高，估值偏贵", "severity": "中"})
+            if risk_level != "高":
+                risk_level = "中"
+
+        pb = fundamental_data.get("pb", 0)
+        if pb and pb > 5:
+            risk_items.append({"type": "估值风险", "description": f"PB={pb:.2f}偏高", "severity": "中"})
+            if risk_level != "高":
+                risk_level = "中"
+
+        roe = fundamental_data.get("roe", 0)
+        if roe and roe < 5:
+            risk_items.append({"type": "盈利风险", "description": f"ROE={roe:.2f}%较低，盈利能力弱", "severity": "高"})
+            risk_level = "高"
+
+        asset_liability_ratio = fundamental_data.get("asset_liability_ratio", 0)
+        if asset_liability_ratio and asset_liability_ratio > 70:
+            risk_items.append({"type": "财务风险", "description": f"资产负债率={asset_liability_ratio:.2f}%过高，偿债压力大", "severity": "高"})
+            risk_level = "高"
+        elif asset_liability_ratio and asset_liability_ratio > 50:
+            risk_items.append({"type": "财务风险", "description": f"资产负债率={asset_liability_ratio:.2f}%偏高", "severity": "中"})
+            if risk_level != "高":
+                risk_level = "中"
+
+        gross_profit_rate = fundamental_data.get("gross_profit_rate", 0)
+        if gross_profit_rate and gross_profit_rate < 10:
+            risk_items.append({"type": "盈利风险", "description": f"毛利率={gross_profit_rate:.2f}%过低，竞争力弱", "severity": "中"})
+            if risk_level != "高":
+                risk_level = "中"
+
+        return {
+            "risk_level": risk_level,
+            "risk_items": risk_items,
+            "summary": f"风险评估{risk_level}级，发现{len(risk_items)}个风险点"
+        }
 
     async def _generate_llm_analysis(
         self,
@@ -168,7 +269,10 @@ class FundamentalAnalyst(BaseAnalyst):
         fundamental_data: Dict,
         depth: int,
         llm,
-        metrics: List[str] = None
+        metrics: List[str] = None,
+        user_id: int = None,
+        preset_id: int = None,
+        user_config_id: int = None
     ) -> tuple:
         """
         使用LLM生成基本面分析
@@ -180,6 +284,9 @@ class FundamentalAnalyst(BaseAnalyst):
             depth: 分析深度
             llm: LLM客户端
             metrics: 要使用的基本面指标列表
+            user_id: 用户ID（用于记录使用量）
+            preset_id: 预设ID（用于记录使用量）
+            user_config_id: 用户配置ID（用于记录使用量）
 
         Returns:
             (LLM生成的分析文本, token消耗)
@@ -212,7 +319,16 @@ class FundamentalAnalyst(BaseAnalyst):
             prompt += f"- 现金流：经营现金流={cash_flow.get('operating_cash_flow', 'N/A')}\n"
         prompt += "\n请基于以上数据提供专业的基本面分析。\n"
         try:
-            response, token_usage = await llm.chat(prompt)
+            if user_id:
+                response, token_usage = await LLMService.wrap_chat(
+                    llm_client=llm,
+                    user_id=user_id,
+                    prompt=prompt,
+                    preset_id=preset_id,
+                    user_config_id=user_config_id
+                )
+            else:
+                response, token_usage = await llm.chat(prompt)
             return response, token_usage.get('total_tokens', 0)
         except Exception as e:
             logger.warning(f"[{self.name}] LLM分析失败: {e}")
@@ -240,7 +356,8 @@ class FundamentalAnalyst(BaseAnalyst):
             基本面分析报告文本
         """
         depth_desc = self._get_depth_description(depth)
-        metrics = metrics or self.get_fundamental_metrics(depth)
+        # 默认使用指定的基本面指标列表
+        metrics = metrics or ["PE", "PB", "ROE", "GROSS_PROFIT_RATE", "ASSET_LIABILITY_RATIO"]
 
         report = f"""# {stock_name}（{ticker}）基本面分析报告
 **分析深度：{depth_desc}**
@@ -294,8 +411,8 @@ class FundamentalAnalyst(BaseAnalyst):
 
         if "ROE" in metrics:
             report += f"| 净资产收益率(ROE) | {fundamental_data.get('roe', 'N/A')}% | 越高越好 |\n"
-        if "GrossMargin" in metrics:
-            report += f"| 毛利率 | {fundamental_data.get('gross_profit_rate', 'N/A')}% | 越高越好 |\n"
+        if "GROSS_PROFIT_RATE" in metrics:
+            report += f"| 销售毛利率 | {fundamental_data.get('gross_profit_rate', 'N/A')}% | 越高越好 |\n"
 
         report += """
 
@@ -322,7 +439,8 @@ class FundamentalAnalyst(BaseAnalyst):
 
 """
 
-        report += f"| 资产负债率 | {fundamental_data.get('asset_liability_ratio', 'N/A')}% | 越低越健康 |\n"
+        if "ASSET_LIABILITY_RATIO" in metrics:
+            report += f"| 资产负债率 | {fundamental_data.get('asset_liability_ratio', 'N/A')}% | 越低越健康 |\n"
 
         report += """
 
@@ -424,3 +542,73 @@ class FundamentalAnalyst(BaseAnalyst):
             return "财务偏紧"
         else:
             return "财务风险较大"
+
+    async def _calculate_industry_sentiment(
+        self,
+        industry: str,
+        llm,
+        user_id: int,
+        preset_id: Optional[int] = None,
+        user_config_id: Optional[int] = None
+    ) -> tuple:
+        """
+        使用LLM评估行业景气度
+        
+        Args:
+            industry: 行业名称
+            llm: LLM客户端实例
+            user_id: 用户ID
+            preset_id: 预设配置ID
+            user_config_id: 用户配置ID
+            
+        Returns:
+            tuple: (景气度分数 [0,1], token消耗数量)
+        """
+        prompt = f"""
+请作为一位资深的行业分析师，对「{industry}」行业进行全面的景气度评估。
+
+请从以下维度进行分析：
+1. 行业整体增长趋势和发展前景
+2. 当前政策支持力度和监管环境
+3. 市场需求状况和下游应用场景
+4. 行业竞争格局和头部企业表现
+5. 技术创新进展和产业链完整性
+
+评估标准：
+- 0.0-0.3: 行业景气度较低，面临较大压力
+- 0.3-0.6: 行业景气度中性，处于平稳发展阶段
+- 0.6-1.0: 行业景气度较高，具备良好发展前景
+
+请按照以下JSON格式输出结果：
+{{
+    "sentiment_score": 0.XX,
+    "reason": "简要说明评估理由"
+}}
+"""
+        
+        result, tokens = await LLMService.wrap_chat(
+            llm_client=llm,
+            user_id=user_id,
+            prompt=prompt,
+            response_format="json",
+            temperature=0.3,
+            seed=42,
+            preset_id=preset_id,
+            user_config_id=user_config_id
+        )
+        
+        total_tokens = tokens.get('total_tokens', 0)
+        
+        try:
+            data = json.loads(result)
+            sentiment_score = float(data.get("sentiment_score", 0.5))
+            sentiment_score = max(0.0, min(1.0, sentiment_score))
+        except (json.JSONDecodeError, ValueError):
+            match = re.search(r'sentiment_score["\']?\s*[:=]\s*([\d.]+)', result)
+            if match:
+                sentiment_score = max(0.0, min(1.0, float(match.group(1))))
+            else:
+                sentiment_score = 0.5
+        
+        logger.info(f"📊 [{self.name}] 行业景气度评估完成: {industry} = {sentiment_score:.4f}")
+        return sentiment_score, total_tokens

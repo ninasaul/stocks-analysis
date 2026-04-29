@@ -242,6 +242,7 @@ class DatabaseInitializer:
         CREATE TABLE IF NOT EXISTS stock_analysis_results (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL,
+            record_id VARCHAR(36) UNIQUE,
             stock_code VARCHAR(20) NOT NULL,
             analysis_date DATE NOT NULL,
             analysis_result JSONB NOT NULL,
@@ -251,6 +252,7 @@ class DatabaseInitializer:
 
         CREATE INDEX IF NOT EXISTS idx_stock_analysis_user_date ON stock_analysis_results(user_id, analysis_date);
         CREATE INDEX IF NOT EXISTS idx_stock_analysis_stock_date ON stock_analysis_results(stock_code, analysis_date);
+        CREATE INDEX IF NOT EXISTS idx_stock_analysis_record_id ON stock_analysis_results(record_id);
         """
         self.execute_sql(sql, "创建股票分析结果表")
 
@@ -351,7 +353,7 @@ class DatabaseInitializer:
             models JSONB DEFAULT '[]',
             is_active BOOLEAN DEFAULT true,
             is_system BOOLEAN DEFAULT false,
-            config JSONB,
+            provider VARCHAR(50) DEFAULT 'custom',
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
@@ -373,7 +375,6 @@ class DatabaseInitializer:
             base_url VARCHAR(500) NOT NULL,
             model VARCHAR(100) NOT NULL,
             is_active BOOLEAN DEFAULT true,
-            config JSONB,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_user_llm_configs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -398,7 +399,6 @@ class DatabaseInitializer:
             prompt_tokens INTEGER DEFAULT 0,
             completion_tokens INTEGER DEFAULT 0,
             total_tokens INTEGER DEFAULT 0,
-            cost DECIMAL(10, 4) DEFAULT 0,
             called_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -448,26 +448,42 @@ class DatabaseInitializer:
         # 先启用加密扩展
         self.enable_pgcrypto()
         
-        self.create_users_table()
-        self.create_memberships_table()
-        self.create_admins_table()  # 新增：创建管理员表
-        self.create_api_call_logs_table()
-        self.create_refresh_tokens_table()
-        self.create_token_blacklist_table()
-        self.create_wechat_users_table()
-        self.create_stock_analysis_results_table()
-        self.create_user_stock_watchlist_table()
-        self.create_user_stock_portfolio_table()
-        self.create_dialogue_sessions_table()
-        self.create_dialogue_messages_table()
-        self.create_llm_presets_table()
-        self.create_user_llm_configs_table()
-        self.create_user_llm_usage_table()
-        self.create_user_llm_preferences_table()
+        # 定义要创建的表列表
+        tables_to_create = [
+            ("users", self.create_users_table),
+            ("memberships", self.create_memberships_table),
+            ("admins", self.create_admins_table),
+            ("api_call_logs", self.create_api_call_logs_table),
+            ("refresh_tokens", self.create_refresh_tokens_table),
+            ("token_blacklist", self.create_token_blacklist_table),
+            ("wechat_users", self.create_wechat_users_table),
+            ("stock_analysis_results", self.create_stock_analysis_results_table),
+            ("user_stock_watchlist", self.create_user_stock_watchlist_table),
+            ("user_stock_portfolio", self.create_user_stock_portfolio_table),
+            ("dialogue_sessions", self.create_dialogue_sessions_table),
+            ("dialogue_messages", self.create_dialogue_messages_table),
+            ("llm_presets", self.create_llm_presets_table),
+            ("user_llm_configs", self.create_user_llm_configs_table),
+            ("user_llm_usage", self.create_user_llm_usage_table),
+            ("user_llm_preferences", self.create_user_llm_preferences_table)
+        ]
+        
+        # 创建所有表
+        created_tables = []
+        for table_name, create_func in tables_to_create:
+            try:
+                create_func()
+                created_tables.append(table_name)
+                print(f"[OK] 创建表: {table_name}")
+            except Exception as e:
+                print(f"[ERROR] 创建表 {table_name} 失败: {e}")
+        
+        # 应用数据库结构补丁
         self.apply_schema_patches()
 
         print("=" * 50)
-        print("所有表创建完成！\n")
+        print(f"所有表创建完成！共创建 {len(created_tables)} 个表")
+        print(f"已创建的表: {', '.join(created_tables)}\n")
 
     def apply_schema_patches(self):
         """
@@ -484,10 +500,110 @@ class DatabaseInitializer:
         -- 修改created_at字段为带时区的TIMESTAMP WITH TIME ZONE
         ALTER TABLE stock_analysis_results ALTER COLUMN created_at TYPE TIMESTAMP WITH TIME ZONE USING created_at AT TIME ZONE 'Asia/Shanghai';
 
+        -- 添加record_id字段用于唯一标识分析记录
+        ALTER TABLE stock_analysis_results ADD COLUMN IF NOT EXISTS record_id VARCHAR(36) UNIQUE;
+        CREATE INDEX IF NOT EXISTS idx_stock_analysis_record_id ON stock_analysis_results(record_id);
+
+        -- 为旧记录生成UUID
+        UPDATE stock_analysis_results SET record_id = gen_random_uuid()::VARCHAR WHERE record_id IS NULL;
+
         -- 添加llm_presets表的models列
         ALTER TABLE llm_presets ADD COLUMN IF NOT EXISTS models JSONB DEFAULT '[]';
+
+        -- 添加provider字段（用于替代原来用name字段存储provider的做法）
+        ALTER TABLE llm_presets ADD COLUMN IF NOT EXISTS provider VARCHAR(50) DEFAULT 'custom';
+
+        -- 删除config字段（冗余字段，已不再使用）
+        ALTER TABLE llm_presets DROP COLUMN IF EXISTS config;
+
+        -- 添加user_llm_configs表的provider字段
+        ALTER TABLE user_llm_configs ADD COLUMN IF NOT EXISTS provider VARCHAR(50);
+
+        -- 删除user_llm_configs表的config字段（冗余字段，已不再使用）
+        ALTER TABLE user_llm_configs DROP COLUMN IF EXISTS config;
+
+        -- 删除user_llm_usage表的cost字段（冗余字段，已不再使用）
+        ALTER TABLE user_llm_usage DROP COLUMN IF EXISTS cost;
         """
         self.execute_sql(sql, "应用数据库结构补丁（仅加列/索引，不做历史数据回填）")
+        
+        # 执行数据迁移：将旧的name值迁移到provider字段（仅当provider为默认值时）
+        self.migrate_provider_data()
+
+    def migrate_provider_data(self):
+        """
+        迁移provider字段数据：将旧的name值迁移到新的provider字段
+        这是因为之前的设计中，name字段同时承担了配置名称和provider的双重职责
+        现在需要将原来存储在name中的provider值迁移到新的provider字段
+        """
+        print("\n检查并迁移provider字段数据...")
+        print("-" * 50)
+        
+        cursor = self.connection.cursor()
+        
+        try:
+            # 检查llm_presets表是否存在provider字段
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM information_schema.columns 
+                WHERE table_name = 'llm_presets' AND column_name = 'provider'
+            """)
+            if cursor.fetchone()[0] == 0:
+                print("llm_presets表不存在provider字段，跳过数据迁移")
+                return
+            
+            # 检查是否有需要迁移的数据（provider为默认值'custom'且name不是配置名格式）
+            cursor.execute("""
+                SELECT id, name, provider 
+                FROM llm_presets 
+                WHERE provider = 'custom' OR provider IS NULL
+            """)
+            rows = cursor.fetchall()
+            
+            if not rows:
+                print("没有需要迁移的provider数据")
+                return
+            
+            print(f"发现 {len(rows)} 条记录需要迁移provider数据")
+            
+            # 定义旧name值到新provider值的映射
+            # 原来的name字段存储的是provider值，现在需要迁移到新字段
+            provider_mapping = {
+                'aliyun': 'aliyun',
+                'deepseek': 'deepseek',
+                'openai': 'openai',
+                'volcengine': 'volcengine',
+                'qwen': 'aliyun',
+                'qwen_config': 'aliyun',
+                'deepseek_config': 'deepseek'
+            }
+            
+            migrated_count = 0
+            for row in rows:
+                preset_id, old_name, current_provider = row
+                # 根据旧name值确定新的provider值
+                new_provider = provider_mapping.get(old_name.lower(), 'custom')
+                
+                if new_provider != 'custom':
+                    cursor.execute("""
+                        UPDATE llm_presets 
+                        SET provider = %s 
+                        WHERE id = %s
+                    """, (new_provider, preset_id))
+                    migrated_count += 1
+                    print(f"迁移记录 ID={preset_id}: name='{old_name}' -> provider='{new_provider}'")
+            
+            if migrated_count > 0:
+                self.connection.commit()
+                print(f"\n成功迁移 {migrated_count} 条记录的provider数据")
+            else:
+                print("没有需要迁移的provider数据（所有name都不是已知的provider值）")
+                
+        except Exception as e:
+            print(f"[ERROR] 迁移provider数据失败: {e}")
+            self.connection.rollback()
+        finally:
+            cursor.close()
 
     def migrate_api_keys_to_encrypted(self, encryption_key: str):
         """
@@ -669,7 +785,7 @@ class DatabaseInitializer:
             models JSONB DEFAULT '[]',
             is_active BOOLEAN DEFAULT true,
             is_system BOOLEAN DEFAULT false,
-            config JSONB,
+            provider VARCHAR(50) DEFAULT 'custom',
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
@@ -683,7 +799,6 @@ class DatabaseInitializer:
             base_url VARCHAR(500) NOT NULL,
             model VARCHAR(100) NOT NULL,
             is_active BOOLEAN DEFAULT true,
-            config JSONB,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_user_llm_configs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -700,7 +815,6 @@ class DatabaseInitializer:
             prompt_tokens INTEGER DEFAULT 0,
             completion_tokens INTEGER DEFAULT 0,
             total_tokens INTEGER DEFAULT 0,
-            cost DECIMAL(10, 4) DEFAULT 0,
             called_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -721,24 +835,65 @@ class DatabaseInitializer:
             print("操作已取消")
             return
 
-        # DROP TABLE IF EXISTS user_llm_usage CASCADE;
-        # DROP TABLE IF EXISTS user_llm_configs CASCADE;
-        # DROP TABLE IF EXISTS llm_presets CASCADE;
+        # 先获取当前存在的表
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public'
+            ORDER BY table_name;
+        """)
+        existing_tables = [row[0] for row in cursor.fetchall()]
+        cursor.close()
 
-        sql = """
-        DROP TABLE IF EXISTS dialogue_messages CASCADE;
-        DROP TABLE IF EXISTS dialogue_sessions CASCADE;
-        DROP TABLE IF EXISTS user_stock_portfolio CASCADE;
-        DROP TABLE IF EXISTS user_stock_watchlist CASCADE;
-        DROP TABLE IF EXISTS stock_analysis_results CASCADE;
-        DROP TABLE IF EXISTS wechat_users CASCADE;
-        DROP TABLE IF EXISTS token_blacklist CASCADE;
-        DROP TABLE IF EXISTS refresh_tokens CASCADE;
-        DROP TABLE IF EXISTS api_call_logs CASCADE;
-        DROP TABLE IF EXISTS memberships CASCADE;
-        DROP TABLE IF EXISTS users CASCADE;
-        """
-        self.execute_sql(sql, "删除所有表")
+        if not existing_tables:
+            print("数据库中没有表")
+            return
+
+        print(f"\n当前数据库中的表 ({len(existing_tables)} 个):")
+        print("-" * 50)
+        for table in existing_tables:
+            print(f"  - {table}")
+        print("-" * 50)
+
+        # 定义要删除的表（按依赖顺序）
+        tables_to_drop = [
+            'user_llm_usage',
+            'user_llm_preferences',
+            'user_llm_configs',
+            'llm_presets',
+            'dialogue_messages',
+            'dialogue_sessions',
+            'user_stock_portfolio',
+            'user_stock_watchlist',
+            'stock_analysis_results',
+            'wechat_users',
+            'token_blacklist',
+            'refresh_tokens',
+            'api_call_logs',
+            'memberships',
+            'admins',
+            'users'
+        ]
+
+        # 只删除实际存在的表
+        dropped_tables = []
+        for table in tables_to_drop:
+            if table in existing_tables:
+                try:
+                    cursor = self.connection.cursor()
+                    cursor.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+                    self.connection.commit()
+                    dropped_tables.append(table)
+                    print(f"[OK] 删除表: {table}")
+                    cursor.close()
+                except Exception as e:
+                    print(f"[ERROR] 删除表 {table} 失败: {e}")
+                    self.connection.rollback()
+
+        print("=" * 50)
+        print(f"删除完成！共删除 {len(dropped_tables)} 个表")
+        print(f"已删除的表: {', '.join(dropped_tables)}\n")
 
     def show_tables(self):
         """显示所有表"""

@@ -28,7 +28,6 @@ ANALYST_DEPTH_CONFIG = {
         "time_estimate": 30,
         "report_detail_level": 1,
         "features": {
-            "technical_indicators": ["MA"],
             "fundamental_metrics": ["PE", "PB"],
             "sentiment_analysis": False,
             "risk_assessment": False,
@@ -50,7 +49,6 @@ ANALYST_DEPTH_CONFIG = {
         "time_estimate": 60,
         "report_detail_level": 2,
         "features": {
-            "technical_indicators": ["MA", "MACD"],
             "fundamental_metrics": ["PE", "PB", "ROE"],
             "sentiment_analysis": True,
             "risk_assessment": False,
@@ -72,8 +70,7 @@ ANALYST_DEPTH_CONFIG = {
         "time_estimate": 120,
         "report_detail_level": 3,
         "features": {
-            "technical_indicators": ["MA", "MACD", "BOLL"],
-            "fundamental_metrics": ["PE", "PB", "ROE", "CashFlow"],
+            "fundamental_metrics": ["PE", "PB", "ROE", "GROSS_PROFIT_RATE", "ASSET_LIABILITY_RATIO"],
             "sentiment_analysis": True,
             "risk_assessment": True,
             "llm_analysis": True, # 全面分析使用LLM
@@ -105,13 +102,6 @@ def get_analyst_depth_config(depth: Any) -> Dict[str, Any]:
         if 1 <= depth <= 3:
             return ANALYST_DEPTH_CONFIG.get(depth, ANALYST_DEPTH_CONFIG[AnalystDepth.QUICK])
     return ANALYST_DEPTH_CONFIG[AnalystDepth.QUICK]
-
-
-def get_technical_indicators_for_depth(depth: Any) -> List[str]:
-    """获取指定深度使用的技术指标"""
-    config = get_analyst_depth_config(depth)
-    return config.get("features", {}).get("technical_indicators", ["MA"])
-
 
 def get_fundamental_metrics_for_depth(depth: Any) -> List[str]:
     """获取指定深度使用的基本面指标"""
@@ -234,12 +224,6 @@ def get_analysts_for_depth(depth: Any) -> tuple:
 def is_feature_enabled(depth: Any, feature: str) -> bool:
     """检查指定深度是否启用某个特性"""
     return is_feature_enabled_for_depth(depth, feature)
-
-
-def get_depth_indicators(depth: Any) -> List[str]:
-    """获取指定分析深度涉及的技术指标"""
-    return get_technical_indicators_for_depth(depth)
-
 
 def get_depth_fundamental_metrics(depth: Any) -> List[str]:
     """获取指定深度涉及的基本面指标"""
@@ -377,11 +361,6 @@ class AnalysisDepthController:
         features = self.config.get("features", {})
         return features.get(feature, False)
 
-    def get_technical_indicators(self) -> List[str]:
-        """获取技术指标列表"""
-        features = self.config.get("features", {})
-        return features.get("technical_indicators", ["MA"])
-
     def get_fundamental_metrics(self) -> List[str]:
         """获取基本面指标列表"""
         features = self.config.get("features", {})
@@ -441,7 +420,6 @@ class AnalysisDepthController:
             "report_detail_level": self.report_detail_level,
             "required_analysts": self.get_required_analysts(),
             "optional_analysts": self.get_optional_analysts(),
-            "technical_indicators": self.get_technical_indicators(),
             "fundamental_metrics": self.get_fundamental_metrics(),
             "features": self.config.get("features", {})
         }

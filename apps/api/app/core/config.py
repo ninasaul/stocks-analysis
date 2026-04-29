@@ -18,8 +18,8 @@ class Config:
     APP_VERSION = "0.1.0"
     DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
-    # LLM 提供商配置
-    DEFAULT_PROVIDER = os.getenv("DEFAULT_PROVIDER", "aliyun")
+    # 默认LLM预设配置名称（对应LLM_PRESETS中的name字段）
+    DEFAULT_CONFIG_NAME = os.getenv("DEFAULT_CONFIG_NAME", "qwen_config")
 
     # LLM 预设配置（从环境变量加载）
     @staticmethod

@@ -7,7 +7,7 @@ from .core.scheduler import scheduler_manager
 from .core.stock_service import StockService
 from .core.logging import logger
 from .core.config import config
-from .services.llm_service import LLMService
+from .llm.llm_service import LLMService
 
 # 导入路由模块
 from .routers.auth_routes import router as auth_router
