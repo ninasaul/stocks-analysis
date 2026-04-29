@@ -6,11 +6,20 @@ import { accountCopy } from "@/lib/copy";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useSubscriptionStore } from "@/stores/use-subscription-store";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
-import { requestCurrentMembership, type MembershipApiResult } from "@/lib/api/subscription";
+import {
+  requestCurrentMembership,
+  requestCurrentUserProfile,
+  requestUpdateCurrentUserProfile,
+  type UserApiResult,
+} from "@/lib/api/users";
+import type { MembershipApiResult } from "@/lib/api/subscription";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
+import { Input } from "@/components/ui/input";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PageLoadingState } from "@/components/features/page-state";
 
 export default function AccountPage() {
@@ -28,8 +37,18 @@ export default function AccountPage() {
   const autoRenew = useSubscriptionStore((s) => s.autoRenew);
   const [logoutPending, setLogoutPending] = useState(false);
   const [membershipLoading, setMembershipLoading] = useState(false);
-  const [membershipError, setMembershipError] = useState<string | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  const [profile, setProfile] = useState<UserApiResult | null>(null);
   const [membership, setMembership] = useState<MembershipApiResult | null>(null);
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
+  const [displayNameInput, setDisplayNameInput] = useState("");
+  const [avatarUrlInput, setAvatarUrlInput] = useState("");
+  const [emailInput, setEmailInput] = useState("");
+  const [phoneInput, setPhoneInput] = useState("");
 
   const subscriptionReady = subHydrated;
   const backendSubscription = useMemo(() => {
@@ -80,24 +99,34 @@ export default function AccountPage() {
     }
     void (async () => {
       setMembershipLoading(true);
-      setMembershipError(null);
+      setProfileLoading(true);
+      setLoadError(null);
       try {
         await syncSession();
         const latest = useAuthStore.getState();
         if (latest.session !== "user" || !latest.accessToken) {
           throw new Error("登录状态已失效，请重新登录");
         }
-        const result = await requestCurrentMembership(latest.accessToken);
+        const [me, membershipResult] = await Promise.all([
+          requestCurrentUserProfile(latest.accessToken),
+          requestCurrentMembership(latest.accessToken),
+        ]);
         if (!cancelled) {
-          setMembership(result);
+          setProfile(me);
+          setDisplayNameInput(me.display_name ?? "");
+          setAvatarUrlInput(me.avatar_url ?? "");
+          setEmailInput(me.email ?? "");
+          setPhoneInput(me.phone ?? "");
+          setMembership(membershipResult);
         }
       } catch (error) {
         if (!cancelled) {
-          setMembershipError(error instanceof Error ? error.message : "获取会员信息失败");
+          setLoadError(error instanceof Error ? error.message : "获取账户信息失败");
         }
       } finally {
         if (!cancelled) {
           setMembershipLoading(false);
+          setProfileLoading(false);
         }
       }
     })();
@@ -113,8 +142,197 @@ export default function AccountPage() {
     );
   }
 
+  const onSaveProfile = async () => {
+    const latest = useAuthStore.getState();
+    if (latest.session !== "user" || !latest.accessToken) {
+      setSaveError("登录状态已失效，请重新登录");
+      return;
+    }
+    setSavingProfile(true);
+    setSaveError(null);
+    setSaveSuccess(null);
+    try {
+      const updated = await requestUpdateCurrentUserProfile(latest.accessToken, {
+        display_name: displayNameInput.trim() || undefined,
+        avatar_url: avatarUrlInput.trim() || undefined,
+        email: emailInput.trim(),
+        phone: phoneInput.trim() || undefined,
+      });
+      setProfile(updated);
+      setDisplayNameInput(updated.display_name ?? "");
+      setAvatarUrlInput(updated.avatar_url ?? "");
+      setEmailInput(updated.email ?? "");
+      setPhoneInput(updated.phone ?? "");
+      setSaveSuccess("账号信息已更新");
+      setProfileDialogOpen(false);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "更新账号信息失败");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const openProfileDialog = () => {
+    setDisplayNameInput(profile?.display_name ?? "");
+    setAvatarUrlInput(profile?.avatar_url ?? "");
+    setEmailInput(profile?.email ?? "");
+    setPhoneInput(profile?.phone ?? "");
+    setSaveError(null);
+    setSaveSuccess(null);
+    setProfileDialogOpen(true);
+  };
+
   return (
     <>
+        <Card>
+          <CardHeader>
+            <CardTitle>个人信息</CardTitle>
+            <CardDescription>管理昵称、头像、邮箱和手机号等账号信息。</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4 text-sm">
+            <div className="flex items-center gap-3">
+              <Avatar size="lg">
+                <AvatarImage src={avatarUrlInput || undefined} alt="用户头像" />
+                <AvatarFallback>
+                  {(displayNameInput || profile?.username || "用户").slice(0, 1).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0">
+                <p className="font-medium">{displayNameInput || profile?.username || "未设置昵称"}</p>
+                <p className="text-muted-foreground truncate text-xs">
+                  {profile?.email || "未设置邮箱"}
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-1">
+                <p className="text-muted-foreground text-xs">昵称</p>
+                <p className="font-medium">{profile?.display_name || "未设置"}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-muted-foreground text-xs">用户名</p>
+                <p className="font-medium">{profile?.username || user?.username || "暂未获取"}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-muted-foreground text-xs">邮箱</p>
+                <p className="font-medium break-all">{profile?.email || "未设置"}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-muted-foreground text-xs">手机号</p>
+                <p className="font-medium">{profile?.phone || "未设置"}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-muted-foreground text-xs">账号标识</p>
+                <p className="font-medium">{user?.phoneMasked || "暂未获取账号标识"}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-muted-foreground text-xs">微信绑定</p>
+                <p className="font-medium">{user?.wechatBound ? accountCopy.wechatBound : accountCopy.wechatNotBound}</p>
+              </div>
+              <div className="space-y-1 md:col-span-2">
+                <p className="text-muted-foreground text-xs">账号状态</p>
+                <Badge variant="secondary" className="w-fit">
+                  {profile?.status ?? "unknown"}
+                </Badge>
+              </div>
+            </div>
+            {profileLoading ? (
+              <p className="text-muted-foreground inline-flex items-center gap-2">
+                <Spinner />
+                正在加载个人信息
+              </p>
+            ) : null}
+            {saveSuccess ? <p className="text-sm text-emerald-600">{saveSuccess}</p> : null}
+          </CardContent>
+          <CardFooter className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={openProfileDialog}>
+              编辑资料
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={logoutPending}
+              onClick={async () => {
+                if (logoutPending) return;
+                setLogoutPending(true);
+                try {
+                  await logout();
+                  router.push("/");
+                } finally {
+                  setLogoutPending(false);
+                }
+              }}
+            >
+              {logoutPending ? (
+                <>
+                  <Spinner />
+                  退出中
+                </>
+              ) : (
+                "退出登录"
+              )}
+            </Button>
+          </CardFooter>
+        </Card>
+        <Dialog open={profileDialogOpen} onOpenChange={setProfileDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>编辑个人信息</DialogTitle>
+              <DialogDescription>更新昵称、头像、邮箱和手机号后将同步到账号资料。</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-2 text-sm">
+              <label className="grid gap-1">
+                <span className="text-muted-foreground">昵称</span>
+                <Input
+                  value={displayNameInput}
+                  onChange={(event) => setDisplayNameInput(event.target.value)}
+                  placeholder="请输入展示昵称"
+                />
+              </label>
+              <label className="grid gap-1">
+                <span className="text-muted-foreground">头像地址</span>
+                <Input
+                  value={avatarUrlInput}
+                  onChange={(event) => setAvatarUrlInput(event.target.value)}
+                  placeholder="请输入头像 URL（可选）"
+                />
+              </label>
+              <label className="grid gap-1">
+                <span className="text-muted-foreground">邮箱</span>
+                <Input
+                  value={emailInput}
+                  onChange={(event) => setEmailInput(event.target.value)}
+                  placeholder="请输入邮箱"
+                />
+              </label>
+              <label className="grid gap-1">
+                <span className="text-muted-foreground">手机号</span>
+                <Input
+                  value={phoneInput}
+                  onChange={(event) => setPhoneInput(event.target.value)}
+                  placeholder="请输入手机号（可选）"
+                />
+              </label>
+              {saveError ? <p className="text-sm text-destructive">{saveError}</p> : null}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setProfileDialogOpen(false)}>
+                取消
+              </Button>
+              <Button type="button" disabled={savingProfile} onClick={onSaveProfile}>
+                {savingProfile ? (
+                  <>
+                    <Spinner />
+                    保存中
+                  </>
+                ) : (
+                  "保存资料"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <Card>
           <CardHeader>
             <CardTitle>订阅与套餐</CardTitle>
@@ -146,55 +364,13 @@ export default function AccountPage() {
                 正在同步后端会员状态
               </p>
             ) : null}
-            {membershipError ? (
-              <p className="text-sm text-destructive">{membershipError}</p>
+            {loadError ? (
+              <p className="text-sm text-destructive">{loadError}</p>
             ) : null}
           </CardContent>
           <CardFooter>
             <Button type="button" variant="outline" onClick={() => router.push("/app/account/subscription")}>
               查看订阅与用量
-            </Button>
-          </CardFooter>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>登录方式</CardTitle>
-            <CardDescription>账号标识与绑定状态</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2 text-sm">
-            <p>
-              账号标识：
-              <span className="font-medium">{user?.phoneMasked || "暂未获取账号标识"}</span>
-            </p>
-            <p className="text-muted-foreground">
-              微信绑定：{user?.wechatBound ? accountCopy.wechatBound : accountCopy.wechatNotBound}
-            </p>
-          </CardContent>
-          <CardFooter className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={logoutPending}
-              onClick={async () => {
-                if (logoutPending) return;
-                setLogoutPending(true);
-                try {
-                  await logout();
-                  router.push("/");
-                } finally {
-                  setLogoutPending(false);
-                }
-              }}
-            >
-              {logoutPending ? (
-                <>
-                  <Spinner />
-                  退出中
-                </>
-              ) : (
-                "退出登录"
-              )}
             </Button>
           </CardFooter>
         </Card>

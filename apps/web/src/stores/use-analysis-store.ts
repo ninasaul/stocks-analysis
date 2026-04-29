@@ -4,9 +4,7 @@ import { create } from "zustand";
 import type { AnalysisInput, Market, PreferenceSnapshot, TimingReport } from "@/lib/contracts/domain";
 import { archiveEntrySchema, timingReportSchema } from "@/lib/contracts/domain";
 import { requestTimingReport } from "@/lib/api/timing";
-import { isMockFlowEnabled } from "@/lib/env";
 import { useArchiveStore } from "@/stores/use-archive-store";
-import { useSubscriptionStore } from "@/stores/use-subscription-store";
 import { useAuthStore } from "@/stores/use-auth-store";
 
 type PendingHandoff = {
@@ -37,11 +35,6 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
   clearReport: () => set({ report: null, error: null, currentInput: null }),
   generateReport: async (input) => {
     const isGuest = useAuthStore.getState().session === "guest";
-    const ok = isMockFlowEnabled() ? true : useSubscriptionStore.getState().tryConsumeAnalysis(isGuest);
-    if (!ok) {
-      set({ error: "quota", loading: false });
-      return false;
-    }
     set({ loading: true, error: null, currentInput: input });
     try {
       const report = await requestTimingReport(input);
@@ -55,7 +48,7 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
-      if (/(调用次数|额度|会员|配额)/.test(message)) {
+      if (message === "quota") {
         set({ loading: false, error: "quota" });
         return false;
       }

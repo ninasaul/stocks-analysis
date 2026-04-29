@@ -24,6 +24,7 @@ import {
   type AnalyzeSymbolSearchItem,
 } from "@/lib/analyze-symbol-search";
 import { requestStockSearch } from "@/lib/api/stocks";
+import { requestAnalyzeHistory, requestReportFile } from "@/lib/api/timing";
 import { buildMockBaseQuote, hashCode, type MockBaseQuote } from "@/lib/mock-base-quote";
 import { analyzeCopy, subscriptionTierPublicCopy } from "@/lib/copy";
 import { useAnalysisStore } from "@/stores/use-analysis-store";
@@ -62,6 +63,15 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemSeparator,
+  ItemTitle,
+} from "@/components/ui/item";
 import {
   Table,
   TableBody,
@@ -111,12 +121,6 @@ const styleLabels: Record<PreferenceSnapshot["style"], string> = {
   growth: "成长",
   momentum: "动量/趋势",
   no_preference: "无明确风格偏好",
-};
-
-const marketLabels: Record<AnalysisInput["market"], string> = {
-  CN: "A 股",
-  HK: "港股",
-  US: "美股",
 };
 
 type SearchItem = AnalyzeSymbolSearchItem;
@@ -196,32 +200,34 @@ function AnalysisHistoryList({
   onSelect: (item: { id: string; market: AnalysisInput["market"]; symbol: string }) => void;
 }) {
   return (
-    <>
+    <ItemGroup className="gap-1">
       {running.length ? (
         <>
           {running.map((item) => (
-            <Button
+            <Item
               key={item.id}
-              type="button"
-              variant={activeAnalysisId === item.id ? "secondary" : "ghost"}
-              className="h-auto w-full justify-start py-2.5"
+              size="xs"
+              variant={activeAnalysisId === item.id ? "muted" : "default"}
+              className="items-start"
+              render={
+                <button type="button" />
+              }
               onClick={() => onSelect({ id: item.id, market: item.market, symbol: item.symbol })}
             >
-              <div className="flex w-full items-start justify-between gap-2 text-left">
-                <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                  <span className="w-full truncate text-sm font-medium leading-tight">{item.name}</span>
-                  <span className="text-muted-foreground font-mono text-xs tabular-nums">
-                    {formatAnalyzeBoardSymbol(item.market, item.symbol)}
-                  </span>
-                  <span className="text-muted-foreground text-xs">正在生成报告，请稍候</span>
-                </div>
-                <Badge variant="secondary" className="shrink-0">
+              <ItemContent className="min-w-0 gap-0.5">
+                <ItemTitle className="w-full truncate leading-5">{item.name}</ItemTitle>
+                <ItemDescription className="line-clamp-1 font-mono text-xs tabular-nums leading-4">
+                  {formatAnalyzeBoardSymbol(item.market, item.symbol)}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions className="pt-0.5">
+                <Badge variant="secondary" className="h-5 px-1.5 text-[11px]">
                   分析中
                 </Badge>
-              </div>
-            </Button>
+              </ItemActions>
+            </Item>
           ))}
-          <Separator className="my-2" />
+          <ItemSeparator className="my-0.5" />
         </>
       ) : null}
 
@@ -230,35 +236,32 @@ function AnalysisHistoryList({
         const actionTone = item.report
           ? actionBadgeClassNames[item.report.action] ?? actionBadgeClassNames.wait
           : actionBadgeClassNames.wait;
-        const score = item.report?.score_breakdown.total ?? null;
         return (
-          <Button
+          <Item
             key={item.id}
-            type="button"
-            variant={activeAnalysisId === item.id ? "secondary" : "ghost"}
-            className="h-auto w-full justify-start py-2.5"
+            size="xs"
+            variant={activeAnalysisId === item.id ? "muted" : "default"}
+            className="items-start"
+            render={
+              <button type="button" />
+            }
             onClick={() => onSelect({ id: item.id, market: item.market, symbol: item.symbol })}
           >
-            <div className="flex w-full items-start justify-between gap-2 text-left">
-              <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                <span className="w-full truncate text-sm font-medium leading-tight">{item.name}</span>
-                <span className="text-muted-foreground font-mono text-xs tabular-nums">
-                  {formatAnalyzeBoardSymbol(item.market, item.symbol)}
-                </span>
-                <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                  <Badge variant="outline" className={actionTone}>
-                    {action}
-                  </Badge>
-                  {score !== null ? (
-                    <span className="text-muted-foreground text-xs tabular-nums">得分 {score}</span>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </Button>
+            <ItemContent className="min-w-0 gap-0.5">
+              <ItemTitle className="w-full truncate leading-5">{item.name}</ItemTitle>
+              <ItemDescription className="line-clamp-1 font-mono text-xs tabular-nums leading-4">
+                {formatAnalyzeBoardSymbol(item.market, item.symbol)}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions className="pt-0.5">
+              <Badge variant="outline" className={`${actionTone} h-5 px-1.5 text-[11px]`}>
+                {action}
+              </Badge>
+            </ItemActions>
+          </Item>
         );
       })}
-    </>
+    </ItemGroup>
   );
 }
 
@@ -584,12 +587,31 @@ function AnalyzePageContent() {
   const [actionReasonOpen, setActionReasonOpen] = useState(false);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [selectedSearchKey, setSelectedSearchKey] = useState<string | null>(null);
+  const [searchComboboxOpen, setSearchComboboxOpen] = useState(false);
   const [remoteSearching, setRemoteSearching] = useState(false);
   const [remoteSearchItems, setRemoteSearchItems] = useState<SearchItem[]>([]);
   const analyzeReportScrollRef = useRef<HTMLDivElement | null>(null);
   const stockCodeParam = searchParams.get("stockCode");
 
   useEffect(() => {
+    if (authSession === "user") {
+      let canceled = false;
+      setLocalHistoryLoaded(false);
+      void requestAnalyzeHistory()
+        .then((items) => {
+          if (!canceled) setLocalHistory(items.slice(0, 100));
+        })
+        .catch(() => {
+          if (!canceled) setLocalHistory([]);
+        })
+        .finally(() => {
+          if (!canceled) setLocalHistoryLoaded(true);
+        });
+      return () => {
+        canceled = true;
+      };
+    }
+
     try {
       const raw = localStorage.getItem(LOCAL_ANALYSIS_HISTORY_KEY);
       if (!raw) {
@@ -610,16 +632,18 @@ function AnalyzePageContent() {
     } finally {
       setLocalHistoryLoaded(true);
     }
-  }, []);
+  }, [authSession]);
 
   useEffect(() => {
     if (!localHistoryLoaded || !report) return;
     setLocalHistory((prev) => {
       const next = [report, ...prev.filter((x) => x.id !== report.id)].slice(0, 100);
-      localStorage.setItem(LOCAL_ANALYSIS_HISTORY_KEY, JSON.stringify(next));
+      if (authSession !== "user") {
+        localStorage.setItem(LOCAL_ANALYSIS_HISTORY_KEY, JSON.stringify(next));
+      }
       return next;
     });
-  }, [localHistoryLoaded, report]);
+  }, [authSession, localHistoryLoaded, report]);
 
   const recentKeys = useMemo(() => {
     const keys: string[] = [];
@@ -968,14 +992,23 @@ function AnalyzePageContent() {
 
   useEffect(() => {
     const keyword = searchKeyword.trim();
-    const picked =
-      selectedSearchItem != null
-        ? { market: selectedSearchItem.market, symbol: selectedSearchItem.symbol.trim() }
-        : parseSearchInput(searchKeyword, market);
+    // 输入框未聚焦/下拉关闭时，不应继续触发远程搜索。
+    if (!searchComboboxOpen) {
+      setRemoteSearching((prev) => (prev ? false : prev));
+      return;
+    }
+    // 已选中候选项时，输入框值通常是展示文本（例如 名称+代码），不应继续触发远程搜索。
+    if (selectedSearchKey) {
+      setRemoteSearchItems((prev) => (prev.length > 0 ? [] : prev));
+      setRemoteSearching((prev) => (prev ? false : prev));
+      return;
+    }
+
+    const picked = parseSearchInput(searchKeyword, market);
     const searchTerm = picked?.symbol?.trim() || keyword;
     if (authSession !== "user" || !searchTerm || (picked && picked.market !== "CN")) {
-      setRemoteSearchItems([]);
-      setRemoteSearching(false);
+      setRemoteSearchItems((prev) => (prev.length > 0 ? [] : prev));
+      setRemoteSearching((prev) => (prev ? false : prev));
       return;
     }
 
@@ -1000,11 +1033,10 @@ function AnalyzePageContent() {
     return () => {
       canceled = true;
       window.clearTimeout(timer);
-      setRemoteSearching(false);
     };
     // 勿依赖 selectedInput：其为每次 useMemo 新对象；远程结果更新后 searchItems 里条目引用会变，
     // 会误触发无限轮询。用 key / keyword 等标量表达「搜什么」即可。
-  }, [authSession, searchKeyword, market, selectedSearchItem?.key]);
+  }, [authSession, searchKeyword, market, selectedSearchKey, searchComboboxOpen]);
 
   const applySearchItem = (item: SearchItem) => {
     setMarket(item.market);
@@ -1027,19 +1059,29 @@ function AnalyzePageContent() {
     return ok;
   };
 
-  const downloadMd = () => {
+  const downloadMd = async () => {
     if (!activeReport) return;
-    const md = activeIsLatest ? buildMarkdown() : buildMarkdownFromReport(activeReport);
-    if (!md) return;
-    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `择时报告-${activeReport.market}.${activeReport.symbol}-${new Date().toISOString().slice(0, 10)}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-    if (useNotificationPreferencesStore.getState().notifyWorkspaceActions) {
-      toast.message(analyzeCopy.exportMdToast);
+    try {
+      let blob: Blob;
+      if (authSession === "user") {
+        const remote = await requestReportFile(activeReport.symbol, "markdown");
+        blob = remote.blob;
+      } else {
+        const md = activeIsLatest ? buildMarkdown() : buildMarkdownFromReport(activeReport);
+        if (!md) return;
+        blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `择时报告-${activeReport.market}.${activeReport.symbol}-${new Date().toISOString().slice(0, 10)}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+      if (useNotificationPreferencesStore.getState().notifyWorkspaceActions) {
+        toast.message(analyzeCopy.exportMdToast);
+      }
+    } catch {
+      toast.error("导出 Markdown 失败，请稍后重试");
     }
   };
 
@@ -1058,8 +1100,20 @@ function AnalyzePageContent() {
     }
   };
 
-  const printPdf = () => {
-    window.print();
+  const printPdf = async () => {
+    if (!activeReport) return;
+    try {
+      if (authSession !== "user") {
+        window.print();
+        return;
+      }
+      const { blob } = await requestReportFile(activeReport.symbol, "pdf");
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch {
+      toast.error("导出 PDF 失败，请稍后重试");
+    }
   };
 
   const openWebReport = () => {
@@ -1138,6 +1192,7 @@ function AnalyzePageContent() {
             listId="analyze-stock-search-listbox"
             formatCode={(item) => `${item.market}.${item.symbol}`}
             onSelect={(item) => applySearchItem(item)}
+            onOpenChange={setSearchComboboxOpen}
             onResolveEnter={(rawQuery, activeItem) => {
               if (activeItem) {
                 applySearchItem(activeItem);
@@ -1182,13 +1237,13 @@ function AnalyzePageContent() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <section className="rounded-lg border p-2 print:hidden">
+      <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:items-stretch">
+        <section className="rounded-lg border p-1.5 print:hidden lg:flex lg:min-h-0 lg:h-full lg:flex-col">
           {isInitialHydrating ? (
             <AnalyzeHistorySkeleton />
           ) : analysisListItems.length ? (
-            <ScrollArea className="max-h-[min(65vh,36rem)]">
-              <div className="flex flex-col gap-2 pr-2">
+            <ScrollArea className="lg:min-h-0 lg:flex-1">
+              <div className="flex flex-col gap-1.5 px-0.5 py-0.5">
                 <AnalysisHistoryList
                   running={analysisListDisplay.running}
                   done={analysisListDisplay.done}

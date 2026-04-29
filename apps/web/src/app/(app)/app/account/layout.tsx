@@ -16,9 +16,15 @@ const sections = [
       pathname === "/app/account" || pathname === "/app/account/",
   },
   {
+    href: "/app/account/subscription",
+    label: "订阅与用量",
+    hint: "套餐与配额",
+    isActive: (pathname: string) => pathname.startsWith("/app/account/subscription"),
+  },
+  {
     href: "/app/account/billing",
-    label: "账单",
-    hint: "订单与收据",
+    label: "账务与流水",
+    hint: "账单与调用记录",
     isActive: (pathname: string) => pathname.startsWith("/app/account/billing"),
   },
 ] as const;

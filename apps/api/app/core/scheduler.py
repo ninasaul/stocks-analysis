@@ -21,12 +21,12 @@ class SchedulerManager:
     def start(self):
         """启动定时任务"""
         if not self.scheduler.running:
-            # 每天 0 时 0 分 0 秒重置 API 调用次数
+            # 每月 1 号 0 时 0 分 0 秒重置 API 调用次数
             self.scheduler.add_job(
-                MembershipService.reset_daily_api_calls,
-                trigger=CronTrigger(hour=0, minute=0, second=0),
-                id='reset_daily_api_calls',
-                name='重置每日 API 调用次数',
+                MembershipService.reset_monthly_api_calls,
+                trigger=CronTrigger(day=1, hour=0, minute=0, second=0),
+                id='reset_monthly_api_calls',
+                name='重置每月 API 调用次数',
                 replace_existing=True
             )
             
