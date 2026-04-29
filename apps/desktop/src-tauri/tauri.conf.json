@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.turingfin.desktop",
   "build": {
-    "devUrl": "http://localhost:4000/login",
+    "devUrl": "http://localhost:4000/app/analyze",
     "frontendDist": "../dist"
   },
   "app": {

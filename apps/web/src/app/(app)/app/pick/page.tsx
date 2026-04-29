@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 import {
   ArrowDownIcon,
@@ -186,6 +188,28 @@ const PICKER_TITLE_STORAGE_KEY = "pick-conversation-title-v1";
 const PICKER_ACTIVE_SESSION_STORAGE_KEY = "pick-active-session-id-v1";
 const PICKER_ACTIVE_SNAPSHOT_STORAGE_KEY = "pick-active-snapshot-v1";
 const WATCHLIST_STORAGE_KEY_V2 = "app-watchlist-v2";
+
+const suggestedActionMarkdownComponents: Components = {
+  p: ({ children }) => <span>{children}</span>,
+  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+  em: ({ children }) => <em className="italic">{children}</em>,
+  code: ({ children }) => (
+    <code className="bg-muted rounded px-1 py-0.5 font-mono text-[0.9em]">{children}</code>
+  ),
+  ul: ({ children }) => <span className="inline-flex flex-wrap gap-1">{children}</span>,
+  ol: ({ children }) => <span className="inline-flex flex-wrap gap-1">{children}</span>,
+  li: ({ children }) => <span>{children}</span>,
+};
+
+function SuggestedActionMarkdown({ content }: { content: string }) {
+  return (
+    <span className="line-clamp-1 min-w-0">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={suggestedActionMarkdownComponents}>
+        {content}
+      </ReactMarkdown>
+    </span>
+  );
+}
 
 const DEFAULT_PREFERENCE_SNAPSHOT: PreferenceSnapshot = {
   market: "CN",
@@ -603,6 +627,7 @@ function ChatTimelineSection({
   onScrollToBottom,
   bottomAnchorRef,
   bottomAnchorOffsetPx,
+  composerDesktopBounds,
 }: {
   chatViewportRef: React.RefObject<HTMLDivElement | null>;
   chatScrollContentRef: React.RefObject<HTMLDivElement | null>;
@@ -625,6 +650,7 @@ function ChatTimelineSection({
   onScrollToBottom: () => void;
   bottomAnchorRef: React.RefObject<HTMLDivElement | null>;
   bottomAnchorOffsetPx: number;
+  composerDesktopBounds: { left?: number; width?: number };
 }) {
   return (
     <section className="flex h-full min-h-0 flex-1 flex-col gap-3 px-1 pb-2 md:px-0 md:pb-0" aria-label="对话消息区域">
@@ -647,7 +673,7 @@ function ChatTimelineSection({
               paddingBottom: `${chatBottomInsetPx}px`,
             }}
           >
-            <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 px-2 md:px-3">
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 px-2 pb-4 md:px-3 md:pb-6">
               {messages.length === 0 ? (
                 <PickerChatEmpty mode={conversationMode} />
               ) : (
@@ -732,10 +758,23 @@ function ChatTimelineSection({
           </div>
         </ScrollArea>
         {!chatPinnedToBottom ? (
-          <div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-end">
-            <Button type="button" size="sm" variant="secondary" className="pointer-events-auto shadow-sm" onClick={onScrollToBottom}>
+          <div
+            className="pointer-events-none fixed inset-x-0 z-30 flex justify-center"
+            style={{
+              left: composerDesktopBounds.left !== undefined ? `${composerDesktopBounds.left}px` : undefined,
+              width: composerDesktopBounds.width !== undefined ? `${composerDesktopBounds.width}px` : undefined,
+              bottom: `${Math.max(12, Math.round(chatBottomInsetPx) + 12)}px`,
+            }}
+          >
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="outline"
+              className="pointer-events-auto rounded-full border-border/70 bg-background/90 shadow-md backdrop-blur supports-backdrop-filter:bg-background/75"
+              onClick={onScrollToBottom}
+              aria-label={sendPending ? "已暂停自动滚动，回到底部" : "回到底部"}
+            >
               <ArrowDownIcon data-icon="inline-start" />
-              {sendPending ? "已暂停自动滚动，回到底部" : "回到底部"}
             </Button>
           </div>
         ) : null}
@@ -1393,16 +1432,16 @@ export default function PickPage() {
       title="选股对话"
       hideHeader
       fillHeight
-      className="flex min-h-0 flex-1 flex-col gap-0! p-0!"
-      contentClassName="min-h-0 flex-1"
+      className="flex min-h-0 flex-1 flex-col overflow-hidden gap-0! p-0!"
+      contentClassName="min-h-0 flex-1 gap-0 overflow-hidden"
     >
-      <div className="grid h-full min-h-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-4 px-4 pt-4 pb-0 md:grid-cols-[minmax(0,18rem)_1fr] md:grid-rows-1 md:gap-6 md:px-6 md:pt-6">
+      <div className="grid h-full min-h-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden md:grid-cols-[18rem_minmax(0,1fr)] md:grid-rows-1">
         <aside
-          className="flex min-h-0 flex-col overflow-hidden md:sticky md:top-18 md:h-[calc(100svh-5.5rem)] md:min-h-0 md:self-start"
+          className="flex h-full min-h-0 flex-col overflow-hidden border-b px-4 pt-4 pb-4 md:border-r md:border-b-0"
           aria-label="选股会话侧栏"
         >
           <ConversationListSection
-            className="rounded-xl border bg-card p-4"
+            className="min-h-0"
             items={filteredConversationListItems}
             activeId={sessionId}
             onSelect={switchConversation}
@@ -1422,9 +1461,9 @@ export default function PickPage() {
 
         <main
           ref={mainAreaRef}
-          className="relative isolate grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden md:sticky md:top-18 md:h-[calc(100svh-5.5rem)] md:min-h-0 md:self-start"
+          className="relative isolate flex h-full min-h-0 flex-1 flex-col overflow-hidden"
         >
-          <div className="h-full min-h-0 overflow-hidden">
+          <div className="min-h-0 flex-1 overflow-hidden">
             <ChatTimelineSection
               chatViewportRef={chatViewportRef}
               chatScrollContentRef={chatScrollContentRef}
@@ -1462,6 +1501,7 @@ export default function PickPage() {
               }}
               bottomAnchorRef={chatBottomAnchorRef}
               bottomAnchorOffsetPx={chatBottomInsetPx + 24}
+              composerDesktopBounds={composerDesktopBounds}
             />
           </div>
 
@@ -1471,7 +1511,7 @@ export default function PickPage() {
               left: composerDesktopBounds.left !== undefined ? `${composerDesktopBounds.left}px` : undefined,
               width: composerDesktopBounds.width !== undefined ? `${composerDesktopBounds.width}px` : undefined,
             }}
-            className="fixed inset-x-0 bottom-2 z-20 overflow-visible bg-background pb-[calc(env(safe-area-inset-bottom)+0.375rem)] md:bottom-3"
+            className="fixed inset-x-0 bottom-0 z-20 overflow-visible bg-background px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] md:px-3 md:pb-[calc(env(safe-area-inset-bottom)+0.75rem)]"
             aria-label="消息输入区"
           >
           {currentConversationExtractedStocks.length > 0 ? (
@@ -1584,7 +1624,7 @@ export default function PickPage() {
               </div>
             </div>
           ) : null}
-          <div className="mx-auto w-full max-w-4xl px-1 md:px-0">
+          <div className="mx-auto w-full max-w-4xl">
             <FieldGroup className="bg-background">
               <Field>
                 <FieldLabel htmlFor="pick-input" className="sr-only">
@@ -1606,7 +1646,7 @@ export default function PickPage() {
                             <Button
                               type="button"
                               size="sm"
-                              variant={selected ? "secondary" : "outline"}
+                              variant={selected ? "secondary" : "ghost"}
                               className={cn(
                                 "h-7 w-full justify-start px-2 text-left text-xs",
                               )}
@@ -1621,7 +1661,7 @@ export default function PickPage() {
                               }}
                             >
                               {selected ? <CheckIcon data-icon="inline-start" /> : null}
-                              <span className="line-clamp-1">{a.label}</span>
+                              <SuggestedActionMarkdown content={a.label} />
                             </Button>
                           </li>
                         );
@@ -1679,7 +1719,6 @@ export default function PickPage() {
                     placeholder={inputPlaceholder}
                     disabled={sendPending}
                     aria-invalid={sendError ? true : undefined}
-                    className="max-h-[min(40svh,16rem)] min-h-14 px-2.5 py-2 md:min-h-16"
                     maxLength={MAX_DRAFT_CHARS}
                     onCompositionStart={() => {
                       isImeComposingRef.current = true;

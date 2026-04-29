@@ -76,7 +76,7 @@ export function StockSearchCombobox({
   }, []);
 
   return (
-    <div className="relative shrink-0" ref={rootRef}>
+    <div className="relative w-full min-w-0 shrink-0 sm:max-w-md lg:max-w-lg" ref={rootRef}>
       <InputGroup className="bg-background">
         <InputGroupAddon>
           <SearchIcon />
