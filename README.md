@@ -2,7 +2,7 @@
 
 TuringFin 是一个投研辅助应用。仓库采用 monorepo 结构，包含 Web 前端、FastAPI 后端、Tauri 桌面端，以及一个微信小程序目录。
 
-当前桌面端不是完整离线应用。它会先打开本地启动页，再进入远程 Web 工作台。这样可以避免桌面端首屏依赖远程页面直接加载，也保留 Web 端的统一发布能力。
+当前桌面端不是完整离线应用。生产构建将主窗口初始 URL 设为远程 Web 工作台（由 `DESKTOP_WEB_URL` 与可选的 `DESKTOP_WEB_PATH` 决定），仍保留 Web 端的统一发布能力。`dist/index.html` 仅作打包占位，启动时直接加载远程页面。
 
 ## 项目结构
 
@@ -170,11 +170,10 @@ Windows 产物需要在 Windows 环境构建。项目里已经提供 GitHub Acti
 
 ## 桌面端设计说明
 
-当前桌面端采用“本地启动页 + 远程工作台”的方式：
+当前桌面端采用“启动即加载远程工作台”的方式：
 
-- Tauri 安装包内置一个本地 HTML 启动页。
-- 启动页展示 TuringFin 品牌和进入按钮。
-- 点击按钮后通过 Tauri 原生命令导航到 Web 工作台。
+- 生产构建在 `tauri.generated.conf.json` 中为窗口设置 `url`，应用打开即深链到远程 Web（默认路径为 `/app/analyze`，可用 `DESKTOP_WEB_PATH` 覆盖）。
+- `dist/index.html` 仅满足 Tauri 对 `frontendDist` 的打包要求，正常启动时不会作为首屏展示。
 - Web 页面仍由远程服务提供，便于统一发布和热更新。
 
 这不是完整离线包。若要完全离线，需要把 FastAPI、Python 运行时、数据依赖和前端资源一起打进桌面端，维护成本会明显增加。

@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import {
   ChartLineIcon,
@@ -11,6 +10,7 @@ import {
   StarIcon,
   WalletIcon,
 } from "lucide-react";
+import { AppSidebarBrand } from "@/components/features/app-sidebar-brand";
 import {
   Sidebar,
   SidebarContent,
@@ -46,34 +46,12 @@ export function ZhputianAppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               size="lg"
+              className="group-data-[collapsible=icon]:justify-center"
               tooltip="返回工作台首页"
               aria-label="返回工作台首页"
               onClick={() => router.push("/app/analyze")}
             >
-              <span className="flex items-center justify-center">
-                <Image
-                  src="/logo_light.svg"
-                  alt="智谱投研 Logo"
-                  width={20}
-                  height={20}
-                  className="block dark:hidden"
-                />
-                <Image
-                  src="/logo_dark.svg"
-                  alt="智谱投研 Logo"
-                  width={20}
-                  height={20}
-                  className="hidden dark:block"
-                />
-              </span>
-              <span className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-                <span className="block truncate font-semibold tracking-tight">
-                  智谱投研
-                </span>
-                <span className="text-muted-foreground block truncate text-xs">
-                  股票研究与决策助手
-                </span>
-              </span>
+              <AppSidebarBrand collapsedTextClassName="group-data-[collapsible=icon]:hidden" />
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

@@ -11,6 +11,7 @@ import {
   FileDownIcon,
   FileTextIcon,
   GlobeIcon,
+  HistoryIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { AnalysisInput, PreferenceSnapshot, TimingReport } from "@/lib/contracts/domain";
@@ -1121,38 +1122,36 @@ function AnalyzePageContent() {
 
       <div className="flex flex-col gap-3 print:hidden sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-          <div className="relative min-w-0 w-full sm:max-w-md lg:max-w-lg">
-            <StockSearchCombobox
-              query={searchKeyword}
-              onQueryChange={(next) => {
-                setSearchKeyword(next);
+          <StockSearchCombobox
+            query={searchKeyword}
+            onQueryChange={(next) => {
+              setSearchKeyword(next);
+              setSelectedSearchKey(null);
+            }}
+            items={filteredSearchItems}
+            loading={remoteSearching}
+            title={searchKeyword.trim() ? "搜索结果" : "最近使用"}
+            emptyMessage="无匹配标的"
+            placeholder="代码或简称，例如 茅台、AAPL"
+            ariaLabel="搜索股票"
+            inputId="analyze-stock-search-input"
+            listId="analyze-stock-search-listbox"
+            formatCode={(item) => `${item.market}.${item.symbol}`}
+            onSelect={(item) => applySearchItem(item)}
+            onResolveEnter={(rawQuery, activeItem) => {
+              if (activeItem) {
+                applySearchItem(activeItem);
+                return;
+              }
+              const parsed = parseSearchInput(rawQuery, market);
+              if (parsed?.symbol) {
                 setSelectedSearchKey(null);
-              }}
-              items={filteredSearchItems}
-              loading={remoteSearching}
-              title={searchKeyword.trim() ? "搜索结果" : "最近使用"}
-              emptyMessage="无匹配标的"
-              placeholder="代码或简称，例如 茅台、AAPL"
-              ariaLabel="搜索股票"
-              inputId="analyze-stock-search-input"
-              listId="analyze-stock-search-listbox"
-              formatCode={(item) => `${item.market}.${item.symbol}`}
-              onSelect={(item) => applySearchItem(item)}
-              onResolveEnter={(rawQuery, activeItem) => {
-                if (activeItem) {
-                  applySearchItem(activeItem);
-                  return;
-                }
-                const parsed = parseSearchInput(rawQuery, market);
-                if (parsed?.symbol) {
-                  setSelectedSearchKey(null);
-                  setSearchKeyword(`${parsed.market}.${parsed.symbol}`);
-                  return;
-                }
-                setConfigOpen(true);
-              }}
-            />
-          </div>
+                setSearchKeyword(`${parsed.market}.${parsed.symbol}`);
+                return;
+              }
+              setConfigOpen(true);
+            }}
+          />
           <Button type="button" disabled={loading} onClick={() => setConfigOpen(true)}>
             {loading ? (
               <>
@@ -1201,6 +1200,7 @@ function AnalyzePageContent() {
           ) : (
             <PageEmptyState
               className="border-0 shadow-none"
+              icon={<HistoryIcon />}
               title="暂无分析记录"
               description="输入股票代码或名称后点击「分析」，系统会生成并保存报告。"
               actions={
@@ -1240,6 +1240,7 @@ function AnalyzePageContent() {
         {!isInitialHydrating && !loading && error !== "unknown" && !activeReport ? (
           <PageEmptyState
             className="print:analyze-hide"
+            icon={<FileTextIcon />}
             title="还没有可展示的报告"
             description="可先从上方搜索标的，再点击「分析」生成首份报告。支持输入代码、简称或 CN.600519。"
             actions={
