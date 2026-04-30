@@ -7,6 +7,7 @@ from .core.scheduler import scheduler_manager
 from .core.stock_service import StockService
 from .core.logging import logger
 from .core.config import config
+from .core.redis_manager import redis_manager
 from .llm.llm_service import LLMService
 
 # 导入路由模块
@@ -36,10 +37,12 @@ app.add_middleware(
 async def startup_event():
     """应用启动时的初始化"""
     init_db()
+    redis_manager.initialize()
     scheduler_manager.start()
     global stock_service
     stock_service = StockService()
     logger.info("数据库连接已初始化")
+    logger.info("Redis连接已初始化")
 
     count = LLMService.init_llm_presets_from_config()
     if count > 0:
