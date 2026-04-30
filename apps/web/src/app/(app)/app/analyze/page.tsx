@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { AnalysisInput, PreferenceSnapshot, TimingReport } from "@/lib/contracts/domain";
-import { timingReportSchema } from "@/lib/contracts/domain";
 import {
   ANALYZE_SYMBOL_MOCK_UNIVERSE,
   formatAnalyzeBoardSymbol,
@@ -193,7 +192,6 @@ type TargetPriceRow = {
 
 type QuoteViewStatus = "idle" | "cached" | "live" | "error";
 
-const LOCAL_ANALYSIS_HISTORY_KEY = "zhputian-analysis-history-v1";
 const LOCAL_ANALYSIS_ACTIVE_ID_KEY = "zhputian-analysis-active-id-v1";
 const sentimentChartConfig = {
   score: { label: "指数", color: "var(--chart-2)" },
@@ -635,56 +633,29 @@ function AnalyzePageContent() {
   const stockCodeParam = searchParams.get("stockCode");
 
   useEffect(() => {
-    if (authSession === "user") {
-      let canceled = false;
-      setLocalHistoryLoaded(false);
-      void requestAnalyzeHistory()
-        .then((items) => {
-          if (!canceled) setLocalHistory(items.slice(0, 100));
-        })
-        .catch(() => {
-          if (!canceled) setLocalHistory([]);
-        })
-        .finally(() => {
-          if (!canceled) setLocalHistoryLoaded(true);
-        });
-      return () => {
-        canceled = true;
-      };
-    }
-
-    try {
-      const raw = localStorage.getItem(LOCAL_ANALYSIS_HISTORY_KEY);
-      if (!raw) {
-        setLocalHistoryLoaded(true);
-        return;
-      }
-      const parsed = JSON.parse(raw) as unknown[];
-      const valid = parsed
-        .map((item) => {
-          const result = timingReportSchema.safeParse(item);
-          return result.success ? result.data : null;
-        })
-        .filter((item): item is TimingReport => item !== null)
-        .slice(0, 100);
-      setLocalHistory(valid);
-    } catch {
-      setLocalHistory([]);
-    } finally {
-      setLocalHistoryLoaded(true);
-    }
+    let canceled = false;
+    setLocalHistoryLoaded(false);
+    void requestAnalyzeHistory()
+      .then((items) => {
+        if (!canceled) setLocalHistory(items.slice(0, 100));
+      })
+      .catch(() => {
+        if (!canceled) setLocalHistory([]);
+      })
+      .finally(() => {
+        if (!canceled) setLocalHistoryLoaded(true);
+      });
+    return () => {
+      canceled = true;
+    };
   }, [authSession]);
 
   useEffect(() => {
     if (!localHistoryLoaded || !report) return;
     setLocalHistory((prev) => {
-      const next = [report, ...prev.filter((x) => x.id !== report.id)].slice(0, 100);
-      if (authSession !== "user") {
-        localStorage.setItem(LOCAL_ANALYSIS_HISTORY_KEY, JSON.stringify(next));
-      }
-      return next;
+      return [report, ...prev.filter((x) => x.id !== report.id)].slice(0, 100);
     });
-  }, [authSession, localHistoryLoaded, report]);
+  }, [localHistoryLoaded, report]);
 
   const recentKeys = useMemo(() => {
     const keys: string[] = [];
@@ -1597,17 +1568,25 @@ function AnalyzePageContent() {
                               ? new Date(liveQuote.updatedAt).toLocaleTimeString("zh-CN", { hour12: false })
                               : "--:--:--"}
                           </Badge>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-7 gap-1.5 px-2"
-                            onClick={() => void handleRefreshAnalyzeQuote()}
-                            disabled={quoteRefreshing}
-                          >
-                            <RotateCwIcon className={`size-3.5 ${quoteRefreshing ? "animate-spin" : ""}`} />
-                            刷新
-                          </Button>
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="icon-sm"
+                                  aria-label="刷新行情"
+                                  onClick={() => void handleRefreshAnalyzeQuote()}
+                                  disabled={quoteRefreshing}
+                                >
+                                  <RotateCwIcon className={`size-3.5 ${quoteRefreshing ? "animate-spin" : ""}`} />
+                                </Button>
+                              }
+                            />
+                            <TooltipContent side="bottom" align="end">
+                              刷新行情
+                            </TooltipContent>
+                          </Tooltip>
                         </div>
                       </div>
                       <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2 xl:grid-cols-3">
@@ -1631,8 +1610,7 @@ function AnalyzePageContent() {
                     </section>
 
                     <section className="rounded-md border p-3">
-                      <p className="text-muted-foreground text-xs">市场情绪</p>
-                      <p className="text-sm">恐惧贪婪指数</p>
+                      <h2 className="text-sm font-medium">市场情绪（恐惧贪婪指数）</h2>
                       <div className="mt-2 flex items-end justify-between">
                         <p className="text-2xl font-semibold">51</p>
                         <Badge variant="secondary">{getSentimentLabel(51)}</Badge>

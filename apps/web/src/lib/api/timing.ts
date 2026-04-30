@@ -329,8 +329,8 @@ async function syntheticTimingReportWithDelay(input: AnalysisInput): Promise<Tim
   return buildSyntheticTimingReport(input);
 }
 
-const ANALYZE_POLL_INTERVAL_MS = 1500;
-const ANALYZE_POLL_TIMEOUT_MS = 3 * 60 * 1000;
+const ANALYZE_POLL_INTERVAL_MS = 5000;
+const ANALYZE_POLL_TIMEOUT_MS = 25 * 60 * 1000;
 
 async function pollAnalyzeResult(
   taskId: string,
@@ -351,11 +351,16 @@ async function pollAnalyzeResult(
 
     const statusPayload = (await statusResponse.json()) as ApiAnalyzeTaskStatusResponse;
     const status = String(statusPayload.status ?? "").toUpperCase();
+    const hasResult = statusPayload.result !== null && statusPayload.result !== undefined;
+    const hasErrorText =
+      typeof statusPayload.error === "string" && statusPayload.error.trim().length > 0;
     onProgress?.({
       progress: clampNumber(Math.round(extractNumber(statusPayload.progress, 0)), 0, 100),
       message: String(statusPayload.progress_message ?? "").trim() || "正在分析中...",
     });
-    if (status === "COMPLETED" || status === "SUCCESS" || status === "DONE") {
+    // 后端当前状态为 pending/processing/completed/failed；
+    // 同时兼容历史或潜在状态命名变更，只要携带 result 也视为完成。
+    if (status === "COMPLETED" || status === "SUCCESS" || status === "DONE" || hasResult) {
       const result = statusPayload.result;
       if (!result) {
         throw new Error("分析任务已完成，但未返回结果");
@@ -366,7 +371,7 @@ async function pollAnalyzeResult(
       return result;
     }
 
-    if (status === "FAILED" || status === "ERROR" || status === "CANCELLED") {
+    if (status === "FAILED" || status === "ERROR" || status === "CANCELLED" || hasErrorText) {
       const errorMessage =
         typeof statusPayload.error === "string" && statusPayload.error.trim().length > 0
           ? statusPayload.error
