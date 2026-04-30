@@ -1470,7 +1470,7 @@ def generate_markdown_report(analysis_result: dict, report_language: str = "中�
     return markdown
 
 
-@router.get("/report")
+@router.get("/analyze/report")
 async def get_report(
     ticker: str = Query(..., description="股票代码"),
     format: str = Query("markdown", description="报告格式: markdown 或 pdf"),
@@ -1693,7 +1693,7 @@ async def get_report(
         )
 
 
-@router.get("/history")
+@router.get("/analyze/history")
 def get_history(current_user: User = Depends(get_current_user)) -> dict:
     """
     获取历史分析记录
@@ -1750,7 +1750,7 @@ def get_history(current_user: User = Depends(get_current_user)) -> dict:
         }
 
 
-@router.get("/history/{record_id}")
+@router.get("/analyze/history/{record_id}")
 def get_history_by_record_id(
     record_id: str,
     current_user: User = Depends(get_current_user)
