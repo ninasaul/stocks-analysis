@@ -1,7 +1,7 @@
 """交易相关的 API 路由"""
 from fastapi import APIRouter, Query, Depends
 
-from ..data.fetcher import fetch_stock_data
+from ..core.stock_service import StockService
 from ..core.logging import logger
 from ..reflection.reflector import Reflector
 from ..reflection.memory import SimpleMemory
@@ -9,7 +9,7 @@ from ..trading.manager import TradingManager
 from ..trading.strategy import TradingStrategy
 from ..user_management.models import User
 from ..core.auth import get_current_user
-from ..services.llm_service import LLMService
+from ..llm.llm_service import LLMService
 
 router = APIRouter(prefix="/api", tags=["交易"])
 
@@ -37,7 +37,7 @@ async def execute_trade(
     logger.info(f"用户 {current_user.id} ({current_user.username}) 执行交易: {ticker} 数量: {quantity}")
     
     # 1. 获取最新收盘价
-    history = fetch_stock_data(ticker, days=1)
+    history = StockService().fetch_stock_data(ticker, days=1)
     if not history:
         return {"ticker": ticker, "error": "数据获取失败"}
     

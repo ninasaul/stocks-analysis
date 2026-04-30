@@ -5,13 +5,15 @@ import aiohttp
 import json
 import logging
 import os
+import threading
 
 from app.core.database import execute_query, execute_write
 from app.core.logging import logger
-from app.models.llm import LLMPreset, UserLLMConfig, UserLLMUsage, LLMChatRequest, LLMChatResponse, UserLLMPreference
+from app.llm.models import LLMPreset, UserLLMConfig, UserLLMUsage, LLMChatRequest, LLMChatResponse, UserLLMPreference
 
 _user_preference_cache: Dict[int, UserLLMPreference] = {}
 _cache_loaded = False
+_preference_cache_lock = threading.Lock()  # 线程锁
 
 # 加密相关配置
 def get_encryption_key() -> str:
@@ -53,7 +55,8 @@ class UnifiedLLMClient:
         
         logger.info(f"初始化UnifiedLLM客户端: provider={self.provider}, model={self.model}")
     
-    async def chat(self, prompt: str, response_format: str = "text", temperature: float = 0.1, seed: int = 42) -> tuple:
+    async def chat(self, prompt: str, response_format: str = "text", temperature: float = 0.1, seed: int = 42, 
+                   enable_search: bool = True, search_options: Optional[Dict[str, Any]] = None) -> tuple:
         """
         同步聊天完成
         
@@ -62,6 +65,8 @@ class UnifiedLLMClient:
             response_format: 响应格式
             temperature: 温度参数，控制输出随机性（0-2）
             seed: 随机种子，确保结果可重复
+            enable_search: 是否启用联网搜索（适用于阿里云百炼等平台）
+            search_options: 联网搜索选项，如 {'forced_search': True, 'search_strategy': 'max', 'search_count': 5}
         
         Returns:
             (响应内容, token使用情况)
@@ -82,6 +87,20 @@ class UnifiedLLMClient:
         
         if response_format == "json":
             payload["response_format"] = {"type": "json_object"}
+        
+        # 添加联网搜索参数（适用于阿里云百炼等平台）
+        if enable_search:
+            default_search_options = {
+                "forced_search": True,
+                "search_strategy": "max",
+                "search_count": 5
+            }
+            # 合并用户自定义选项
+            final_search_options = {**default_search_options, **(search_options or {})}
+            payload["extra_body"] = {
+                "enable_search": True,
+                "search_options": final_search_options
+            }
         
         # 过滤敏感参数
         filtered_payload = payload.copy()
@@ -106,13 +125,16 @@ class UnifiedLLMClient:
             logger.error(f"{self.provider} LLM调用失败: {e}")
             raise
     
-    async def stream_chat(self, prompt: str, response_format: str = "text"):
+    async def stream_chat(self, prompt: str, response_format: str = "text", 
+                          enable_search: bool = True, search_options: Optional[Dict[str, Any]] = None):
         """
         流式聊天完成
         
         Args:
             prompt: 提示
             response_format: 响应格式
+            enable_search: 是否启用联网搜索（适用于阿里云百炼等平台）
+            search_options: 联网搜索选项
         
         Yields:
             响应内容块
@@ -131,6 +153,19 @@ class UnifiedLLMClient:
         
         if response_format == "json":
             payload["response_format"] = {"type": "json_object"}
+        
+        # 添加联网搜索参数（适用于阿里云百炼等平台）
+        if enable_search:
+            default_search_options = {
+                "forced_search": True,
+                "search_strategy": "max",
+                "search_count": 5
+            }
+            final_search_options = {**default_search_options, **(search_options or {})}
+            payload["extra_body"] = {
+                "enable_search": True,
+                "search_options": final_search_options
+            }
         
         # 过滤敏感参数
         filtered_payload = payload.copy()
@@ -188,7 +223,7 @@ class LLMService:
                 query = """
                 SELECT id, name, display_name, 
                        CASE WHEN api_key IS NOT NULL THEN pgp_sym_decrypt(api_key, %s) ELSE NULL END as api_key,
-                       base_url, default_model, models, is_active, is_system, config,
+                       base_url, default_model, models, is_active, is_system, provider,
                        created_at, updated_at
                 FROM llm_presets ORDER BY is_system DESC, id ASC
                 """
@@ -197,7 +232,7 @@ class LLMService:
                 query = """
                 SELECT id, name, display_name, 
                        CASE WHEN api_key IS NOT NULL THEN pgp_sym_decrypt(api_key, %s) ELSE NULL END as api_key,
-                       base_url, default_model, models, is_active, is_system, config,
+                       base_url, default_model, models, is_active, is_system, provider,
                        created_at, updated_at
                 FROM llm_presets WHERE is_active = true ORDER BY is_system DESC, id ASC
                 """
@@ -207,7 +242,7 @@ class LLMService:
             if include_inactive:
                 query = """
                 SELECT id, name, display_name, api_key,
-                       base_url, default_model, models, is_active, is_system, config,
+                       base_url, default_model, models, is_active, is_system, provider,
                        created_at, updated_at
                 FROM llm_presets ORDER BY is_system DESC, id ASC
                 """
@@ -215,7 +250,7 @@ class LLMService:
             else:
                 query = """
                 SELECT id, name, display_name, api_key,
-                       base_url, default_model, models, is_active, is_system, config,
+                       base_url, default_model, models, is_active, is_system, provider,
                        created_at, updated_at
                 FROM llm_presets WHERE is_active = true ORDER BY is_system DESC, id ASC
                 """
@@ -232,7 +267,7 @@ class LLMService:
             query = """
             SELECT id, name, display_name, 
                    CASE WHEN api_key IS NOT NULL THEN pgp_sym_decrypt(api_key, %s) ELSE NULL END as api_key,
-                   base_url, default_model, models, is_active, is_system, config,
+                   base_url, default_model, models, is_active, is_system, provider,
                    created_at, updated_at
             FROM llm_presets WHERE id = %s
             """
@@ -240,7 +275,7 @@ class LLMService:
         else:
             query = """
             SELECT id, name, display_name, api_key,
-                   base_url, default_model, models, is_active, is_system, config,
+                   base_url, default_model, models, is_active, is_system, provider,
                    created_at, updated_at
             FROM llm_presets WHERE id = %s
             """
@@ -259,7 +294,7 @@ class LLMService:
             query = """
             SELECT id, name, display_name, 
                    CASE WHEN api_key IS NOT NULL THEN pgp_sym_decrypt(api_key, %s) ELSE NULL END as api_key,
-                   base_url, default_model, models, is_active, is_system, config,
+                   base_url, default_model, models, is_active, is_system, provider,
                    created_at, updated_at
             FROM llm_presets WHERE name = %s
             """
@@ -267,7 +302,7 @@ class LLMService:
         else:
             query = """
             SELECT id, name, display_name, api_key,
-                   base_url, default_model, models, is_active, is_system, config,
+                   base_url, default_model, models, is_active, is_system, provider,
                    created_at, updated_at
             FROM llm_presets WHERE name = %s
             """
@@ -279,7 +314,8 @@ class LLMService:
     @staticmethod
     def create_preset(
         name: str, display_name: str, base_url: str, default_model: str,
-        api_key: str = "", models: Optional[List[str]] = None, is_active: bool = True, config: Optional[Dict] = None
+        api_key: str = "", models: Optional[List[str]] = None, is_active: bool = True,
+        provider: str = "custom"
     ) -> LLMPreset:
         """创建预定义模型（支持加密和明文存储API Key）"""
         encryption_key = get_encryption_key()
@@ -296,12 +332,12 @@ class LLMService:
                 encrypted_api_key = api_key.strip()
         
         query = """
-        INSERT INTO llm_presets (name, display_name, api_key, base_url, default_model, models, is_active, is_system, config)
+        INSERT INTO llm_presets (name, display_name, api_key, base_url, default_model, models, is_active, is_system, provider)
         VALUES (%s, %s, %s, %s, %s, %s, %s, false, %s)
         RETURNING id
         """
         try:
-            rows = execute_query(query, (name, display_name, encrypted_api_key, base_url, default_model, json.dumps(models or []), is_active, json.dumps(config) if config else None))
+            rows = execute_query(query, (name, display_name, encrypted_api_key, base_url, default_model, json.dumps(models or []), is_active, provider))
             if rows:
                 logger.debug(f"创建预设成功，ID: {rows[0][0]}")
                 return LLMService.get_preset_by_id(rows[0][0])
@@ -315,7 +351,8 @@ class LLMService:
     def update_preset(
         preset_id: int, display_name: Optional[str] = None, api_key: Optional[str] = None,
         base_url: Optional[str] = None, default_model: Optional[str] = None,
-        models: Optional[List[str]] = None, is_active: Optional[bool] = None, config: Optional[Dict] = None
+        models: Optional[List[str]] = None, is_active: Optional[bool] = None,
+        provider: Optional[str] = None
     ) -> Optional[LLMPreset]:
         """更新预定义模型（支持加密和明文存储API Key）"""
         encryption_key = get_encryption_key()
@@ -349,9 +386,9 @@ class LLMService:
         if is_active is not None:
             updates.append("is_active = %s")
             params.append(is_active)
-        if config is not None:
-            updates.append("config = %s")
-            params.append(json.dumps(config))
+        if provider is not None:
+            updates.append("provider = %s")
+            params.append(provider)
 
         if not updates:
             return LLMService.get_preset_by_id(preset_id)
@@ -390,7 +427,7 @@ class LLMService:
                 query = """
                 SELECT id, user_id, name, provider,
                        CASE WHEN api_key IS NOT NULL THEN pgp_sym_decrypt(api_key, %s) ELSE NULL END as api_key,
-                       base_url, model, is_active, config, created_at, updated_at
+                       base_url, model, is_active, created_at, updated_at
                 FROM user_llm_configs WHERE user_id = %s ORDER BY is_active DESC, id ASC
                 """
                 rows = execute_query(query, (encryption_key, user_id))
@@ -398,7 +435,7 @@ class LLMService:
                 query = """
                 SELECT id, user_id, name, provider,
                        CASE WHEN api_key IS NOT NULL THEN pgp_sym_decrypt(api_key, %s) ELSE NULL END as api_key,
-                       base_url, model, is_active, config, created_at, updated_at
+                       base_url, model, is_active, created_at, updated_at
                 FROM user_llm_configs WHERE user_id = %s AND is_active = true ORDER BY id ASC
                 """
                 rows = execute_query(query, (encryption_key, user_id))
@@ -407,14 +444,14 @@ class LLMService:
             if include_inactive:
                 query = """
                 SELECT id, user_id, name, provider, api_key,
-                       base_url, model, is_active, config, created_at, updated_at
+                       base_url, model, is_active, created_at, updated_at
                 FROM user_llm_configs WHERE user_id = %s ORDER BY is_active DESC, id ASC
                 """
                 rows = execute_query(query, (user_id,))
             else:
                 query = """
                 SELECT id, user_id, name, provider, api_key,
-                       base_url, model, is_active, config, created_at, updated_at
+                       base_url, model, is_active, created_at, updated_at
                 FROM user_llm_configs WHERE user_id = %s AND is_active = true ORDER BY id ASC
                 """
                 rows = execute_query(query, (user_id,))
@@ -430,14 +467,14 @@ class LLMService:
             query = """
             SELECT id, user_id, name, provider,
                    CASE WHEN api_key IS NOT NULL THEN pgp_sym_decrypt(api_key, %s) ELSE NULL END as api_key,
-                   base_url, model, is_active, config, created_at, updated_at
+                   base_url, model, is_active, created_at, updated_at
             FROM user_llm_configs WHERE id = %s AND user_id = %s
             """
             rows = execute_query(query, (encryption_key, config_id, user_id))
         else:
             query = """
             SELECT id, user_id, name, provider, api_key,
-                   base_url, model, is_active, config, created_at, updated_at
+                   base_url, model, is_active, created_at, updated_at
             FROM user_llm_configs WHERE id = %s AND user_id = %s
             """
             rows = execute_query(query, (config_id, user_id))
@@ -448,7 +485,7 @@ class LLMService:
     @staticmethod
     def create_user_config(
         user_id: int, name: str, api_key: str, base_url: str, model: str,
-        provider: Optional[str] = None, is_active: bool = True, config: Optional[Dict] = None
+        provider: Optional[str] = None, is_active: bool = True
     ) -> UserLLMConfig:
         """创建用户自定义配置（支持加密和明文存储API Key）"""
         from app.core.database import db_manager
@@ -464,13 +501,13 @@ class LLMService:
             encrypted_api_key = rows[0][0] if rows else None
         
         query = """
-        INSERT INTO user_llm_configs (user_id, name, provider, api_key, base_url, model, is_active, config)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO user_llm_configs (user_id, name, provider, api_key, base_url, model, is_active)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """
         with db_manager.get_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(query, (user_id, name, provider, encrypted_api_key, base_url, model, is_active, json.dumps(config) if config else None))
+                cursor.execute(query, (user_id, name, provider, encrypted_api_key, base_url, model, is_active))
                 result = cursor.fetchone()
                 conn.commit()
                 config_id = result[0] if result else None
@@ -483,7 +520,7 @@ class LLMService:
     def update_user_config(
         user_id: int, config_id: int, name: Optional[str] = None,
         api_key: Optional[str] = None, base_url: Optional[str] = None, model: Optional[str] = None,
-        provider: Optional[str] = None, is_active: Optional[bool] = None, config: Optional[Dict] = None
+        provider: Optional[str] = None, is_active: Optional[bool] = None
     ) -> Optional[UserLLMConfig]:
         """更新用户自定义配置（支持加密和明文存储API Key）"""
         encryption_key = get_encryption_key()
@@ -517,9 +554,6 @@ class LLMService:
         if is_active is not None:
             updates.append("is_active = %s")
             params.append(is_active)
-        if config is not None:
-            updates.append("config = %s")
-            params.append(json.dumps(config))
 
         if not updates:
             return LLMService.get_user_config_by_id(user_id, config_id)
@@ -545,22 +579,85 @@ class LLMService:
     @staticmethod
     def record_usage(
         user_id: int, model: str, prompt_tokens: int, completion_tokens: int,
-        total_tokens: int, cost: float = 0.0,
+        total_tokens: int,
         preset_id: Optional[int] = None, user_config_id: Optional[int] = None,
         provider: Optional[str] = None
     ) -> bool:
         """记录LLM使用量"""
+        logger.info(f"record_usage 被调用: user_id={user_id}, model={model}, prompt_tokens={prompt_tokens}, completion_tokens={completion_tokens}, total_tokens={total_tokens}, preset_id={preset_id}, user_config_id={user_config_id}, provider={provider}")
+
         query = """
         INSERT INTO user_llm_usage
-        (user_id, preset_id, user_config_id, provider, model, prompt_tokens, completion_tokens, total_tokens, cost)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        (user_id, preset_id, user_config_id, provider, model, prompt_tokens, completion_tokens, total_tokens)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """
         try:
-            execute_write(query, (user_id, preset_id, user_config_id, provider, model, prompt_tokens, completion_tokens, total_tokens, cost))
+            execute_write(query, (user_id, preset_id, user_config_id, provider, model, prompt_tokens, completion_tokens, total_tokens))
+            logger.info(f"记录LLM使用量成功")
             return True
         except Exception as e:
             logger.error(f"记录LLM使用量失败: {e}")
             return False
+
+    @staticmethod
+    async def wrap_chat(
+        llm_client: "UnifiedLLMClient",
+        user_id: int,
+        prompt: str,
+        response_format: str = "text",
+        temperature: float = 0.1,
+        seed: int = 42,
+        preset_id: Optional[int] = None,
+        user_config_id: Optional[int] = None
+    ) -> tuple:
+        """
+        包装LLM调用并自动记录使用量
+        
+        Args:
+            llm_client: LLM客户端实例
+            user_id: 用户ID
+            prompt: 提示词
+            response_format: 响应格式
+            temperature: 温度参数
+            seed: 随机种子
+            preset_id: 预设ID（用于记录）
+            user_config_id: 用户配置ID（用于记录）
+        
+        Returns:
+            (响应内容, token使用情况, 使用量是否记录成功)
+        """
+        logger.info(f"wrap_chat 被调用，user_id={user_id}, provider={llm_client.provider}, model={llm_client.model}")
+        
+        response, token_usage = await llm_client.chat(
+            prompt,
+            response_format=response_format,
+            temperature=temperature,
+            seed=seed
+        )
+        
+        # 记录使用量
+        prompt_tokens = token_usage.get("prompt_tokens", 0)
+        completion_tokens = token_usage.get("completion_tokens", 0)
+        total_tokens = token_usage.get("total_tokens", prompt_tokens + completion_tokens)
+
+        logger.info(f"准备记录使用量: user_id={user_id}, prompt_tokens={prompt_tokens}, completion_tokens={completion_tokens}, total_tokens={total_tokens}")
+
+        usage_recorded = LLMService.record_usage(
+            user_id=user_id,
+            preset_id=preset_id,
+            user_config_id=user_config_id,
+            provider=llm_client.provider,
+            model=llm_client.model or "unknown",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens
+        )
+
+        logger.info(f"使用量记录结果: {usage_recorded}")
+
+        token_usage["usage_recorded"] = usage_recorded
+
+        return response, token_usage
 
     @staticmethod
     def get_user_usage_summary(user_id: int, days: int = 30) -> Dict[str, Any]:
@@ -572,7 +669,6 @@ class LLMService:
             COALESCE(SUM(prompt_tokens), 0) as total_prompt_tokens,
             COALESCE(SUM(completion_tokens), 0) as total_completion_tokens,
             COALESCE(SUM(total_tokens), 0) as total_tokens,
-            COALESCE(SUM(cost), 0) as total_cost,
             date_trunc('day', called_at) as day
         FROM user_llm_usage
         WHERE user_id = %s AND called_at >= %s
@@ -586,8 +682,7 @@ class LLMService:
             COUNT(*) as total_calls,
             COALESCE(SUM(prompt_tokens), 0) as total_prompt_tokens,
             COALESCE(SUM(completion_tokens), 0) as total_completion_tokens,
-            COALESCE(SUM(total_tokens), 0) as total_tokens,
-            COALESCE(SUM(cost), 0) as total_cost
+            COALESCE(SUM(total_tokens), 0) as total_tokens
         FROM user_llm_usage
         WHERE user_id = %s AND called_at >= %s
         """
@@ -596,55 +691,71 @@ class LLMService:
         daily_usage = []
         for row in rows:
             daily_usage.append({
-                "date": row[5].strftime("%Y-%m-%d") if row[5] else None,
+                "date": row[4].strftime("%Y-%m-%d") if row[4] else None,
                 "call_count": row[0],
                 "prompt_tokens": row[1],
                 "completion_tokens": row[2],
-                "total_tokens": row[3],
-                "cost": float(row[4]) if row[4] else 0.0
+                "total_tokens": row[3]
             })
 
-        total = total_rows[0] if total_rows else (0, 0, 0, 0, 0)
+        total = total_rows[0] if total_rows else (0, 0, 0, 0)
         return {
             "period_days": days,
             "total_calls": total[0],
             "total_prompt_tokens": total[1],
             "total_completion_tokens": total[2],
             "total_tokens": total[3],
-            "total_cost": float(total[4]) if total[4] else 0.0,
             "daily_usage": daily_usage
         }
 
     @staticmethod
-    def _load_preference_cache():
-        """从数据库加载用户偏好到缓存"""
+    def _load_preference_cache(force_reload: bool = False):
+        """从数据库加载用户偏好到缓存
+        
+        Args:
+            force_reload: 是否强制重新加载（默认只加载一次）
+        """
         global _user_preference_cache, _cache_loaded
-        if _cache_loaded:
-            return
+        with _preference_cache_lock:
+            if _cache_loaded and not force_reload:
+                return
 
-        try:
-            query = "SELECT * FROM user_llm_preferences"
-            rows = execute_query(query)
-            for row in rows:
-                pref = UserLLMPreference.from_db_row(row)
-                _user_preference_cache[pref.user_id] = pref
-            _cache_loaded = True
-            logger.info(f"已加载 {len(_user_preference_cache)} 个用户LLM偏好到缓存")
-        except Exception as e:
-            logger.error(f"加载用户偏好缓存失败: {e}")
+            try:
+                query = "SELECT * FROM user_llm_preferences"
+                rows = execute_query(query)
+                if force_reload:
+                    _user_preference_cache.clear()
+                for row in rows:
+                    pref = UserLLMPreference.from_db_row(row)
+                    _user_preference_cache[pref.user_id] = pref
+                _cache_loaded = True
+                logger.info(f"已加载 {len(_user_preference_cache)} 个用户LLM偏好到缓存")
+            except Exception as e:
+                logger.error(f"加载用户偏好缓存失败: {e}")
+
+    @staticmethod
+    def invalidate_preference_cache():
+        """使偏好缓存失效，下次调用时重新加载"""
+        global _cache_loaded
+        with _preference_cache_lock:
+            _cache_loaded = False
+        logger.info("用户LLM偏好缓存已失效")
 
     @staticmethod
     def get_user_preference(user_id: int, use_cache: bool = True) -> Optional[UserLLMPreference]:
         """获取用户LLM偏好"""
         if use_cache:
             LLMService._load_preference_cache()
-            return _user_preference_cache.get(user_id)
-
+            with _preference_cache_lock:
+                if user_id in _user_preference_cache:
+                    return _user_preference_cache[user_id]
+        
         query = "SELECT * FROM user_llm_preferences WHERE user_id = %s"
         rows = execute_query(query, (user_id,))
         if rows:
             pref = UserLLMPreference.from_db_row(rows[0])
-            _user_preference_cache[user_id] = pref
+            with _preference_cache_lock:
+                _user_preference_cache[user_id] = pref
             return pref
         return None
 
@@ -688,7 +799,8 @@ class LLMService:
         rows = execute_query(query, (user_id, preset_id, user_config_id, now))
         pref = UserLLMPreference.from_db_row(rows[0])
 
-        _user_preference_cache[user_id] = pref
+        with _preference_cache_lock:
+            _user_preference_cache[user_id] = pref
         if preset_id:
             preset = LLMService.get_preset_by_id(preset_id)
         else:
@@ -712,20 +824,20 @@ class LLMService:
 
         pref = LLMService.get_user_preference(user_id)
         if not pref:
-            default_provider = Config.DEFAULT_PROVIDER
-            preset = LLMService.get_preset_by_name(default_provider)
+            default_config_name = Config.DEFAULT_CONFIG_NAME
+            preset = LLMService.get_preset_by_name(default_config_name)
             if not preset:
-                raise ValueError(f"默认提供商 {default_provider} 不存在，请检查配置")
+                raise ValueError(f"默认配置名称 {default_config_name} 不存在，请检查配置")
             LLMService.set_user_preference(user_id, preset_id=preset.id)
             pref = LLMService.get_user_preference(user_id)
 
         if pref.preset_id:
             preset = LLMService.get_preset_by_id(pref.preset_id)
-            logger.info(f"用户 {user_id} 使用LLM: 预设模型={preset.name}, 模型={preset.default_model}")
+            logger.info(f"用户 {user_id} 使用LLM: 预设配置名={preset.name}, 模型={preset.default_model}")
             return LLMManager.get_preset_client(pref.preset_id)
         elif pref.user_config_id:
             config = LLMService.get_user_config_by_id(user_id, pref.user_config_id)
-            logger.info(f"用户 {user_id} 使用LLM: 自定义配置={config.name}, 模型={config.model}")
+            logger.info(f"用户 {user_id} 使用LLM: 自定义配置名={config.name}, 模型={config.model}")
             return LLMManager.get_user_client(user_id, pref.user_config_id)
         else:
             raise ValueError(f"用户 {user_id} 的LLM偏好配置无效")
@@ -788,6 +900,7 @@ class LLMService:
                             api_key = %s,
                             models = %s,
                             is_active = %s,
+                            provider = %s,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE name = %s
                         """
@@ -798,13 +911,14 @@ class LLMService:
                             encrypted_api_key,
                             json.dumps(preset.get("models", [])),
                             preset.get("is_active", True),
+                            preset.get("provider", "custom"),
                             name
                         ))
-                        logger.info(f"更新LLM预设: {name}, 默认模型: {preset.get('default_model', '')}, 支持模型: {preset.get('models', [])}")
+                        logger.info(f"更新LLM预设: {name}, 默认模型: {preset.get('default_model', '')}, 支持模型: {preset.get('models', [])}, provider: {preset.get('provider', 'custom')}")
                     else:
                         # 创建预设
                         insert_query = """
-                        INSERT INTO llm_presets (name, display_name, api_key, base_url, default_model, models, is_active, is_system, config)
+                        INSERT INTO llm_presets (name, display_name, api_key, base_url, default_model, models, is_active, is_system, provider)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, false, %s)
                         """
                         cursor.execute(insert_query, (
@@ -815,10 +929,10 @@ class LLMService:
                             preset.get("default_model", ""),
                             json.dumps(preset.get("models", [])),
                             preset.get("is_active", True),
-                            json.dumps(preset.get("config")) if preset.get("config") else None
+                            preset.get("provider", "custom")
                         ))
                         count += 1
-                        logger.info(f"初始化LLM预设: {name}, 默认模型: {preset.get('default_model', '')}, 支持模型: {preset.get('models', [])}")
+                        logger.info(f"初始化LLM预设: {name}, 默认模型: {preset.get('default_model', '')}, 支持模型: {preset.get('models', [])}, provider: {preset.get('provider', 'custom')}")
 
                 # 提交事务
                 conn.commit()
@@ -855,7 +969,7 @@ class LLMManager:
             raise ValueError(f"预设模型 {preset.name} 的API密钥未配置")
 
         target_model = model or preset.default_model
-        return UnifiedLLMClient(api_key, preset.base_url, target_model, preset.name)
+        return UnifiedLLMClient(api_key, preset.base_url, target_model, preset.provider)
 
     @staticmethod
     def get_user_client(user_id: int, config_id: int) -> "UnifiedLLMClient":
@@ -883,9 +997,14 @@ class LLMManager:
         if preference and preference.preset_id:
             # 使用预设
             try:
-                return LLMManager.get_preset_client(preference.preset_id)
+                preset = LLMService.get_preset_by_id(preference.preset_id)
+                preset_name = preset.name if preset else f"preset_{preference.preset_id}"
+                logger.debug(f"用户 {user_id} 尝试使用偏好预设: {preset_name}")
+                client = LLMManager.get_preset_client(preference.preset_id)
+                logger.debug(f"用户 {user_id} 成功获取预设客户端: {preset_name}")
+                return client
             except Exception as e:
-                logger.warning(f"使用预设失败: {e}")
+                logger.warning(f"用户 {user_id} 使用偏好预设失败: {e}")
         
         # 尝试使用用户配置（第一个激活的）
         user_configs = LLMService.get_user_configs(user_id)
@@ -893,19 +1012,30 @@ class LLMManager:
         
         if active_configs:
             try:
-                return LLMManager.get_user_client(user_id, active_configs[0].id)
+                config_name = active_configs[0].name
+                logger.debug(f"用户 {user_id} 尝试使用用户配置: {config_name}")
+                client = LLMManager.get_user_client(user_id, active_configs[0].id)
+                logger.debug(f"用户 {user_id} 成功获取用户配置客户端: {config_name}")
+                return client
             except Exception as e:
-                logger.warning(f"使用用户配置失败: {e}")
+                logger.warning(f"用户 {user_id} 使用用户配置 {config_name} 失败: {e}")
         
         # 尝试使用系统默认预设
         from app.core.config import Config
         try:
-            preset = LLMService.get_preset_by_name(Config.DEFAULT_PROVIDER)
+            default_config_name = Config.DEFAULT_CONFIG_NAME
+            logger.debug(f"用户 {user_id} 尝试使用系统默认预设: {default_config_name}")
+            preset = LLMService.get_preset_by_name(default_config_name)
             if preset and preset.is_active:
-                return LLMManager.get_preset_client(preset.id)
+                client = LLMManager.get_preset_client(preset.id)
+                logger.debug(f"用户 {user_id} 成功获取系统默认客户端: {default_config_name}")
+                return client
+            else:
+                logger.warning(f"用户 {user_id} 系统默认预设 {default_config_name} 不存在或未激活")
         except Exception as e:
-            logger.warning(f"使用系统默认预设失败: {e}")
+            logger.error(f"用户 {user_id} 使用系统默认预设 {default_config_name} 失败: {e}")
         
+        logger.error(f"用户 {user_id} 获取LLM客户端失败，已尝试：用户偏好、用户配置、系统默认预设")
         return None
 
     @staticmethod
@@ -942,7 +1072,6 @@ class LLMManager:
             prompt_tokens = token_usage.get("prompt_tokens", 0)
             completion_tokens = token_usage.get("completion_tokens", 0)
             total_tokens = token_usage.get("total_tokens", prompt_tokens + completion_tokens)
-            cost = LLMManager.calculate_cost(provider, model, prompt_tokens, completion_tokens)
 
             usage_recorded = LLMService.record_usage(
                 user_id=user_id,
@@ -952,8 +1081,7 @@ class LLMManager:
                 model=model or request.model or "unknown",
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                cost=cost
+                total_tokens=total_tokens
             )
 
             return LLMChatResponse(
@@ -963,7 +1091,6 @@ class LLMManager:
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,
-                cost=cost,
                 usage_recorded=usage_recorded
             )
 
@@ -991,19 +1118,3 @@ class LLMManager:
         except Exception as e:
             logger.error(f"LLM流式聊天失败: {e}")
             yield f"调用失败: {str(e)}"
-
-    @staticmethod
-    def calculate_cost(provider: Optional[str], model: str, prompt_tokens: int, completion_tokens: int) -> float:
-        """计算API调用成本（基于估算）"""
-        cost_per_1k_tokens = {
-            ("aliyun", "qwen-plus"): 0.004,
-            ("aliyun", "qwen-max"): 0.02,
-            ("deepseek", "deepseek-chat"): 0.001,
-            ("deepseek", "deepseek-coder"): 0.002,
-        }
-
-        key = (provider, model) if provider else ("custom", model)
-        rate = cost_per_1k_tokens.get(key, 0.001)
-
-        total_tokens = prompt_tokens + completion_tokens
-        return (total_tokens / 1000) * rate

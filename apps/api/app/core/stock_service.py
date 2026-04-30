@@ -224,8 +224,6 @@ class StockService:
             raise HTTPException(status_code=404, detail=f"Index {index_code} not found")
         return stock_zh_index_daily_df[(stock_zh_index_daily_df["date"] >= start_date) & (stock_zh_index_daily_df["date"] <= end_date)]
 
-
-
     def get_stock_quote(self, stock_code: str) -> Dict:
         normalized_code = stock_code.strip().zfill(6)
         if not hasattr(self, "stock_quote_cache"):
@@ -327,6 +325,7 @@ class StockService:
             raise HTTPException(status_code=502, detail=f"获取股票行情失败: {str(e)}")
     
     def get_stock_history(self, stock_code: str, period: str, days: int) -> Dict:
+        # 获取股票历史k线数据 （支持日、周、月）
         period_map = {
             "daily": "d",
             "weekly": "w",
@@ -454,6 +453,117 @@ class StockService:
         """
         return self.stock_basic_info_map.get(code, {})
     
+    def fetch_stock_data(self, ticker: str, days: int = 60, buffer_days: int = 30) -> List[Dict]:
+        """
+        获取股票历史日线数据
+        
+        Args:
+            ticker: 股票代码
+            days: 获取天数
+            buffer_days: 额外获取的天数，以确保数据充足
+        
+        Returns:
+            日线数据列表，每项包含 {date, open, high, low, close, volume, amount}
+        """
+        logger.info(f"开始获取股票 {ticker} 的 {days} 天历史日线数据")
+        try:
+            # 确定股票类型
+            symbol = self.get_full_lowercase_stock_code_no_dot(ticker)
+            
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=days + buffer_days)  # 多取 buffer_days 天以确保数据充足
+            
+            # 使用 AkShare 获取数据
+            stock_zh_a_hist_df = ak.stock_zh_a_daily(
+                symbol=symbol, 
+                start_date=start_date.strftime("%Y%m%d"),
+                end_date=end_date.strftime("%Y%m%d"),
+                adjust="qfq")
+
+            logger.debug(f"获取到的前1条数据:\n{stock_zh_a_hist_df.head(1)}")
+            logger.debug(f"获取到的后1条数据:\n{stock_zh_a_hist_df.tail(1)}")
+
+            # 转换为所需格式
+            data = []
+            for _, row in stock_zh_a_hist_df.iterrows():
+                data.append({
+                    "date": row["date"],
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                    "volume": float(row["volume"]),
+                    "amount": float(row["amount"])
+                })
+
+            logger.info(f"已获取数据: {ticker}, 开始日期: {start_date.strftime('%Y%m%d')}, 结束日期: {end_date.strftime('%Y%m%d')} 获取到 {len(data)} 条数据")
+            return data
+        except Exception as e:
+            logger.error(f"获取股票数据失败: {e}")
+            return []
+
+    def fetch_fundamental(self, ticker: str) -> Dict:
+        """
+        获取股票基本面数据
+        
+        Args:
+            ticker: 股票代码
+        
+        Returns:
+            基本面数据字典
+        """
+        logger.info(f"开始获取股票 {ticker} 的基本面数据")
+        try:
+            # 获取股票基本信息
+            stock_basic_info = self.get_stock_basic_info(ticker)
+            org_short_name_cn = stock_basic_info.get('name', '')
+            industry_name = stock_basic_info.get('industry', '')
+
+            # 获取股票估值信息
+            stock_info = ak.stock_value_em(symbol=ticker)
+            if stock_info.empty:
+                logger.warning(f"获取估值信息为空: {ticker}")
+                return {}
+            
+            # 获取财务指标
+            try:
+                previous_year = str(datetime.now().year - 1)
+                finance_data = ak.stock_financial_analysis_indicator(symbol=ticker, start_year=previous_year)
+                logger.debug(f"获取到的财务指标数量: {len(finance_data)}")
+                logger.debug(f"获取到的最新财务指标:\n{finance_data.tail(1)}")
+                
+                # 取最新财务指标
+                finance_data = finance_data.tail(1)
+                if finance_data.empty:
+                    logger.error(f"获取财务指标为空: {ticker}")
+                    return {}
+
+            except Exception as e:
+                logger.warning(f"获取财务指标失败: {e}")
+                return {}
+            
+            fundamental = {
+                "name": org_short_name_cn,
+                "industry": industry_name,
+                "pe": float(stock_info.iloc[-1]["PE(TTM)"]) if not pd.isna(stock_info.iloc[-1]["PE(TTM)"]) else None,
+                "pb": float(stock_info.iloc[-1]["市净率"]) if not pd.isna(stock_info.iloc[-1]["市净率"]) else None,
+            }
+            
+            if finance_data is not None and not finance_data.empty:
+                # 获取第一行数据
+                row = finance_data.iloc[0]
+                fundamental.update({
+                    "roe": float(row["加权净资产收益率(%)"]) if not pd.isna(row["加权净资产收益率(%)"]) else None,
+                    "gross_profit_rate": float(row["销售毛利率(%)"]) if not pd.isna(row["销售毛利率(%)"]) else None,
+                    "asset_liability_ratio": float(row["资产负债率(%)"]) if not pd.isna(row["资产负债率(%)"]) else None,
+                })
+            
+            logger.info(f"{ticker} 获取基本面数据: {fundamental}")
+            return fundamental
+        except Exception as e:
+            logger.error(f"{ticker} 获取基本面数据失败: {e}")
+            return {}
+
     def get_stock_market(self, code: str) -> str:
         """
         根据股票代码获取对应的市场

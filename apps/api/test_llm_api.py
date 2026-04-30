@@ -4,6 +4,7 @@ import time
 from fastapi.testclient import TestClient
 from app.main import app
 from app.core.auth import get_current_user
+from app.core.admin import require_admin
 from app.user_management.models import User
 from unittest.mock import patch
 
@@ -22,11 +23,26 @@ def mock_get_current_user():
     )
     return user
 
+# 模拟管理员用户（用于管理员接口测试）
+def mock_require_admin():
+    """模拟获取管理员用户"""
+    user = User(
+        id=1,
+        username="tester",
+        email="test@example.com",
+        password_hash="$2b$12$mQrZxjQiULc2inGJfqlIPOwhUWW69wLTPAJpMmjuahJs6xIMzXape",
+        status="active",
+        created_at=os.environ.get("DATABASE_URL"),
+        updated_at=os.environ.get("DATABASE_URL")
+    )
+    return user
+
 # 应用模拟
 app.dependency_overrides[get_current_user] = mock_get_current_user
+app.dependency_overrides[require_admin] = mock_require_admin
 
 # 初始化LLM预设
-from app.services.llm_service import LLMService
+from app.llm.llm_service import LLMService
 print("初始化LLM预设...")
 count = LLMService.init_llm_presets_from_config()
 print(f"初始化了 {count} 个LLM预设")
@@ -185,7 +201,7 @@ def test_get_user_config():
         "api_key": "user-test-key",
         "base_url": "https://user.test",
         "model": "user-test-model",
-        "provider": "custom"
+        "provider": "aliyun"
     }
     create_response = client.post("/api/llm/user/configs", json=test_config, headers=get_auth_headers())
     print(f"创建用户配置响应状态码: {create_response.status_code}")
@@ -369,6 +385,34 @@ def test_delete_user_preference():
     assert data["message"] == "偏好删除成功"
     print("15 [OK] 删除用户偏好测试通过")
 
+
+def test_get_user_config_api_key():
+    """测试获取用户配置的API Key"""
+    print("测试: GET /api/llm/user/configs/{config_id}/api-key")
+    # 先创建一个用户配置
+    test_config = {
+        "name": f"测试API Key配置_{int(time.time() * 1000)}",
+        "api_key": "user-api-key-for-test",
+        "base_url": "https://user.test",
+        "model": "user-test-model"
+    }
+    create_response = client.post("/api/llm/user/configs", json=test_config, headers=get_auth_headers())
+    config_id = create_response.json()["config"]["id"]
+    
+    # 测试获取API Key
+    response = client.get(f"/api/llm/user/configs/{config_id}/api-key", headers=get_auth_headers())
+    assert response.status_code == 200
+    data = response.json()
+    print(data)
+    assert "config_id" in data
+    assert data["config_id"] == config_id
+    assert "name" in data
+    assert "api_key" in data
+    assert data["api_key"] == test_config["api_key"]
+    assert "message" in data
+    print("16 [OK] 获取用户配置API Key测试通过")
+
+
 if __name__ == "__main__":
     # 运行所有测试
     try:
@@ -387,8 +431,9 @@ if __name__ == "__main__":
         test_get_user_preference()
         test_set_user_preference()
         test_delete_user_preference()
+        test_get_user_config_api_key()
         
-        print("\n[SUCCESS] 所有15个接口测试通过！")
+        print("\n[SUCCESS] 所有16个接口测试通过！")
     except Exception as e:
         print(f"\n[ERROR] 测试失败: {e}")
         import traceback

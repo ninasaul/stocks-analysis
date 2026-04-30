@@ -8,7 +8,7 @@ from ..dialogue.manager import dialogue_manager
 from ..user_management.models import User
 from ..core.auth import get_current_user
 from ..core.logging import logger
-from ..services.llm_service import LLMService
+from ..llm.llm_service import LLMService
 
 router = APIRouter(prefix="/api/dialogue", tags=["AI对话"])
 

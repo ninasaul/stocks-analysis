@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 
-from ..services.llm_service import LLMService
+from ..llm.llm_service import LLMService
 from ..user_management.models import User
 from ..core.admin import require_admin
 from ..core.logging import logger
@@ -18,7 +18,6 @@ class CreatePresetRequest(BaseModel):
     default_model: str
     api_key: Optional[str] = ""
     is_active: bool = True
-    config: Optional[Dict[str, Any]] = None
 
 
 class UpdatePresetRequest(BaseModel):
@@ -28,7 +27,6 @@ class UpdatePresetRequest(BaseModel):
     default_model: Optional[str] = None
     models: Optional[List[str]] = None
     is_active: Optional[bool] = None
-    config: Optional[Dict[str, Any]] = None
 
 
 @router.post("/presets")
@@ -49,8 +47,7 @@ async def create_llm_preset(
             api_key=request.api_key or "",
             base_url=request.base_url,
             default_model=request.default_model,
-            is_active=request.is_active,
-            config=request.config
+            is_active=request.is_active
         )
         logger.info(f"用户 {current_user.id} 创建预设模型: {request.name}")
         return {"preset": preset.to_dict(), "message": "创建成功"}
@@ -78,8 +75,7 @@ async def update_llm_preset(
         base_url=request.base_url,
         default_model=request.default_model,
         models=request.models,
-        is_active=request.is_active,
-        config=request.config
+        is_active=request.is_active
     )
     if not preset:
         raise HTTPException(status_code=404, detail="预设模型不存在")

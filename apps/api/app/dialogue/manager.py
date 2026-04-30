@@ -4,7 +4,7 @@ import asyncio
 from app.core.logging import logger
 from app.core.stock_service import StockService
 from app.core.database import execute_query
-from app.services.llm_service import LLMManager
+from app.llm.llm_service import LLMManager
 import json
 import re
 
@@ -27,30 +27,47 @@ class DialogueManager:
             # 从数据库加载对话历史
             # 注意：这里暂时不加载，因为需要用户上下文
 
-    def _get_session(self, session_id: Optional[str]) -> Dict:
+    def _get_session(self, session_id: Optional[str], user_id: Optional[int] = None) -> Dict:
         """获取或创建会话"""
         if not session_id:
             session_id = self.current_session_id
-        
+
         if not session_id:
-            # 如果没有会话ID，返回当前会话（如果存在）
             if self.current_session_id:
                 return self.sessions.get(self.current_session_id, {"history": [], "criteria": {}})
             return {"history": [], "criteria": {}}
-        
-        # 确保会话存在
-        if session_id not in self.sessions:
-            self.sessions[session_id] = {"history": [], "criteria": {}, "user_id": None, "topic": ""}
-        
-        # 如果是新的会话ID，更新当前会话
+
+        is_new_session = session_id not in self.sessions
+
+        if is_new_session:
+            self.sessions[session_id] = {"history": [], "criteria": {}, "user_id": user_id, "topic": ""}
+            if user_id:
+                self._create_session_in_db(user_id, session_id)
+
         if session_id != self.current_session_id:
             self.current_session_id = session_id
-        
+
         return self.sessions[session_id]
+
+    def _create_session_in_db(self, user_id: int, session_id: str) -> bool:
+        """在数据库中创建会话"""
+        try:
+            insert_query = """
+            INSERT INTO dialogue_sessions (user_id, session_id, topic, created_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (user_id, session_id) DO NOTHING
+            """
+            from datetime import date
+            execute_query(insert_query, (user_id, session_id, "", date.today()), fetch=False)
+            logger.debug(f"会话已创建到数据库: user_id={user_id}, session_id={session_id}")
+            return True
+        except Exception as e:
+            logger.error(f"创建会话到数据库失败: {e}")
+            return False
 
     def add_user_message(self, message: str, session_id: Optional[str] = None, user_id: Optional[int] = None) -> None:
         """添加用户消息到历史"""
-        session = self._get_session(session_id)
+        session = self._get_session(session_id, user_id)
         
         timestamp = datetime.now().astimezone().isoformat()
         message_id = None

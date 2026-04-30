@@ -26,7 +26,7 @@ log_filename = os.path.join(logs_dir, f"app-{current_date}.log")
 logger = logging.getLogger(__name__)
 logger.setLevel(LOG_LEVEL)
 
-# 清除现有处理器
+# 清除现有处理器（防止重复添加）
 logger.handlers = []
 
 # 创建控制台处理器
@@ -35,16 +35,6 @@ console_handler.setLevel(LOG_LEVEL)
 console_formatter = logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT)
 console_handler.setFormatter(console_formatter)
 logger.addHandler(console_handler)
-
-# 创建文件处理器（追加模式）
-file_handler = logging.FileHandler(log_filename, mode='a', encoding='utf-8')
-file_handler.setLevel(LOG_LEVEL)
-file_formatter = logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT)
-file_handler.setFormatter(file_formatter)
-logger.addHandler(file_handler)
-
-# 记录当前日志文件的日期
-current_log_date = current_date
 
 # 自定义日志处理器，支持跨天自动切换
 class DateRotatingFileHandler(logging.Handler):

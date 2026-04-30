@@ -1,5 +1,5 @@
 """择时智能体：技术面 10 维度打分"""
-from app.data.indicators import TimingScorer
+from app.core.indicators import TimingScorer
 from app.core.config import config
 from app.core.stock_service import StockService
 from app.core.logging import logger

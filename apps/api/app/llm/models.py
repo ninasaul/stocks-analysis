@@ -16,7 +16,7 @@ class LLMPreset:
     models: list = field(default_factory=list)
     is_active: bool = True
     is_system: bool = False
-    config: Optional[Dict[str, Any]] = None
+    provider: str = "custom"
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -31,7 +31,7 @@ class LLMPreset:
             "models": self.models,
             "is_active": self.is_active,
             "is_system": self.is_system,
-            "config": self.config,
+            "provider": self.provider,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }
@@ -40,8 +40,7 @@ class LLMPreset:
         import json
         return (
             self.name, self.display_name, self.api_key, self.base_url,
-            self.default_model, json.dumps(self.models), self.is_active, self.is_system,
-            self.config if self.config else None
+            self.default_model, json.dumps(self.models), self.is_active, self.is_system
         )
 
     @classmethod
@@ -60,7 +59,7 @@ class LLMPreset:
             models=models,
             is_active=data.get("is_active", True),
             is_system=data.get("is_system", False),
-            config=data.get("config"),
+            provider=data.get("provider", "custom"),
             created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None,
             updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
         )
@@ -82,9 +81,9 @@ class LLMPreset:
             models=models or [],
             is_active=row[7],
             is_system=row[8],
-            config=row[9],
-            created_at=row[10],
-            updated_at=row[11]
+            provider=row[9] if len(row) > 9 else "custom",
+            created_at=row[10] if len(row) > 10 else None,
+            updated_at=row[11] if len(row) > 11 else None
         )
 
 
@@ -99,7 +98,6 @@ class UserLLMConfig:
     base_url: str = ""
     model: str = ""
     is_active: bool = True
-    config: Optional[Dict[str, Any]] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -113,7 +111,6 @@ class UserLLMConfig:
             "base_url": self.base_url,
             "model": self.model,
             "is_active": self.is_active,
-            "config": self.config,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }
@@ -121,7 +118,7 @@ class UserLLMConfig:
     def to_db_tuple(self) -> tuple:
         return (
             self.user_id, self.name, self.provider, self.api_key,
-            self.base_url, self.model, self.is_active, self.config if self.config else None
+            self.base_url, self.model, self.is_active
         )
 
     @classmethod
@@ -135,7 +132,6 @@ class UserLLMConfig:
             base_url=data.get("base_url", ""),
             model=data.get("model", ""),
             is_active=data.get("is_active", True),
-            config=data.get("config"),
             created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None,
             updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
         )
@@ -151,9 +147,8 @@ class UserLLMConfig:
             base_url=row[5],
             model=row[6],
             is_active=row[7],
-            config=row[8],
-            created_at=row[9],
-            updated_at=row[10]
+            created_at=row[8] if len(row) > 8 else None,
+            updated_at=row[9] if len(row) > 9 else None
         )
 
 
@@ -249,7 +244,6 @@ class LLMChatResponse:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
-    cost: float = 0.0
     usage_recorded: bool = False
 
 

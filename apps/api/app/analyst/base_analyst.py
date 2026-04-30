@@ -3,7 +3,6 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 from .depth_config import (
     get_analyst_depth_config,
-    get_technical_indicators_for_depth,
     get_fundamental_metrics_for_depth,
     is_feature_enabled_for_depth,
     get_data_days_for_depth,
@@ -32,10 +31,6 @@ class BaseAnalyst(ABC):
     def get_depth_config(self, depth: int) -> Dict[str, Any]:
         """获取指定深度的配置"""
         return get_analyst_depth_config(depth)
-
-    def get_technical_indicators(self, depth: int) -> List[str]:
-        """获取指定深度使用的技术指标"""
-        return get_technical_indicators_for_depth(depth)
 
     def get_fundamental_metrics(self, depth: int) -> List[str]:
         """获取指定深度使用的基本面指标"""

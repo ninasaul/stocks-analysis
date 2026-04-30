@@ -3,7 +3,7 @@ from fastapi import APIRouter, Query, Depends, HTTPException
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 
-from ..services.llm_service import LLMService, UnifiedLLMClient
+from ..llm.llm_service import LLMService, UnifiedLLMClient
 from ..user_management.models import User
 from ..core.auth import get_current_user
 from ..core.logging import logger
@@ -18,7 +18,6 @@ class CreateUserConfigRequest(BaseModel):
     model: str
     provider: Optional[str] = "custom"
     is_active: bool = True
-    config: Optional[Dict[str, Any]] = None
 
 
 class UpdateUserConfigRequest(BaseModel):
@@ -28,7 +27,6 @@ class UpdateUserConfigRequest(BaseModel):
     model: Optional[str] = None
     provider: Optional[str] = None
     is_active: Optional[bool] = None
-    config: Optional[Dict[str, Any]] = None
 
 
 @router.get("/presets")
@@ -116,8 +114,7 @@ async def create_user_llm_config(
             base_url=request.base_url,
             model=request.model,
             provider=request.provider,
-            is_active=request.is_active,
-            config=request.config
+            is_active=request.is_active
         )
         logger.info(f"用户 {current_user.id} 创建LLM配置: {request.name}")
         return {"config": config.to_dict(), "message": "创建成功"}
@@ -146,8 +143,7 @@ async def update_user_llm_config(
         base_url=request.base_url,
         model=request.model,
         provider=request.provider,
-        is_active=request.is_active,
-        config=request.config
+        is_active=request.is_active
     )
     if not config:
         raise HTTPException(status_code=404, detail="配置不存在")
@@ -230,10 +226,6 @@ async def test_user_llm_config(
             "response": None,
             "usage": None
         }
-
-
-
-
 
 @router.get("/usage/summary")
 async def get_usage_summary(
@@ -355,5 +347,4 @@ async def delete_user_preference(
         操作结果
     """
     LLMService.delete_user_preference(current_user.id)
-    logger.info(f"用户 {current_user.id} 删除LLM偏好")
     return {"message": "偏好删除成功"}

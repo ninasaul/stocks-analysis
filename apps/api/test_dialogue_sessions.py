@@ -113,7 +113,7 @@ def test_dialogue_sessions():
     print(f"\n=== 测试会话2: {session_id_2} ===")
     
     # 发送第一条消息
-    message_3 = "推荐几只新能源股票"
+    message_3 = "你现在的数据更新到哪一天了？你支持联网模式吗？"
     params = {
         "message": message_3,
         "session_id": session_id_2
