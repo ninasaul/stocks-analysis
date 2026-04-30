@@ -6,8 +6,8 @@ import { subscriptionCopy, subscriptionTierPublicCopy } from "@/lib/copy";
 import { useAuthStore } from "@/stores/use-auth-store";
 import type { BillingCycle, SubscriptionOrder } from "@/stores/use-subscription-store";
 import { GUEST_QUOTA, useSubscriptionStore } from "@/stores/use-subscription-store";
-import { requestCheckout } from "@/lib/api/subscription";
-import { requestCurrentMembership, type MembershipApiResult } from "@/lib/api/users";
+import { requestCheckout, type MembershipApiResult } from "@/lib/api/subscription";
+import { requestCurrentMembership } from "@/lib/api/users";
 import { Button } from "@/components/ui/button";
 import {
   Card,
