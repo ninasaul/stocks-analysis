@@ -6,7 +6,7 @@ export const subscriptionTierPublicCopy = {
   proTierName: "专业版",
   subscriptionPageTitle: "订阅与会员",
   plansSectionTitle: "套餐与价格",
-  /** 与 `/subscription` 对齐的长按钮/链接 */
+  /** 与 `/app/account/subscription` 对齐的长按钮/链接 */
   ctaViewPlans: "查看订阅与价格",
   /** 页眉、对话框等窄位入口 */
   ctaViewPlansShort: "订阅与价格",
@@ -48,7 +48,7 @@ export const pickerCopy = {
   inputPlaceholder: "补充说明或偏好（可选）",
   optionsLoading: "正在整理可选项…",
   chatIntro:
-    "你好，我是智谱投研选股助手。你可以先进行一般性咨询，或选择「帮我选股」以结构化方式收敛偏好并生成候选。",
+    "你好，我是智谱投研选股助手。你可以先用「随便问问」咨询市场、策略与术语，也可以直接点「帮我选股」进入 D1-D8 偏好收集流程，我会根据你的条件生成候选标的。",
   chatEmptyTitle: "你还没有发送消息",
   chatEmptyBody: "在底部选择对话模式后输入说明，Enter 发送；Shift+Enter 换行。",
   chatEmptyModeUnset: "请先在底部选择「随便问问」或「帮我选股」，再发送第一条消息。",
@@ -315,7 +315,7 @@ export const marketingFooterCopy = {
       title: "账户",
       links: [
         { href: "/login", label: "登录" },
-        { href: "/subscription", label: "订阅与配额" },
+        { href: "/app/account/subscription", label: "订阅与配额" },
         { href: "/app/analyze", label: "进入工作台" },
         { href: "/#landing-faq", label: "常见问题" },
       ],

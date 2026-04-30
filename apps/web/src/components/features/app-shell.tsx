@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -14,6 +13,7 @@ import { AppBreadcrumb } from "@/components/features/app-breadcrumb";
 import { ThemeSwitcher } from "@/components/features/theme-switcher";
 import { AppMessageNotificationsTrigger } from "@/components/features/app-message-notifications-trigger";
 import { subscriptionTierPublicCopy } from "@/lib/copy";
+import { cn } from "@/lib/utils";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useSubscriptionStore } from "@/stores/use-subscription-store";
@@ -21,6 +21,7 @@ import { useSubscriptionStore } from "@/stores/use-subscription-store";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const isPickPage = pathname === "/app/pick";
   const authHydrated = useStoreHydrated(useAuthStore);
   const syncSession = useAuthStore((s) => s.syncSession);
   const session = useAuthStore((s) => s.session);
@@ -58,7 +59,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <SidebarProvider defaultOpen={false}>
       <ZhputianAppSidebar />
-      <SidebarInset className="flex min-h-svh flex-col">
+      <SidebarInset className={cn("flex min-h-svh flex-col", isPickPage && "h-svh overflow-hidden")}>
         <header
           data-app-print-hide
           className="bg-background/95 sticky top-0 z-40 flex shrink-0 flex-col gap-2 border-b px-3 py-2 backdrop-blur supports-backdrop-filter:bg-background/80 md:px-4 md:py-2.5"
@@ -75,17 +76,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Badge variant="outline" className="hidden text-xs sm:inline-flex">
                 {planName}
               </Badge>
-              <Button size="sm" variant="ghost" render={<Link href="/app/account" />}>
+              <Button type="button" size="sm" variant="ghost" onClick={() => router.push("/app/account")}>
                 我的账号
               </Button>
-              <Button size="sm" variant="secondary" render={<Link href="/subscription" />}>
+              <Button type="button" size="sm" variant="secondary" onClick={() => router.push("/app/account/subscription")}>
                 {subscriptionTierPublicCopy.ctaViewPlansShort}
               </Button>
             </div>
           </div>
           <ComplianceBanner />
         </header>
-        <main className="flex min-h-0 flex-1 flex-col">{children}</main>
+        <main className={cn("flex min-h-0 flex-1 flex-col", isPickPage && "overflow-hidden")}>{children}</main>
       </SidebarInset>
     </SidebarProvider>
   );

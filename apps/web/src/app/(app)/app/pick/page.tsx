@@ -1,8 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 import {
   ArrowDownIcon,
@@ -83,6 +84,7 @@ import {
   ANALYZE_SYMBOL_MOCK_UNIVERSE,
   type AnalyzeSymbolSearchItem,
 } from "@/lib/analyze-symbol-search";
+import { requestAddStockPortfolio, requestStockPortfolio } from "@/lib/api/stocks";
 import {
   Item,
   ItemActions,
@@ -96,6 +98,7 @@ import { AppPageLayout } from "@/components/features/app-page-layout";
 import { PageErrorState } from "@/components/features/page-state";
 import { AnalyzeRunConfigDialog } from "@/components/features/analyze-run-config-dialog";
 import { PickerChatEmpty, PickerChatMessage } from "@/components/features/picker-chat-message";
+import { useAuthStore } from "@/stores/use-auth-store";
 
 function isActionActive(actionId: string, s: PreferenceSnapshot) {
   if (actionId.startsWith("toggle_sector_")) {
@@ -176,6 +179,7 @@ type ConversationListItem = {
 type ExtractedStock = {
   name: string;
   code: string;
+  displayCode?: string;
 };
 
 const MAX_DRAFT_CHARS = 600;
@@ -185,6 +189,28 @@ const PICKER_TITLE_STORAGE_KEY = "pick-conversation-title-v1";
 const PICKER_ACTIVE_SESSION_STORAGE_KEY = "pick-active-session-id-v1";
 const PICKER_ACTIVE_SNAPSHOT_STORAGE_KEY = "pick-active-snapshot-v1";
 const WATCHLIST_STORAGE_KEY_V2 = "app-watchlist-v2";
+
+const suggestedActionMarkdownComponents: Components = {
+  p: ({ children }) => <span>{children}</span>,
+  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+  em: ({ children }) => <em className="italic">{children}</em>,
+  code: ({ children }) => (
+    <code className="bg-muted rounded px-1 py-0.5 font-mono text-[0.9em]">{children}</code>
+  ),
+  ul: ({ children }) => <span className="inline-flex flex-wrap gap-1">{children}</span>,
+  ol: ({ children }) => <span className="inline-flex flex-wrap gap-1">{children}</span>,
+  li: ({ children }) => <span>{children}</span>,
+};
+
+function SuggestedActionMarkdown({ content }: { content: string }) {
+  return (
+    <span className="line-clamp-1 min-w-0">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={suggestedActionMarkdownComponents}>
+        {content}
+      </ReactMarkdown>
+    </span>
+  );
+}
 
 const DEFAULT_PREFERENCE_SNAPSHOT: PreferenceSnapshot = {
   market: "CN",
@@ -274,16 +300,99 @@ function toMessageTime(timestamp?: string) {
 
 function extractStocksFromText(content: string): ExtractedStock[] {
   const result: ExtractedStock[] = [];
-  const pattern =
-    /([A-Za-z\u4E00-\u9FFF][A-Za-z0-9\u4E00-\u9FFF·\- ]{0,30})\s*[（(]\s*([A-Za-z]{1,5}(?:\.[A-Za-z]{1,2})?|\d{5,6})\s*[)）]/g;
-  let match: RegExpExecArray | null = pattern.exec(content);
+  // Strict code format: 6 digits + "." + 2 letters (normalized to uppercase)
+  const strictCodePattern = /\b(\d{6}\.[A-Za-z]{2})\b/g;
+  const withBracketNamePattern =
+    /\b(\d{6}\.[A-Za-z]{2})\b\s*[（(]\s*([A-Za-z0-9\u4E00-\u9FFF·\- ]{1,40})\s*[)）]/g;
+  const withSpaceNamePattern = /\b(\d{6}\.[A-Za-z]{2})\b[\s,，:：]+([A-Za-z0-9\u4E00-\u9FFF·\- ]{1,40})/g;
+  const nameFirstWithBracketCodePattern =
+    /([A-Za-z0-9\u4E00-\u9FFF·\- ]{1,40})\s*[（(]\s*(\d{6}\.[A-Za-z]{2})\s*[)）]/g;
+  const legacyNameFirstNoSuffixPattern =
+    /([A-Za-z0-9\u4E00-\u9FFF·\- ]{1,40})\s*[（(]\s*(\d{6})\s*[)）]/g;
+  const legacyCodeFirstNoSuffixPattern =
+    /\b(\d{6})\b\s*[（(]\s*([A-Za-z0-9\u4E00-\u9FFF·\- ]{1,40})\s*[)）]/g;
+  const legacyBareCodePattern = /\b(\d{6})\b/g;
+
+  let match: RegExpExecArray | null = withBracketNamePattern.exec(content);
+  while (match) {
+    const rawCode = String(match[1] ?? "").trim().toUpperCase();
+    const name = String(match[2] ?? "").trim();
+    const code = rawCode.split(".")[0]?.trim().toUpperCase() ?? "";
+    const displayCode = rawCode;
+    if (name && code) {
+      result.push({ name, code, displayCode });
+    }
+    match = withBracketNamePattern.exec(content);
+  }
+
+  match = withSpaceNamePattern.exec(content);
+  while (match) {
+    const rawCode = String(match[1] ?? "").trim().toUpperCase();
+    const name = String(match[2] ?? "").trim();
+    const code = rawCode.split(".")[0]?.trim().toUpperCase() ?? "";
+    const displayCode = rawCode;
+    if (name && code) {
+      result.push({ name, code, displayCode });
+    }
+    match = withSpaceNamePattern.exec(content);
+  }
+
+  // Compatibility: 洋河股份（002304.SZ）
+  match = nameFirstWithBracketCodePattern.exec(content);
   while (match) {
     const name = String(match[1] ?? "").trim();
-    const code = String(match[2] ?? "").trim().toUpperCase();
+    const rawCode = String(match[2] ?? "").trim().toUpperCase();
+    const code = rawCode.split(".")[0]?.trim().toUpperCase() ?? "";
+    const displayCode = rawCode;
     if (name && code) {
-      result.push({ name, code });
+      result.push({ name, code, displayCode });
     }
-    match = pattern.exec(content);
+    match = nameFirstWithBracketCodePattern.exec(content);
+  }
+
+  // Legacy compatibility: 洋河股份（002304）
+  match = legacyNameFirstNoSuffixPattern.exec(content);
+  while (match) {
+    const name = String(match[1] ?? "").trim();
+    const rawCode = String(match[2] ?? "").trim().toUpperCase();
+    const code = rawCode;
+    if (name && code) {
+      result.push({ name, code, displayCode: rawCode });
+    }
+    match = legacyNameFirstNoSuffixPattern.exec(content);
+  }
+
+  // Legacy compatibility: 002304（洋河股份）
+  match = legacyCodeFirstNoSuffixPattern.exec(content);
+  while (match) {
+    const rawCode = String(match[1] ?? "").trim().toUpperCase();
+    const name = String(match[2] ?? "").trim();
+    const code = rawCode;
+    if (name && code) {
+      result.push({ name, code, displayCode: rawCode });
+    }
+    match = legacyCodeFirstNoSuffixPattern.exec(content);
+  }
+
+  // Fallback when only code is present without explicit name
+  match = strictCodePattern.exec(content);
+  while (match) {
+    const rawCode = String(match[1] ?? "").trim().toUpperCase();
+    const code = rawCode.split(".")[0]?.trim().toUpperCase() ?? "";
+    if (code) {
+      result.push({ name: rawCode, code, displayCode: rawCode });
+    }
+    match = strictCodePattern.exec(content);
+  }
+
+  // Legacy fallback when only 6-digit code is present
+  match = legacyBareCodePattern.exec(content);
+  while (match) {
+    const rawCode = String(match[1] ?? "").trim().toUpperCase();
+    if (rawCode) {
+      result.push({ name: rawCode, code: rawCode, displayCode: rawCode });
+    }
+    match = legacyBareCodePattern.exec(content);
   }
   return result;
 }
@@ -314,10 +423,31 @@ function extractUniqueStocksFromMessages(messages: PickerMessage[]): ExtractedSt
   const byCode = new Map<string, ExtractedStock>();
   for (const message of messages) {
     for (const stock of extractStocksFromText(message.content)) {
-      if (!byCode.has(stock.code)) byCode.set(stock.code, stock);
+      if (!byCode.has(stock.code)) {
+        byCode.set(stock.code, stock);
+        continue;
+      }
+      const existing = byCode.get(stock.code);
+      if (existing && !existing.displayCode && stock.displayCode?.includes(".")) {
+        byCode.set(stock.code, stock);
+      }
     }
   }
   return Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code, "en"));
+}
+
+function normalizeStockCode(raw: string): { code: string; displayCode: string } | null {
+  const normalized = raw.trim().toUpperCase();
+  if (/^\d{6}\.[A-Z]{2}$/.test(normalized)) {
+    return {
+      code: normalized.split(".")[0] ?? normalized,
+      displayCode: normalized,
+    };
+  }
+  if (/^\d{6}$/.test(normalized)) {
+    return { code: normalized, displayCode: normalized };
+  }
+  return null;
 }
 
 function inferMarketFromCode(code: string): "CN" | "HK" | "US" {
@@ -331,6 +461,15 @@ function formatMarketShortLabel(market: "CN" | "HK" | "US") {
   if (market === "CN") return "A股";
   if (market === "HK") return "港股";
   return "美股";
+}
+
+function inferExchange(market: "CN" | "HK" | "US", code: string): string {
+  const normalized = code.trim().toUpperCase();
+  if (market === "HK") return "HK";
+  if (market === "US") return "US";
+  if (normalized.startsWith("SZ") || normalized.startsWith("00") || normalized.startsWith("30")) return "SZ";
+  if (normalized.startsWith("BJ") || normalized.startsWith("8") || normalized.startsWith("4")) return "BJ";
+  return "SH";
 }
 
 function upsertWatchlistStock(stock: ExtractedStock) {
@@ -593,6 +732,7 @@ function ChatTimelineSection({
   onScrollToBottom,
   bottomAnchorRef,
   bottomAnchorOffsetPx,
+  composerDesktopBounds,
 }: {
   chatViewportRef: React.RefObject<HTMLDivElement | null>;
   chatScrollContentRef: React.RefObject<HTMLDivElement | null>;
@@ -615,13 +755,17 @@ function ChatTimelineSection({
   onScrollToBottom: () => void;
   bottomAnchorRef: React.RefObject<HTMLDivElement | null>;
   bottomAnchorOffsetPx: number;
+  composerDesktopBounds: { left?: number; width?: number };
 }) {
   return (
     <section className="flex h-full min-h-0 flex-1 flex-col gap-3 px-1 pb-2 md:px-0 md:pb-0" aria-label="对话消息区域">
       <div className="relative h-full min-h-0 flex-1">
         <ScrollArea
           className="size-full overscroll-contain"
-          viewportRef={chatViewportRef}
+          ref={(root) => {
+            chatViewportRef.current =
+              root?.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]') ?? null;
+          }}
           role="log"
           aria-live="polite"
           aria-relevant="additions text"
@@ -634,7 +778,7 @@ function ChatTimelineSection({
               paddingBottom: `${chatBottomInsetPx}px`,
             }}
           >
-            <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 px-2 md:px-3">
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 px-2 pb-4 md:px-3 md:pb-6">
               {messages.length === 0 ? (
                 <PickerChatEmpty mode={conversationMode} />
               ) : (
@@ -719,10 +863,23 @@ function ChatTimelineSection({
           </div>
         </ScrollArea>
         {!chatPinnedToBottom ? (
-          <div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-end">
-            <Button type="button" size="sm" variant="secondary" className="pointer-events-auto shadow-sm" onClick={onScrollToBottom}>
+          <div
+            className="pointer-events-none fixed inset-x-0 z-30 flex justify-center"
+            style={{
+              left: composerDesktopBounds.left !== undefined ? `${composerDesktopBounds.left}px` : undefined,
+              width: composerDesktopBounds.width !== undefined ? `${composerDesktopBounds.width}px` : undefined,
+              bottom: `${Math.max(12, Math.round(chatBottomInsetPx) + 12)}px`,
+            }}
+          >
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="outline"
+              className="pointer-events-auto rounded-full border-border/70 bg-background/90 shadow-md backdrop-blur supports-backdrop-filter:bg-background/75"
+              onClick={onScrollToBottom}
+              aria-label={sendPending ? "已暂停自动滚动，回到底部" : "回到底部"}
+            >
               <ArrowDownIcon data-icon="inline-start" />
-              {sendPending ? "已暂停自动滚动，回到底部" : "回到底部"}
             </Button>
           </div>
         ) : null}
@@ -733,6 +890,7 @@ function ChatTimelineSection({
 
 export default function PickPage() {
   const router = useRouter();
+  const authSession = useAuthStore((s) => s.session);
   const sessionId = usePickerStore((s) => s.sessionId);
   const messages = usePickerStore((s) => s.messages);
   const dialogueMode = usePickerStore((s) => s.dialogueMode);
@@ -921,10 +1079,31 @@ export default function PickPage() {
     () => toolbar_actions.filter((a) => selectedSuggestedActionIds.includes(a.action_id)),
     [selectedSuggestedActionIds, toolbar_actions],
   );
-  const currentConversationExtractedStocks = useMemo(
-    () => extractUniqueStocksFromMessages(messages),
-    [messages],
-  );
+  const currentConversationExtractedStocks = useMemo(() => {
+    const byCode = new Map<string, ExtractedStock>();
+    for (const stock of extractUniqueStocksFromMessages(messages)) {
+      const normalizedCode = normalizeStockCode(stock.displayCode ?? stock.code);
+      if (!normalizedCode) continue;
+      byCode.set(normalizedCode.code, {
+        ...stock,
+        code: normalizedCode.code,
+        displayCode: normalizedCode.displayCode,
+      });
+    }
+    for (const candidate of candidate_stocks) {
+      const normalized = normalizeStockCode(String(candidate.code ?? ""));
+      const name = String(candidate.name ?? "").trim();
+      if (!normalized) continue;
+      if (!byCode.has(normalized.code)) {
+        byCode.set(normalized.code, {
+          code: normalized.code,
+          displayCode: normalized.displayCode,
+          name: name || normalized.displayCode,
+        });
+      }
+    }
+    return Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code, "en"));
+  }, [candidate_stocks, messages]);
   const analysisSymbolSearchItems = useMemo<AnalyzeSymbolSearchItem[]>(() => {
     const byKey = new Map<string, AnalyzeSymbolSearchItem>();
     for (const item of ANALYZE_SYMBOL_MOCK_UNIVERSE) byKey.set(item.key, item);
@@ -1164,8 +1343,61 @@ export default function PickPage() {
   }, [toolbar_actions]);
 
   useEffect(() => {
-    setWatchlistKeys(loadWatchlistKeysFromStorage());
-  }, []);
+    if (authSession !== "user") {
+      setWatchlistKeys(loadWatchlistKeysFromStorage());
+      return;
+    }
+    let canceled = false;
+    void requestStockPortfolio()
+      .then((list) => {
+        if (canceled) return;
+        const keys = new Set<string>();
+        for (const item of list) {
+          keys.add(`${item.market}.${item.symbol.trim().toUpperCase()}`);
+        }
+        setWatchlistKeys(keys);
+      })
+      .catch(() => {
+        if (canceled) return;
+        setWatchlistKeys(loadWatchlistKeysFromStorage());
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [authSession]);
+
+  const handleAddWatchlistStock = useCallback(
+    (stock: ExtractedStock) => {
+      const code = stock.code.trim().toUpperCase();
+      if (!code) return;
+      const market = inferMarketFromCode(code);
+      const key = `${market}.${code}`;
+      if (watchlistKeys.has(key)) return;
+
+      if (authSession === "user") {
+        void requestAddStockPortfolio({
+          symbol: code,
+          name: stock.name || code,
+          market,
+          exchange: inferExchange(market, code),
+        })
+          .then(() => {
+            setWatchlistKeys((prev) => new Set(prev).add(key));
+            toast.success("已加入自选");
+          })
+          .catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : "加入自选失败";
+            toast.error(message);
+          });
+        return;
+      }
+
+      upsertWatchlistStock(stock);
+      setWatchlistKeys(loadWatchlistKeysFromStorage());
+      toast.success("已加入自选");
+    },
+    [authSession, watchlistKeys],
+  );
 
   const switchConversation = useCallback(
     (conversationId: string) => {
@@ -1326,16 +1558,16 @@ export default function PickPage() {
       title="选股对话"
       hideHeader
       fillHeight
-      className="flex min-h-0 flex-1 flex-col gap-0! p-0!"
-      contentClassName="min-h-0 flex-1"
+      className="flex min-h-0 flex-1 flex-col overflow-hidden gap-0! p-0!"
+      contentClassName="min-h-0 flex-1 gap-0 overflow-hidden"
     >
-      <div className="grid h-full min-h-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-4 px-4 pt-4 pb-0 md:grid-cols-[minmax(0,18rem)_1fr] md:grid-rows-1 md:gap-6 md:px-6 md:pt-6">
+      <div className="grid h-full min-h-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden md:grid-cols-[18rem_minmax(0,1fr)] md:grid-rows-1">
         <aside
-          className="flex min-h-0 flex-col overflow-hidden md:sticky md:top-18 md:h-[calc(100svh-5.5rem)] md:min-h-0 md:self-start"
+          className="flex h-full min-h-0 flex-col overflow-hidden border-b px-4 pt-4 pb-4 md:border-r md:border-b-0"
           aria-label="选股会话侧栏"
         >
           <ConversationListSection
-            className="rounded-xl border bg-card p-4"
+            className="min-h-0"
             items={filteredConversationListItems}
             activeId={sessionId}
             onSelect={switchConversation}
@@ -1355,9 +1587,9 @@ export default function PickPage() {
 
         <main
           ref={mainAreaRef}
-          className="relative isolate grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden md:sticky md:top-18 md:h-[calc(100svh-5.5rem)] md:min-h-0 md:self-start"
+          className="relative isolate flex h-full min-h-0 flex-1 flex-col overflow-hidden"
         >
-          <div className="h-full min-h-0 overflow-hidden">
+          <div className="min-h-0 flex-1 overflow-hidden">
             <ChatTimelineSection
               chatViewportRef={chatViewportRef}
               chatScrollContentRef={chatScrollContentRef}
@@ -1378,8 +1610,7 @@ export default function PickPage() {
                 openAnalysisConfig(stock);
               }}
               onAddWatchlistStock={(stock) => {
-                upsertWatchlistStock(stock);
-                setWatchlistKeys(loadWatchlistKeysFromStorage());
+                handleAddWatchlistStock(stock);
               }}
               isInWatchlist={(code) => {
                 const market = inferMarketFromCode(code);
@@ -1396,6 +1627,7 @@ export default function PickPage() {
               }}
               bottomAnchorRef={chatBottomAnchorRef}
               bottomAnchorOffsetPx={chatBottomInsetPx + 24}
+              composerDesktopBounds={composerDesktopBounds}
             />
           </div>
 
@@ -1405,7 +1637,7 @@ export default function PickPage() {
               left: composerDesktopBounds.left !== undefined ? `${composerDesktopBounds.left}px` : undefined,
               width: composerDesktopBounds.width !== undefined ? `${composerDesktopBounds.width}px` : undefined,
             }}
-            className="fixed inset-x-0 bottom-2 z-20 overflow-visible bg-background pb-[calc(env(safe-area-inset-bottom)+0.375rem)] md:bottom-3"
+            className="fixed inset-x-0 bottom-0 z-20 overflow-visible bg-background px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] md:px-3 md:pb-[calc(env(safe-area-inset-bottom)+0.75rem)]"
             aria-label="消息输入区"
           >
           {currentConversationExtractedStocks.length > 0 ? (
@@ -1453,14 +1685,11 @@ export default function PickPage() {
                               >
                                 <ItemHeader className="min-w-0">
                                   <ItemContent>
-                                    <ItemTitle className="max-w-32 text-xs sm:max-w-28">
-                                      <span className="truncate">{stock.name}</span>
+                                    <ItemTitle className="max-w-44 text-[11px] font-normal leading-tight sm:max-w-36">
+                                      <span className="truncate">{`${stock.displayCode ?? stock.code}（${stock.name}）`}</span>
                                     </ItemTitle>
-                                    <ItemDescription className="flex items-center gap-1.5 text-[11px] leading-tight">
-                                      <Badge variant="outline" className="h-4 px-1 text-[10px]">
-                                        {formatMarketShortLabel(market)}
-                                      </Badge>
-                                      <span>{stock.code}</span>
+                                    <ItemDescription className="text-[10px] leading-tight">
+                                      {formatMarketShortLabel(market)}
                                     </ItemDescription>
                                   </ItemContent>
                                   <ItemActions className="gap-1 opacity-0 transition-opacity group-hover/stock-item:opacity-100 group-focus-within/stock-item:opacity-100">
@@ -1492,8 +1721,7 @@ export default function PickPage() {
                                             disabled={alreadyInWatchlist}
                                             aria-label={alreadyInWatchlist ? "已在自选" : `将 ${stock.name} 加入自选`}
                                             onClick={() => {
-                                              upsertWatchlistStock(stock);
-                                              setWatchlistKeys(loadWatchlistKeysFromStorage());
+                                              handleAddWatchlistStock(stock);
                                             }}
                                           >
                                             {alreadyInWatchlist ? <CheckIcon /> : <PlusIcon />}
@@ -1519,7 +1747,7 @@ export default function PickPage() {
               </div>
             </div>
           ) : null}
-          <div className="mx-auto w-full max-w-4xl px-1 md:px-0">
+          <div className="mx-auto w-full max-w-4xl">
             <FieldGroup className="bg-background">
               <Field>
                 <FieldLabel htmlFor="pick-input" className="sr-only">
@@ -1541,7 +1769,7 @@ export default function PickPage() {
                             <Button
                               type="button"
                               size="sm"
-                              variant={selected ? "secondary" : "outline"}
+                              variant={selected ? "secondary" : "ghost"}
                               className={cn(
                                 "h-7 w-full justify-start px-2 text-left text-xs",
                               )}
@@ -1556,7 +1784,7 @@ export default function PickPage() {
                               }}
                             >
                               {selected ? <CheckIcon data-icon="inline-start" /> : null}
-                              <span className="line-clamp-1">{a.label}</span>
+                              <SuggestedActionMarkdown content={a.label} />
                             </Button>
                           </li>
                         );
@@ -1614,7 +1842,6 @@ export default function PickPage() {
                     placeholder={inputPlaceholder}
                     disabled={sendPending}
                     aria-invalid={sendError ? true : undefined}
-                    className="max-h-[min(40svh,16rem)] min-h-14 px-2.5 py-2 md:min-h-16"
                     maxLength={MAX_DRAFT_CHARS}
                     onCompositionStart={() => {
                       isImeComposingRef.current = true;
@@ -1733,7 +1960,7 @@ export default function PickPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>关闭</AlertDialogCancel>
-            <Button type="button" render={<Link href="/subscription" />}>
+            <Button type="button" onClick={() => router.push("/app/account/subscription")}>
               {subscriptionTierPublicCopy.ctaViewPlansShort}
             </Button>
           </AlertDialogFooter>
@@ -1784,7 +2011,7 @@ export default function PickPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>关闭</AlertDialogCancel>
-            <Button type="button" variant="secondary" onClick={() => router.push("/subscription")}>
+            <Button type="button" variant="secondary" onClick={() => router.push("/app/account/subscription")}>
               {subscriptionTierPublicCopy.ctaViewPlansShort}
             </Button>
           </AlertDialogFooter>

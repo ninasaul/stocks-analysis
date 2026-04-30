@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChartLineIcon, EllipsisVerticalIcon, Trash2Icon } from "lucide-react";
 import type { AnalysisInput } from "@/lib/contracts/domain";
 import {
@@ -12,8 +11,15 @@ import {
   parseAnalyzeSearchInput,
   type AnalyzeSymbolSearchItem,
 } from "@/lib/analyze-symbol-search";
-import { requestStockSearch } from "@/lib/api/stocks";
-import { buildMockBaseQuote } from "@/lib/mock-base-quote";
+import {
+  getStoredStockQuote,
+  requestAddStockPortfolio,
+  requestDeleteStockPortfolio,
+  requestStockQuote,
+  requestStockPortfolio,
+  requestStockSearch,
+  type StockQuote,
+} from "@/lib/api/stocks";
 import { AppPageLayout } from "@/components/features/app-page-layout";
 import { StockSearchCombobox } from "@/components/features/stock-search-combobox";
 import { Button } from "@/components/ui/button";
@@ -25,11 +31,31 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemHeader,
+  ItemTitle,
+} from "@/components/ui/item";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/use-auth-store";
 
 const WATCHLIST_STORAGE_KEY_V2 = "app-watchlist-v2";
 const WATCHLIST_STORAGE_KEY_V1 = "app-watchlist-symbols";
+const WATCHLIST_QUOTE_STORAGE_KEY = "app-watchlist-quotes-v1";
 
 type WatchlistEntry = {
   market: AnalysisInput["market"];
@@ -93,11 +119,101 @@ function formatSignedPct(n: number) {
   return `${fixed}%`;
 }
 
+function inferExchange(market: AnalysisInput["market"], symbol: string): string {
+  const normalized = symbol.trim().toUpperCase();
+  if (market === "HK") return "HK";
+  if (market === "US") return "US";
+  // A股按代码段粗略映射交易所，未知时回退 SH。
+  if (normalized.startsWith("SZ") || normalized.startsWith("00") || normalized.startsWith("30")) return "SZ";
+  if (normalized.startsWith("BJ") || normalized.startsWith("8") || normalized.startsWith("4")) return "BJ";
+  return "SH";
+}
+
 /** A 股常用配色：涨红跌绿；零轴为中性灰。 */
 function quoteToneClass(changePct: number) {
   if (changePct > 0) return "text-red-600 dark:text-red-500";
   if (changePct < 0) return "text-emerald-600 dark:text-emerald-500";
   return "text-muted-foreground";
+}
+
+function isStockQuote(value: unknown): value is StockQuote {
+  if (!value || typeof value !== "object") return false;
+  const quote = value as Partial<StockQuote>;
+  return (
+    typeof quote.stockCode === "string" &&
+    typeof quote.stockName === "string" &&
+    typeof quote.currentPrice === "number" &&
+    quote.currentPrice > 0 &&
+    typeof quote.change === "number" &&
+    typeof quote.changePercent === "number" &&
+    typeof quote.cachedAt === "number"
+  );
+}
+
+function readWatchlistQuoteCache() {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(WATCHLIST_QUOTE_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const cache: Record<string, StockQuote> = {};
+    let changed = false;
+    for (const [key, value] of Object.entries(parsed)) {
+      if (isStockQuote(value)) {
+        cache[key] = value;
+      } else {
+        changed = true;
+      }
+    }
+    if (changed) {
+      window.localStorage.setItem(WATCHLIST_QUOTE_STORAGE_KEY, JSON.stringify(cache));
+    }
+    return cache;
+  } catch {
+    return {};
+  }
+}
+
+function writeWatchlistQuoteCache(key: string, quote: StockQuote) {
+  if (typeof window === "undefined") return;
+  try {
+    const cache = readWatchlistQuoteCache();
+    cache[key] = quote;
+    window.localStorage.setItem(WATCHLIST_QUOTE_STORAGE_KEY, JSON.stringify(cache));
+  } catch {
+    // Ignore localStorage write failures.
+  }
+}
+
+function getStoredQuotesByEntryKey(entries: WatchlistEntry[]) {
+  const watchlistQuoteCache = readWatchlistQuoteCache();
+  const quotes: Record<string, StockQuote> = {};
+  for (const entry of entries) {
+    if (entry.market !== "CN") continue;
+    const key = entryKey(entry);
+    const quote = getStoredQuoteForEntry(entry, watchlistQuoteCache);
+    if (quote) quotes[key] = quote;
+  }
+  return quotes;
+}
+
+function getStoredQuoteForEntry(entry: WatchlistEntry, cache = readWatchlistQuoteCache()) {
+  return cache[entryKey(entry)] ?? getStoredStockQuote(entry.symbol);
+}
+
+function mergeQuotesForEntries(
+  entries: WatchlistEntry[],
+  previous: Record<string, StockQuote>,
+  stored: Record<string, StockQuote>,
+) {
+  const next: Record<string, StockQuote> = {};
+  for (const entry of entries) {
+    const key = entryKey(entry);
+    const quote = stored[key] ?? previous[key];
+    if (quote && isStockQuote(quote)) next[key] = quote;
+  }
+  return next;
 }
 
 export default function WatchlistPage() {
@@ -107,69 +223,208 @@ export default function WatchlistPage() {
   const [entries, setEntries] = useState<WatchlistEntry[]>([]);
   const [remoteSearching, setRemoteSearching] = useState(false);
   const [remoteSearchItems, setRemoteSearchItems] = useState<AnalyzeSymbolSearchItem[]>([]);
+  const [portfolioLoading, setPortfolioLoading] = useState(false);
+  const [portfolioSyncError, setPortfolioSyncError] = useState<string | null>(null);
+  const [quotesByKey, setQuotesByKey] = useState<Record<string, StockQuote>>({});
+  const [quoteLoadingKeys, setQuoteLoadingKeys] = useState<Set<string>>(() => new Set());
+  const [quoteErrorKeys, setQuoteErrorKeys] = useState<Set<string>>(() => new Set());
+  const quoteRequestKeysRef = useRef<Set<string>>(new Set());
+  const quoteRefreshedKeysRef = useRef<Set<string>>(new Set());
+  const [deleteTargetKey, setDeleteTargetKey] = useState<string | null>(null);
 
   const keySet = useMemo(() => new Set(entries.map((e) => entryKey(e))), [entries]);
 
-  useEffect(() => {
-    try {
-      const rawV2 = window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V2);
-      if (rawV2) {
-        const parsed = JSON.parse(rawV2) as unknown;
-        if (Array.isArray(parsed)) {
-          const next: WatchlistEntry[] = [];
-          for (const row of parsed) {
-            if (!row || typeof row !== "object") continue;
-            const r = row as Record<string, unknown>;
-            const market = r.market;
-            const symbol = r.symbol;
-            const name = r.name;
-            if (market !== "CN" && market !== "HK" && market !== "US") continue;
-            if (typeof symbol !== "string" || typeof name !== "string") continue;
-            const sym = symbol.trim();
-            if (!sym) continue;
-            next.push({ market, symbol: sym, name: name.trim() || sym });
-          }
-          const dedup = new Map<string, WatchlistEntry>();
-          for (const e of next) {
-            dedup.set(entryKey(e), e);
-          }
-          setEntries([...dedup.values()]);
-          return;
-        }
-      }
+  const deleteTargetEntry = useMemo(
+    () => (deleteTargetKey ? entries.find((e) => entryKey(e) === deleteTargetKey) : undefined),
+    [deleteTargetKey, entries],
+  );
 
-      const rawV1 = window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V1);
-      if (rawV1) {
-        const parsed = JSON.parse(rawV1) as unknown;
-        if (Array.isArray(parsed)) {
-          const migrated: WatchlistEntry[] = [];
-          for (const item of parsed) {
-            if (typeof item !== "string") continue;
-            const resolved = tryResolveEntryFromRaw(item, "CN");
-            if (resolved) migrated.push(resolved);
-          }
-          const dedup = new Map<string, WatchlistEntry>();
-          for (const e of migrated) {
-            dedup.set(entryKey(e), e);
-          }
-          const list = [...dedup.values()];
-          setEntries(list);
-          window.localStorage.setItem(WATCHLIST_STORAGE_KEY_V2, JSON.stringify(list));
-          window.localStorage.removeItem(WATCHLIST_STORAGE_KEY_V1);
-        }
-      }
-    } catch {
-      // Ignore invalid local storage payload.
+  useEffect(() => {
+    let canceled = false;
+    if (authSession === "user") {
+      const timer = window.setTimeout(() => {
+        if (canceled) return;
+        setPortfolioLoading(true);
+        setPortfolioSyncError(null);
+        void requestStockPortfolio()
+          .then((portfolioList) => {
+            if (canceled) return;
+            const dedup = new Map<string, WatchlistEntry>();
+            for (const item of portfolioList) {
+              dedup.set(entryKey(item), {
+                market: item.market,
+                symbol: item.symbol.trim(),
+                name: item.name.trim() || item.symbol.trim(),
+              });
+            }
+            const list = Array.from(dedup.values());
+            const storedQuotes = getStoredQuotesByEntryKey(list);
+            setEntries(list);
+            setQuotesByKey((prev) => mergeQuotesForEntries(list, prev, storedQuotes));
+            setPortfolioLoading(false);
+          })
+          .catch((error: unknown) => {
+            if (canceled) return;
+            const message = error instanceof Error ? error.message : "同步失败";
+            setPortfolioSyncError(message);
+            setPortfolioLoading(false);
+          });
+      }, 0);
+      return () => {
+        canceled = true;
+        window.clearTimeout(timer);
+      };
     }
-  }, []);
+
+    const timer = window.setTimeout(() => {
+      if (canceled) return;
+      setPortfolioSyncError(null);
+      setPortfolioLoading(false);
+      try {
+        const rawV2 = window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V2);
+        if (rawV2) {
+          const parsed = JSON.parse(rawV2) as unknown;
+          if (Array.isArray(parsed)) {
+            const next: WatchlistEntry[] = [];
+            for (const row of parsed) {
+              if (!row || typeof row !== "object") continue;
+              const r = row as Record<string, unknown>;
+              const market = r.market;
+              const symbol = r.symbol;
+              const name = r.name;
+              if (market !== "CN" && market !== "HK" && market !== "US") continue;
+              if (typeof symbol !== "string" || typeof name !== "string") continue;
+              const sym = symbol.trim();
+              if (!sym) continue;
+              next.push({ market, symbol: sym, name: name.trim() || sym });
+            }
+            const dedup = new Map<string, WatchlistEntry>();
+            for (const e of next) {
+              dedup.set(entryKey(e), e);
+            }
+            const list = [...dedup.values()];
+            const storedQuotes = getStoredQuotesByEntryKey(list);
+            setEntries(list);
+            setQuotesByKey((prev) => mergeQuotesForEntries(list, prev, storedQuotes));
+            return;
+          }
+        }
+
+        const rawV1 = window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V1);
+        if (rawV1) {
+          const parsed = JSON.parse(rawV1) as unknown;
+          if (Array.isArray(parsed)) {
+            const migrated: WatchlistEntry[] = [];
+            for (const item of parsed) {
+              if (typeof item !== "string") continue;
+              const resolved = tryResolveEntryFromRaw(item, "CN");
+              if (resolved) migrated.push(resolved);
+            }
+            const dedup = new Map<string, WatchlistEntry>();
+            for (const e of migrated) {
+              dedup.set(entryKey(e), e);
+            }
+            const list = [...dedup.values()];
+            const storedQuotes = getStoredQuotesByEntryKey(list);
+            setEntries(list);
+            setQuotesByKey((prev) => mergeQuotesForEntries(list, prev, storedQuotes));
+            window.localStorage.setItem(WATCHLIST_STORAGE_KEY_V2, JSON.stringify(list));
+            window.localStorage.removeItem(WATCHLIST_STORAGE_KEY_V1);
+          }
+        }
+      } catch {
+        // Ignore invalid local storage payload.
+      }
+    }, 0);
+    return () => {
+      canceled = true;
+      window.clearTimeout(timer);
+    };
+  }, [authSession]);
 
   useEffect(() => {
+    if (authSession === "user") return;
     try {
       window.localStorage.setItem(WATCHLIST_STORAGE_KEY_V2, JSON.stringify(entries));
     } catch {
       // Ignore local storage write failures.
     }
-  }, [entries]);
+  }, [authSession, entries]);
+
+  useEffect(() => {
+    let canceled = false;
+    const timer = window.setTimeout(() => {
+      if (canceled) return;
+
+      if (authSession !== "user") {
+        setQuotesByKey({});
+        setQuoteLoadingKeys(new Set());
+        setQuoteErrorKeys(new Set());
+        quoteRequestKeysRef.current.clear();
+        quoteRefreshedKeysRef.current.clear();
+        return;
+      }
+
+      const cnEntries = entries.filter((entry) => entry.market === "CN");
+      const activeKeys = new Set(cnEntries.map((entry) => entryKey(entry)));
+      for (const key of quoteRequestKeysRef.current) {
+        if (!activeKeys.has(key)) quoteRequestKeysRef.current.delete(key);
+      }
+      for (const key of quoteRefreshedKeysRef.current) {
+        if (!activeKeys.has(key)) quoteRefreshedKeysRef.current.delete(key);
+      }
+
+      for (const entry of cnEntries) {
+        const k = entryKey(entry);
+        const storedQuote = getStoredQuoteForEntry(entry);
+        if (storedQuote) {
+          setQuotesByKey((prev) => (prev[k] ? prev : { ...prev, [k]: storedQuote }));
+        }
+        if (quoteRequestKeysRef.current.has(k) || quoteRefreshedKeysRef.current.has(k)) continue;
+
+        quoteRequestKeysRef.current.add(k);
+        quoteRefreshedKeysRef.current.add(k);
+        setQuoteLoadingKeys((prev) => {
+          const next = new Set(prev);
+          next.add(k);
+          return next;
+        });
+        setQuoteErrorKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(k);
+          return next;
+        });
+
+        void requestStockQuote(entry.symbol)
+          .then((quote) => {
+            if (canceled || !quote) return;
+            writeWatchlistQuoteCache(k, quote);
+            setQuotesByKey((prev) => ({ ...prev, [k]: quote }));
+          })
+          .catch(() => {
+            if (canceled) return;
+            setQuoteErrorKeys((prev) => {
+              const next = new Set(prev);
+              next.add(k);
+              return next;
+            });
+          })
+          .finally(() => {
+            quoteRequestKeysRef.current.delete(k);
+            if (canceled) return;
+            setQuoteLoadingKeys((prev) => {
+              const next = new Set(prev);
+              next.delete(k);
+              return next;
+            });
+          });
+      }
+    }, 0);
+    return () => {
+      canceled = true;
+      window.clearTimeout(timer);
+    };
+  }, [authSession, entries]);
 
   const searchItems = useMemo(() => {
     const byKey = new Map<string, AnalyzeSymbolSearchItem>();
@@ -194,14 +449,16 @@ export default function WatchlistPage() {
     const parsed = parseAnalyzeSearchInput(keyword, "CN");
     const searchTerm = parsed?.symbol?.trim() || keyword;
     if (authSession !== "user" || !searchTerm || (parsed && parsed.market !== "CN")) {
-      setRemoteSearchItems([]);
-      setRemoteSearching(false);
-      return;
+      const timer = window.setTimeout(() => {
+        setRemoteSearchItems([]);
+        setRemoteSearching(false);
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
 
     let canceled = false;
-    setRemoteSearching(true);
     const timer = window.setTimeout(() => {
+      setRemoteSearching(true);
       void requestStockSearch(searchTerm, 6)
         .then((items) => {
           if (!canceled) {
@@ -256,16 +513,50 @@ export default function WatchlistPage() {
 
   const addEntry = useCallback((entry: WatchlistEntry) => {
     const k = entryKey(entry);
-    setEntries((prev) => {
-      if (prev.some((e) => entryKey(e) === k)) return prev;
-      return [entry, ...prev];
-    });
+    if (authSession === "user") {
+      setPortfolioSyncError(null);
+      void requestAddStockPortfolio({
+        market: entry.market,
+        symbol: entry.symbol,
+        name: entry.name,
+        exchange: inferExchange(entry.market, entry.symbol),
+      })
+        .then(() => {
+          setEntries((prev) => {
+            if (prev.some((e) => entryKey(e) === k)) return prev;
+            return [entry, ...prev];
+          });
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : "添加自选失败";
+          setPortfolioSyncError(message);
+        });
+    } else {
+      setEntries((prev) => {
+        if (prev.some((e) => entryKey(e) === k)) return prev;
+        return [entry, ...prev];
+      });
+    }
     setQuery("");
-  }, []);
+  }, [authSession]);
 
   const removeEntry = useCallback((k: string) => {
+    if (authSession === "user") {
+      const target = entries.find((e) => entryKey(e) === k);
+      if (!target) return;
+      setPortfolioSyncError(null);
+      void requestDeleteStockPortfolio(target.symbol)
+        .then(() => {
+          setEntries((prev) => prev.filter((e) => entryKey(e) !== k));
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : "删除自选失败";
+          setPortfolioSyncError(message);
+        });
+      return;
+    }
     setEntries((prev) => prev.filter((e) => entryKey(e) !== k));
-  }, []);
+  }, [authSession, entries]);
 
   const listEmpty = entries.length === 0;
   const filterEmpty = !listEmpty && q.length > 0 && filteredEntries.length === 0;
@@ -273,9 +564,8 @@ export default function WatchlistPage() {
   return (
     <AppPageLayout
       title="自选"
-      description="同一搜索框可筛选自选或在匹配结果中回车加入自选；数据保存在当前浏览器。"
       actions={
-        <Button variant="outline" render={<Link href="/app/analyze" />}>
+        <Button type="button" variant="outline" onClick={() => router.push("/app/analyze")}>
           去预测
         </Button>
       }
@@ -304,6 +594,10 @@ export default function WatchlistPage() {
           if (resolved) addEntry(resolved);
         }}
       />
+      {portfolioLoading ? (
+        <p className="text-muted-foreground text-sm">正在同步自选股...</p>
+      ) : null}
+      {portfolioSyncError ? <p className="text-sm text-red-600 dark:text-red-500">{portfolioSyncError}</p> : null}
 
       {listEmpty ? (
         <Empty className="border">
@@ -323,66 +617,114 @@ export default function WatchlistPage() {
         </Empty>
       ) : (
         <ul
-          className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+          className="grid grid-cols-[repeat(auto-fit,minmax(15rem,1fr))] gap-3 2xl:grid-cols-5"
           aria-label="自选标的列表"
         >
           {filteredEntries.map((entry) => {
             const k = entryKey(entry);
             const stockCode = `${entry.market}.${entry.symbol}`;
-            const q = buildMockBaseQuote(entry.market, entry.symbol);
-            const tone = quoteToneClass(q.changePct);
+            const quote = quotesByKey[k];
+            const quoteLoading = quoteLoadingKeys.has(k);
+            const quoteFailed = quoteErrorKeys.has(k);
+            const quoteUnsupported = entry.market !== "CN";
+            const tone = quote ? quoteToneClass(quote.changePercent) : "text-muted-foreground";
             return (
-              <li key={k} className="min-w-0">
-                <article className="bg-card relative flex h-full min-h-0 flex-col rounded-xl border p-4">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          type="button"
-                          size="icon-sm"
-                          variant="ghost"
-                          className="text-muted-foreground absolute top-2 right-2"
-                          aria-label={`操作：${entry.name}`}
-                        >
-                          <EllipsisVerticalIcon />
-                        </Button>
-                      }
-                    />
-                    <DropdownMenuContent align="end" side="bottom" className="min-w-36">
-                      <DropdownMenuGroup>
-                        <DropdownMenuItem
-                          onClick={() => {
-                            router.push(`/app/analyze?stockCode=${encodeURIComponent(stockCode)}`);
-                          }}
-                        >
-                          <ChartLineIcon />
-                          分析
-                        </DropdownMenuItem>
-                        <DropdownMenuItem variant="destructive" onClick={() => removeEntry(k)}>
-                          <Trash2Icon />
-                          删除
-                        </DropdownMenuItem>
-                      </DropdownMenuGroup>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                  <div className="flex min-h-0 flex-1 items-end justify-between gap-2 pr-9">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-base font-medium">{entry.name}</p>
-                      <p className="text-muted-foreground mt-0.5 text-sm tabular-nums">
-                        {compactBoardCode(entry.market, entry.symbol)}
-                      </p>
+              <Item
+                key={k}
+                render={<li />}
+                variant="outline"
+                size="sm"
+              >
+                <ItemHeader>
+                  <ItemContent>
+                    <ItemTitle>{entry.name}</ItemTitle>
+                    <ItemDescription>
+                      <span className="text-xs">{compactBoardCode(entry.market, entry.symbol)}</span>
+                      {" "}
+                      <Badge variant="secondary">{entry.market === "CN" ? "A股" : entry.market}</Badge>
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemContent>
+                    <div className={cn("flex flex-col gap-1 text-right tabular-nums", tone)}>
+                      <div className="text-base font-semibold leading-none">
+                        {quote ? quote.currentPrice.toFixed(2) : quoteLoading ? "--" : "--"}
+                      </div>
+                      <div className="text-xs leading-tight">
+                        {quote
+                          ? formatSignedPct(quote.changePercent)
+                          : quoteUnsupported
+                            ? "未接入"
+                            : quoteFailed
+                              ? "获取失败"
+                              : "--"}
+                      </div>
                     </div>
-                    <div className={cn("shrink-0 text-right tabular-nums", tone)}>
-                      <p className="text-base font-semibold leading-tight">{q.price.toFixed(2)}</p>
-                      <p className="text-sm leading-tight">{formatSignedPct(q.changePct)}</p>
-                    </div>
-                  </div>
-                </article>
-              </li>
+                  </ItemContent>
+                  <ItemActions>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={
+                          <Button
+                            type="button"
+                            size="icon-sm"
+                            variant="ghost"
+                            className="text-muted-foreground"
+                            aria-label={`操作：${entry.name}`}
+                          >
+                            <EllipsisVerticalIcon />
+                          </Button>
+                        }
+                      />
+                      <DropdownMenuContent align="end" side="bottom" className="min-w-36">
+                        <DropdownMenuGroup>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              router.push(`/app/analyze?stockCode=${encodeURIComponent(stockCode)}`);
+                            }}
+                          >
+                            <ChartLineIcon />
+                            分析
+                          </DropdownMenuItem>
+                          <DropdownMenuItem variant="destructive" onClick={() => setDeleteTargetKey(k)}>
+                            <Trash2Icon />
+                            删除
+                          </DropdownMenuItem>
+                        </DropdownMenuGroup>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </ItemActions>
+                </ItemHeader>
+              </Item>
             );
           })}
         </ul>
       )}
+
+      <AlertDialog open={deleteTargetKey !== null} onOpenChange={(open) => !open && setDeleteTargetKey(null)}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>移除自选？</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTargetEntry
+                ? `确定从自选列表移除「${deleteTargetEntry.name}」（${compactBoardCode(deleteTargetEntry.market, deleteTargetEntry.symbol)}）吗？`
+                : "确定从自选列表移除此标的吗？"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                const key = deleteTargetKey;
+                setDeleteTargetKey(null);
+                if (key !== null) removeEntry(key);
+              }}
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppPageLayout>
   );
 }

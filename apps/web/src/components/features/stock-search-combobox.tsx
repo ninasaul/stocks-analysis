@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SearchIcon } from "lucide-react";
 import type { AnalyzeSymbolSearchItem } from "@/lib/analyze-symbol-search";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,8 @@ type StockSearchComboboxProps = {
   formatCode: (item: AnalyzeSymbolSearchItem) => string;
   onSelect: (item: AnalyzeSymbolSearchItem) => void;
   onResolveEnter: (rawQuery: string, activeItem: AnalyzeSymbolSearchItem | undefined) => void;
+  onOpenChange?: (open: boolean) => void;
+  openOnFocus?: boolean;
 };
 
 export function StockSearchCombobox({
@@ -37,10 +39,16 @@ export function StockSearchCombobox({
   formatCode,
   onSelect,
   onResolveEnter,
+  onOpenChange,
+  openOnFocus = true,
 }: StockSearchComboboxProps) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const updateOpen = useCallback((next: boolean) => {
+    setOpen(next);
+    onOpenChange?.(next);
+  }, [onOpenChange]);
 
   const activeItem = useMemo(
     () => (items.length ? items[Math.min(activeIndex, items.length - 1)] : undefined),
@@ -48,35 +56,19 @@ export function StockSearchCombobox({
   );
 
   useEffect(() => {
-    if (!open) {
-      setActiveIndex(0);
-      return;
-    }
-    setActiveIndex((prev) => {
-      if (!items.length) return 0;
-      return Math.min(prev, items.length - 1);
-    });
-  }, [open, items.length]);
-
-  useEffect(() => {
-    if (!open) return;
-    setActiveIndex(0);
-  }, [query, open]);
-
-  useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
       const root = rootRef.current;
       if (!root) return;
       const target = event.target as Node | null;
       if (target && root.contains(target)) return;
-      setOpen(false);
+      updateOpen(false);
     };
     window.addEventListener("mousedown", onPointerDown);
     return () => window.removeEventListener("mousedown", onPointerDown);
-  }, []);
+  }, [updateOpen]);
 
   return (
-    <div className="relative shrink-0" ref={rootRef}>
+    <div className="relative w-full min-w-0 shrink-0 sm:max-w-md lg:max-w-lg" ref={rootRef}>
       <InputGroup className="bg-background">
         <InputGroupAddon>
           <SearchIcon />
@@ -86,24 +78,29 @@ export function StockSearchCombobox({
           value={query}
           onChange={(e) => {
             onQueryChange(e.target.value);
-            setOpen(true);
+            setActiveIndex(0);
+            updateOpen(true);
           }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => {
+            if (!openOnFocus) return;
+            setActiveIndex(0);
+            updateOpen(true);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
-              setOpen(false);
+              updateOpen(false);
               return;
             }
             if (e.key === "ArrowDown") {
               e.preventDefault();
-              setOpen(true);
+              updateOpen(true);
               if (!items.length) return;
               setActiveIndex((prev) => (prev + 1) % items.length);
               return;
             }
             if (e.key === "ArrowUp") {
               e.preventDefault();
-              setOpen(true);
+              updateOpen(true);
               if (!items.length) return;
               setActiveIndex((prev) => (prev === 0 ? items.length - 1 : prev - 1));
               return;
@@ -111,7 +108,7 @@ export function StockSearchCombobox({
             if (e.key !== "Enter") return;
             e.preventDefault();
             onResolveEnter(query.trim(), activeItem);
-            setOpen(false);
+            updateOpen(false);
           }}
           placeholder={placeholder}
           aria-label={ariaLabel}
@@ -149,7 +146,7 @@ export function StockSearchCombobox({
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
                       onSelect(item);
-                      setOpen(false);
+                      updateOpen(false);
                     }}
                   >
                     <span className="min-w-0 flex-1 truncate">

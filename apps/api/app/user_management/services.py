@@ -213,6 +213,14 @@ class UserService:
             if user_data.phone is not None:
                 updates.append("phone = %s")
                 params.append(user_data.phone)
+            if user_data.display_name is not None:
+                updates.append("display_name = %s")
+                value = user_data.display_name.strip()
+                params.append(value[:100] if value else None)
+            if user_data.avatar_url is not None:
+                updates.append("avatar_url = %s")
+                value = user_data.avatar_url.strip()
+                params.append(value[:255] if value else None)
             if user_data.status is not None:
                 updates.append("status = %s")
                 params.append(user_data.status.value)
@@ -628,8 +636,8 @@ class MembershipService:
             raise
 
     @staticmethod
-    def reset_daily_api_calls():
-        """重置所有会员的每日API调用次数"""
+    def reset_monthly_api_calls():
+        """重置所有会员的每月 API 调用次数"""
         try:
             query = """
                 UPDATE memberships
@@ -637,10 +645,15 @@ class MembershipService:
                 WHERE status = 'active'
             """
             execute_update(query, (datetime.now().astimezone(),))
-            logger.info("每日API调用次数已重置")
+            logger.info("每月 API 调用次数已重置")
         except Exception as e:
-            logger.error(f"重置API调用次数失败: {e}")
+            logger.error(f"重置每月 API 调用次数失败: {e}")
             raise
+
+    @staticmethod
+    def reset_daily_api_calls():
+        """兼容旧入口：调用每月重置逻辑。"""
+        MembershipService.reset_monthly_api_calls()
 
     @staticmethod
     def check_api_call_limit(user_id: int) -> tuple[bool, str]:

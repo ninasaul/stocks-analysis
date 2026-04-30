@@ -106,6 +106,7 @@ class StockService:
             else:
                 self._fetch_and_save_concept_data(concept_file)
 
+            self.stock_quote_cache = {}
             self.initialized = True
     
     def _fetch_and_save_stock_data(self, csv_file):
@@ -224,26 +225,104 @@ class StockService:
         return stock_zh_index_daily_df[(stock_zh_index_daily_df["date"] >= start_date) & (stock_zh_index_daily_df["date"] <= end_date)]
 
     def get_stock_quote(self, stock_code: str) -> Dict:
-        stock_individual_spot_em_df = ak.stock_individual_spot_xq(symbol=self.get_full_uppercase_stock_code(stock_code))
-        if stock_individual_spot_em_df.empty:
-            raise HTTPException(status_code=404, detail=f"Stock {stock_code} not found")
-        
-        return {
-            "stock_code": stock_code,
-            "stock_name": stock_individual_spot_em_df[stock_individual_spot_em_df["item"] == "名称"]["value"].values[0],
-            "current_price": stock_individual_spot_em_df[stock_individual_spot_em_df["item"] == "现价"]["value"].values[0],
-            "change": stock_individual_spot_em_df[stock_individual_spot_em_df["item"] == "涨跌"]["value"].values[0],
-            "change_percent": stock_individual_spot_em_df[stock_individual_spot_em_df["item"] == "涨幅"]["value"].values[0],
-            "open": stock_individual_spot_em_df[stock_individual_spot_em_df["item"] == "今开"]["value"].values[0],
-            "high": stock_individual_spot_em_df[stock_individual_spot_em_df["item"] == "最高"]["value"].values[0],
-            "low": stock_individual_spot_em_df[stock_individual_spot_em_df["item"] == "最低"]["value"].values[0],
-            "prev_close": stock_individual_spot_em_df[stock_individual_spot_em_df["item"] == "昨收"]["value"].values[0],
-            "volume": stock_individual_spot_em_df[stock_individual_spot_em_df["item"] == "成交量"]["value"].values[0],
-            "amount": stock_individual_spot_em_df[stock_individual_spot_em_df["item"] == "成交额"]["value"].values[0],
-            "update_time": datetime.now().isoformat(),
-            "source": "akshare",
-            "fallback_chain": ["xueqiu", "akshare"]
-        }
+        normalized_code = stock_code.strip().zfill(6)
+        if not hasattr(self, "stock_quote_cache"):
+            self.stock_quote_cache = {}
+
+        cached_quote = self.stock_quote_cache.get(normalized_code)
+        if cached_quote:
+            cached_at = cached_quote.get("cached_at")
+            cached_data = cached_quote.get("data")
+            if cached_at and cached_data and datetime.now() - cached_at < timedelta(minutes=30):
+                return dict(cached_data)
+
+        def cache_and_return(data: Dict) -> Dict:
+            self.stock_quote_cache[normalized_code] = {
+                "cached_at": datetime.now(),
+                "data": data,
+            }
+            return data
+
+        def to_native(value):
+            if pd.isna(value):
+                return None
+            if hasattr(value, "item"):
+                return value.item()
+            return value
+
+        def get_xq_value(df: pd.DataFrame, item: str):
+            values = df[df["item"] == item]["value"].values
+            return to_native(values[0]) if len(values) else None
+
+        def is_valid_price(value) -> bool:
+            try:
+                if value is None or pd.isna(value):
+                    return False
+                return float(value) > 0
+            except (TypeError, ValueError):
+                return False
+
+        try:
+            stock_individual_spot_df = ak.stock_individual_spot_xq(
+                symbol=self.get_full_uppercase_stock_code(normalized_code)
+            )
+            if not stock_individual_spot_df.empty:
+                current_price = get_xq_value(stock_individual_spot_df, "现价")
+                if not is_valid_price(current_price):
+                    raise ValueError(f"雪球行情价格无效: {current_price}")
+                return cache_and_return({
+                    "stock_code": normalized_code,
+                    "stock_name": get_xq_value(stock_individual_spot_df, "名称"),
+                    "current_price": current_price,
+                    "change": get_xq_value(stock_individual_spot_df, "涨跌"),
+                    "change_percent": get_xq_value(stock_individual_spot_df, "涨幅"),
+                    "open": get_xq_value(stock_individual_spot_df, "今开"),
+                    "high": get_xq_value(stock_individual_spot_df, "最高"),
+                    "low": get_xq_value(stock_individual_spot_df, "最低"),
+                    "prev_close": get_xq_value(stock_individual_spot_df, "昨收"),
+                    "volume": get_xq_value(stock_individual_spot_df, "成交量"),
+                    "amount": get_xq_value(stock_individual_spot_df, "成交额"),
+                    "update_time": datetime.now().isoformat(),
+                    "source": "akshare.stock_individual_spot_xq",
+                    "fallback_chain": ["xueqiu", "stock_zh_a_spot"]
+                })
+        except Exception as e:
+            logger.warning(f"雪球行情接口获取失败 {normalized_code}: {e}")
+
+        try:
+            stock_spot_df = ak.stock_zh_a_spot()
+            symbol = self.get_full_lowercase_stock_code_no_dot(normalized_code).lower()
+            matched_df = stock_spot_df[
+                stock_spot_df["代码"].astype(str).str.lower() == symbol
+            ]
+            if matched_df.empty:
+                raise HTTPException(status_code=404, detail=f"Stock {normalized_code} not found")
+
+            row = matched_df.iloc[0]
+            current_price = to_native(row.get("最新价"))
+            if not is_valid_price(current_price):
+                raise HTTPException(status_code=404, detail=f"Stock {normalized_code} quote not available")
+            return cache_and_return({
+                "stock_code": normalized_code,
+                "stock_name": to_native(row.get("名称")) or self.get_stock_name(normalized_code),
+                "current_price": current_price,
+                "change": to_native(row.get("涨跌额")),
+                "change_percent": to_native(row.get("涨跌幅")),
+                "open": to_native(row.get("今开")),
+                "high": to_native(row.get("最高")),
+                "low": to_native(row.get("最低")),
+                "prev_close": to_native(row.get("昨收")),
+                "volume": to_native(row.get("成交量")),
+                "amount": to_native(row.get("成交额")),
+                "update_time": datetime.now().isoformat(),
+                "source": "akshare.stock_zh_a_spot",
+                "fallback_chain": ["xueqiu", "stock_zh_a_spot"]
+            })
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"获取股票行情失败 {normalized_code}: {e}")
+            raise HTTPException(status_code=502, detail=f"获取股票行情失败: {str(e)}")
     
     def get_stock_history(self, stock_code: str, period: str, days: int) -> Dict:
         # 获取股票历史k线数据 （支持日、周、月）

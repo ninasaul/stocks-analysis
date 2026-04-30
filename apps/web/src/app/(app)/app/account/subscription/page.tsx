@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { subscriptionCopy, subscriptionTierPublicCopy } from "@/lib/copy";
 import { useAuthStore } from "@/stores/use-auth-store";
 import type { BillingCycle, SubscriptionOrder } from "@/stores/use-subscription-store";
 import { GUEST_QUOTA, useSubscriptionStore } from "@/stores/use-subscription-store";
-import { requestCheckout } from "@/lib/api/subscription";
+import { requestCheckout, type MembershipApiResult } from "@/lib/api/subscription";
+import { requestCurrentMembership } from "@/lib/api/users";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -28,6 +29,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Dialog,
   DialogContent,
@@ -47,12 +49,12 @@ function statusLabel(s: SubscriptionOrder["status"]) {
 
 export default function SubscriptionPage() {
   const session = useAuthStore((s) => s.session);
+  const syncSession = useAuthStore((s) => s.syncSession);
   const isGuest = session === "guest";
   const plans = useSubscriptionStore((s) => s.plans);
   const getPlan = useSubscriptionStore((s) => s.getPlan);
   const currentPlanId = useSubscriptionStore((s) => s.currentPlanId);
   const billingCycle = useSubscriptionStore((s) => s.billingCycle);
-  const currentPlan = getPlan(currentPlanId);
   const periodEnd = useSubscriptionStore((s) => s.periodEnd);
   const autoRenew = useSubscriptionStore((s) => s.autoRenew);
   const paymentStatus = useSubscriptionStore((s) => s.paymentStatus);
@@ -67,8 +69,75 @@ export default function SubscriptionPage() {
   const [agree, setAgree] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [checkoutCycle, setCheckoutCycle] = useState<BillingCycle>("month");
+  const [membership, setMembership] = useState<MembershipApiResult | null>(null);
+  const [membershipLoading, setMembershipLoading] = useState(false);
+  const [membershipError, setMembershipError] = useState<string | null>(null);
 
   const proPlan = getPlan("pro");
+  const backendState = useMemo(() => {
+    if (!membership) return null;
+    const planId = membership.type === "normal" ? "free" : "pro";
+    const cycle =
+      membership.type === "premium_yearly"
+        ? "year"
+        : membership.type === "premium_quarterly"
+          ? "quarter"
+          : membership.type === "premium_monthly"
+            ? "month"
+            : null;
+    return {
+      planId,
+      billingCycle: cycle,
+      periodEnd: membership.end_date?.slice(0, 10) ?? null,
+      autoRenew: membership.status === "active",
+      analysisRemaining: membership.api_call_remaining,
+      analysisUsed: membership.api_call_used,
+    } as const;
+  }, [membership]);
+  const displayPlanId = backendState?.planId ?? currentPlanId;
+  const displayBillingCycle = backendState?.billingCycle ?? billingCycle;
+  const displayPeriodEnd = backendState?.periodEnd ?? periodEnd;
+  const displayAutoRenew = backendState?.autoRenew ?? autoRenew;
+  const displayAnalysisLeft = backendState?.analysisRemaining ?? analysisLeft;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (isGuest) {
+      setMembership(null);
+      setMembershipError(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void (async () => {
+      setMembershipLoading(true);
+      setMembershipError(null);
+      try {
+        await syncSession();
+        const latest = useAuthStore.getState();
+        if (latest.session !== "user" || !latest.accessToken) {
+          throw new Error("登录状态已失效，请重新登录");
+        }
+        const result = await requestCurrentMembership(latest.accessToken);
+        if (!cancelled) {
+          setMembership(result);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMembershipError(error instanceof Error ? error.message : "获取会员信息失败");
+        }
+      } finally {
+        if (!cancelled) {
+          setMembershipLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isGuest, syncSession]);
 
   const checkoutAmountLabel =
     checkoutCycle === "month"
@@ -115,15 +184,15 @@ export default function SubscriptionPage() {
   };
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-10 px-4 py-12 md:px-6 md:py-16">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
-          {subscriptionTierPublicCopy.subscriptionPageTitle}
-        </h1>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          {subscriptionCopy.pageSubtitle}
-        </p>
-      </div>
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>{subscriptionTierPublicCopy.subscriptionPageTitle}</CardTitle>
+          <CardDescription>
+            {subscriptionCopy.pageSubtitle}
+          </CardDescription>
+        </CardHeader>
+      </Card>
 
       {isGuest ? (
         <Alert>
@@ -142,38 +211,56 @@ export default function SubscriptionPage() {
       <Card>
         <CardHeader>
           <CardTitle>当前状态</CardTitle>
-          <CardDescription>{subscriptionCopy.currentCardDesc}</CardDescription>
+          <CardDescription>本卡片优先展示后端会员状态；选股会话当前仍按本地计数展示。</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3 text-sm">
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-muted-foreground">
             <span>
-              今日股票预测剩余：
-              <span className="text-foreground font-medium tabular-nums">{analysisLeft}</span>
+              本月股票预测剩余：
+              <span className="text-foreground font-medium tabular-nums">{displayAnalysisLeft}</span>
             </span>
             <span>
-              今日选股会话剩余：
+              今日选股会话剩余（本地估算）：
               <span className="text-foreground font-medium tabular-nums">{pickerLeft}</span>
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground">当前套餐</span>
-            <Badge variant={currentPlanId === "pro" ? "default" : "secondary"}>{currentPlan.name}</Badge>
+            <Badge variant={displayPlanId === "pro" ? "default" : "secondary"}>
+              {getPlan(displayPlanId).name}
+            </Badge>
           </div>
-          {currentPlanId === "pro" ? (
+          {displayPlanId === "pro" ? (
             <p className="text-muted-foreground">
               计费周期：
               <span className="text-foreground font-medium">
-                {billingCycle === "month" ? "月付" : billingCycle === "quarter" ? "季付" : "年付"}
+                {displayBillingCycle === "month"
+                  ? "月付"
+                  : displayBillingCycle === "quarter"
+                    ? "季付"
+                    : "年付"}
               </span>
             </p>
           ) : null}
-          {periodEnd ? (
+          {displayPeriodEnd ? (
             <p className="text-muted-foreground">
-              周期至 {periodEnd} · 自动续费：{autoRenew ? "开" : "关"}
+              周期至 {displayPeriodEnd} · 自动续费：{displayAutoRenew ? "开" : "关"}
             </p>
           ) : (
             <p className="text-muted-foreground">未开通付费套餐</p>
           )}
+          {membershipLoading ? (
+            <p className="text-muted-foreground inline-flex items-center gap-2 text-sm">
+              <Spinner />
+              正在同步后端会员状态
+            </p>
+          ) : null}
+          {backendState ? (
+            <p className="text-muted-foreground text-xs">
+              本月股票预测已用：<span className="tabular-nums">{backendState.analysisUsed}</span>
+            </p>
+          ) : null}
+          {membershipError ? <p className="text-sm text-destructive">{membershipError}</p> : null}
           <p className="text-muted-foreground text-xs">最近支付状态：{paymentStatus}</p>
         </CardContent>
         <CardFooter className="flex flex-wrap gap-2">
@@ -183,95 +270,92 @@ export default function SubscriptionPage() {
         </CardFooter>
       </Card>
 
-      <div className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold tracking-tight">
-          {subscriptionTierPublicCopy.plansSectionTitle}
-        </h2>
-        <p className="text-muted-foreground text-sm leading-relaxed">
-          以下为当前版本公示档位；自然日用量在每日 0 点（本地时区）按实现重置。
-        </p>
-      </div>
-
-      <div className="grid gap-6 md:grid-cols-2">
-        {plans.map((plan) => (
-          <Card
-            key={plan.id}
-            className={cn(
-              "relative flex h-full flex-col overflow-hidden",
-              plan.id === "pro"
-                ? "border-primary/40 shadow-md ring-1 ring-primary/15"
-                : "border-border/80",
-            )}
-          >
-            {plan.id === "pro" ? (
-              <div className="absolute inset-e-4 top-4">
-                <Badge>{subscriptionTierPublicCopy.proRecommendedBadge}</Badge>
-              </div>
-            ) : null}
-            <CardHeader className="gap-2 pb-2">
-              <CardTitle className="text-xl">{plan.name}</CardTitle>
-              <CardDescription className="text-base leading-relaxed">{plan.tagline}</CardDescription>
-              <p className="text-foreground pt-1 text-2xl font-semibold tabular-nums tracking-tight">
-                {plan.priceLabel}
-              </p>
-              {plan.quarterlyPriceLabel ? (
-                <div className="text-muted-foreground flex flex-col gap-0.5 pt-1 text-sm">
-                  <p>
-                    <span className="text-foreground font-medium tabular-nums">{plan.quarterlyPriceLabel}</span>
-                    <span className="text-muted-foreground">（季付）</span>
-                  </p>
-                  {plan.quarterlyEquivMonthlyLabel ? (
-                    <p className="text-xs leading-relaxed">{plan.quarterlyEquivMonthlyLabel}</p>
-                  ) : null}
+      <div className="space-y-3">
+        <div>
+          <h2 className="text-base font-semibold">{subscriptionTierPublicCopy.plansSectionTitle}</h2>
+          <p className="text-muted-foreground text-sm">套餐信息、权益边界与价格口径。</p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          {plans.map((plan) => (
+            <Card
+              key={plan.id}
+              className={cn(
+                "relative flex h-full flex-col overflow-hidden",
+                plan.id === "pro"
+                  ? "border-primary/40 shadow-md ring-1 ring-primary/15"
+                  : "border-border/80",
+              )}
+            >
+              {plan.id === "pro" ? (
+                <div className="absolute inset-e-4 top-4">
+                  <Badge>{subscriptionTierPublicCopy.proRecommendedBadge}</Badge>
                 </div>
               ) : null}
-              {plan.annualPriceLabel ? (
-                <div className="text-muted-foreground flex flex-col gap-0.5 pt-1 text-sm">
-                  <p>
-                    <span className="text-foreground font-medium tabular-nums">{plan.annualPriceLabel}</span>
-                    <span className="text-muted-foreground">（年付）</span>
-                  </p>
-                  {plan.annualEquivMonthlyLabel ? (
-                    <p className="text-xs leading-relaxed">{plan.annualEquivMonthlyLabel}</p>
-                  ) : null}
-                </div>
-              ) : null}
-              {plan.priceNote ? (
-                <p className="text-muted-foreground text-xs leading-relaxed">{plan.priceNote}</p>
-              ) : null}
-            </CardHeader>
-            <CardContent className="flex flex-1 flex-col gap-4 pt-0">
-              <Separator />
-              <ul className="text-muted-foreground list-disc space-y-2 pl-5 text-sm leading-relaxed">
-                {plan.features.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-              <div className="text-muted-foreground border-border rounded-lg border bg-muted/20 px-3 py-2 text-xs leading-relaxed">
-                <p>
-                  每日股票预测{" "}
-                  <span className="text-foreground font-medium tabular-nums">
-                    {plan.dailyAnalysisLimit}
-                  </span>{" "}
-                  次 · 每日选股会话{" "}
-                  <span className="text-foreground font-medium tabular-nums">
-                    {plan.pickerSessionDaily}
-                  </span>{" "}
-                  次
+              <CardHeader className="gap-2 pb-2">
+                <CardTitle className="text-xl">{plan.name}</CardTitle>
+                <CardDescription className="text-base leading-relaxed">{plan.tagline}</CardDescription>
+                <p className="text-foreground pt-1 text-2xl font-semibold tabular-nums tracking-tight">
+                  {plan.priceLabel}
                 </p>
-              </div>
-            </CardContent>
-            <CardFooter className="mt-auto flex-col items-stretch gap-2 border-t pt-4">
-              {currentPlanId === plan.id ? (
-                <Badge variant="secondary" className="w-fit">
-                  当前套餐
-                </Badge>
-              ) : plan.id === "free" ? (
-                <p className="text-muted-foreground text-xs">登录后默认包含；无需单独购买。</p>
-              ) : null}
-            </CardFooter>
-          </Card>
-        ))}
+                {plan.quarterlyPriceLabel ? (
+                  <div className="text-muted-foreground flex flex-col gap-0.5 pt-1 text-sm">
+                    <p>
+                      <span className="text-foreground font-medium tabular-nums">{plan.quarterlyPriceLabel}</span>
+                      <span className="text-muted-foreground">（季付）</span>
+                    </p>
+                    {plan.quarterlyEquivMonthlyLabel ? (
+                      <p className="text-xs leading-relaxed">{plan.quarterlyEquivMonthlyLabel}</p>
+                    ) : null}
+                  </div>
+                ) : null}
+                {plan.annualPriceLabel ? (
+                  <div className="text-muted-foreground flex flex-col gap-0.5 pt-1 text-sm">
+                    <p>
+                      <span className="text-foreground font-medium tabular-nums">{plan.annualPriceLabel}</span>
+                      <span className="text-muted-foreground">（年付）</span>
+                    </p>
+                    {plan.annualEquivMonthlyLabel ? (
+                      <p className="text-xs leading-relaxed">{plan.annualEquivMonthlyLabel}</p>
+                    ) : null}
+                  </div>
+                ) : null}
+                {plan.priceNote ? (
+                  <p className="text-muted-foreground text-xs leading-relaxed">{plan.priceNote}</p>
+                ) : null}
+              </CardHeader>
+              <CardContent className="flex flex-1 flex-col gap-4 pt-0">
+                <Separator />
+                <ul className="text-muted-foreground list-disc space-y-2 pl-5 text-sm leading-relaxed">
+                  {plan.features.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+                <div className="text-muted-foreground border-border rounded-lg border bg-muted/20 px-3 py-2 text-xs leading-relaxed">
+                  <p>
+                    每日股票预测{" "}
+                    <span className="text-foreground font-medium tabular-nums">
+                      {plan.dailyAnalysisLimit}
+                    </span>{" "}
+                    次 · 每日选股会话{" "}
+                    <span className="text-foreground font-medium tabular-nums">
+                      {plan.pickerSessionDaily}
+                    </span>{" "}
+                    次
+                  </p>
+                </div>
+              </CardContent>
+              <CardFooter className="mt-auto flex-col items-stretch gap-2 border-t pt-4">
+                {currentPlanId === plan.id ? (
+                  <Badge variant="secondary" className="w-fit">
+                    当前套餐
+                  </Badge>
+                ) : plan.id === "free" ? (
+                  <p className="text-muted-foreground text-xs">登录后默认包含；无需单独购买。</p>
+                ) : null}
+              </CardFooter>
+            </Card>
+          ))}
+        </div>
       </div>
 
       <Card>
@@ -374,11 +458,21 @@ export default function SubscriptionPage() {
               <Checkbox checked={agree} onCheckedChange={(v) => setAgree(v === true)} className="mt-0.5" />
               <span>
                 已阅读并同意
-                <Button variant="link" className="mx-1 h-auto p-0 text-sm" render={<Link href="/terms" />}>
+                <Button
+                  variant="link"
+                  className="mx-1 h-auto p-0 text-sm"
+                  nativeButton={false}
+                  render={<Link href="/terms" />}
+                >
                   服务条款
                 </Button>
                 与
-                <Button variant="link" className="mx-1 h-auto p-0 text-sm" render={<Link href="/privacy" />}>
+                <Button
+                  variant="link"
+                  className="mx-1 h-auto p-0 text-sm"
+                  nativeButton={false}
+                  render={<Link href="/privacy" />}
+                >
                   隐私政策
                 </Button>
                 ，知悉数字化订阅与退款政策以公示为准。
@@ -468,12 +562,13 @@ export default function SubscriptionPage() {
             <Button type="button" variant="outline" onClick={() => setShowResult(false)}>
               关闭
             </Button>
-            <Button type="button" render={<Link href="/app/analyze" />}>
+            <Button type="button" nativeButton={false} render={<Link href="/app/analyze" />}>
               进入工作台
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }
+

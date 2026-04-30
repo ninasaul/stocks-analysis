@@ -585,7 +585,6 @@ export function AnalyzeRunConfigDialog({
     <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent
         showCloseButton
-        closeSrOnlyLabel="关闭"
         aria-busy={loading}
         className="flex min-h-0 max-h-[min(92vh,880px)] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl"
       >
@@ -637,6 +636,7 @@ export function AnalyzeRunConfigDialog({
                       listId={`${fieldId}-search-listbox`}
                       formatCode={(item) => `${item.market}.${item.symbol}`}
                       onSelect={applySearchItem}
+                      openOnFocus={false}
                       onResolveEnter={(rawQuery, activeItem) => {
                         if (activeItem) {
                           applySearchItem(activeItem);

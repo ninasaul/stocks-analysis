@@ -10,30 +10,80 @@ function hashSymbolKey(s: string) {
   return Math.abs(h);
 }
 
-type ApiTimingResponse = {
-  composite?: number;
-  signal?: "BUY" | "SELL" | "HOLD";
-  price_range?: {
-    current_price?: number;
-    buy_range?: { low?: number; high?: number };
-    sell_range?: { low?: number; high?: number };
-  };
-  [key: string]: unknown;
-};
-
-type ApiDebateResponse = {
-  final_score?: number;
-  signal?: "BUY" | "SELL" | "HOLD";
-  bull?: { arguments?: string[] };
-  bear?: { rebuttals?: string[]; risks?: string[] };
-};
-
 type ApiAnalyzeResponse = {
-  ticker?: string;
-  signal?: "BUY" | "SELL" | "HOLD";
-  score?: number;
-  timing?: ApiTimingResponse;
-  debate?: ApiDebateResponse;
+  stock_info?: {
+    name?: string;
+    code?: string;
+    market?: string;
+  };
+  final_signal?: "BUY" | "SELL" | "HOLD";
+  final_score?: number;
+  ratings?: {
+    overall?: number;
+    technical?: number;
+    fundamental?: number;
+  };
+  technical_analysis?: {
+    signal?: "BUY" | "SELL" | "HOLD";
+    confidence?: number;
+    market_report?: string;
+    indicators?: Record<string, unknown> | null;
+    price_range?: {
+      current_price?: number;
+      buy_range?: {
+        best_buy_price?: number;
+        secondary_buy_price?: number;
+        stop_loss?: number;
+        take_profit?: number;
+      };
+      sell_range?: {
+        best_sell_price?: number;
+        secondary_sell_price?: number;
+        stop_loss?: number;
+        take_profit?: number;
+      };
+    };
+  };
+  fundamental_analysis?: {
+    thesis?: string;
+    risks?: string[] | string;
+    catalyst?: string;
+    fundamentals_report?: string;
+  };
+  strategy_position?: {
+    best_buy_price?: number | null;
+    secondary_buy_price?: number | null;
+    best_sell_price?: number | null;
+    secondary_sell_price?: number | null;
+    stop_loss?: number | null;
+    take_profit?: number | null;
+  };
+  execution_plan?: {
+    focus_price_range?: string;
+    risk_price?: string;
+    monitor_target_price?: string;
+    risk_exposure?: string;
+    invalid_trigger?: string;
+  };
+  debate_result?: {
+    bull_case?: string;
+    bear_case?: string;
+  };
+  reflection?: {
+    lessons_learned?: string;
+    improvements?: string[] | string;
+  };
+  basis_and_risks?: {
+    investment_thesis?: string;
+    key_risks?: string[] | string;
+    catalyst?: string;
+  };
+  created_at?: string;
+  error?: string;
+};
+
+type ApiHistoryResponse = {
+  analysis_result?: ApiAnalyzeResponse[];
   error?: string;
 };
 
@@ -44,6 +94,40 @@ function clampNumber(value: number, min: number, max: number): number {
 function formatPrice(n: number | null | undefined): string {
   if (typeof n !== "number" || Number.isNaN(n)) return "--";
   return n.toFixed(2);
+}
+
+function normalizeSignal(value: unknown): "BUY" | "SELL" | "HOLD" {
+  if (value === "BUY" || value === "SELL" || value === "HOLD") return value;
+  return "HOLD";
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item ?? "").trim())
+      .filter((item) => item.length > 0);
+  }
+  const text = String(value ?? "").trim();
+  if (!text) return [];
+  return text
+    .split(/\r?\n|[;；]/g)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function parseApiCreatedAt(value: unknown): number {
+  if (typeof value !== "string" || !value.trim()) return Date.now();
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const timestamp = Date.parse(normalized);
+  return Number.isFinite(timestamp) ? timestamp : Date.now();
+}
+
+function inferMarket(input: AnalysisInput | null, payload: ApiAnalyzeResponse): AnalysisInput["market"] {
+  if (input?.market) return input.market;
+  const rawMarket = String(payload.stock_info?.market ?? "").toUpperCase();
+  if (rawMarket.includes("港")) return "HK";
+  if (rawMarket.includes("美")) return "US";
+  return "CN";
 }
 
 function toFiveState(signal: "BUY" | "SELL" | "HOLD"): TimingReport["action"] {
@@ -72,42 +156,96 @@ function buildPlanMetrics(referencePrice: number, targetPrice: number) {
   };
 }
 
-function mapAnalyzeToTimingReport(input: AnalysisInput, payload: ApiAnalyzeResponse): TimingReport {
-  const timing = payload.timing ?? {};
-  const debate = payload.debate ?? {};
-  const timingComposite = clampNumber(extractNumber(timing.composite, 0), -1, 1);
-  const debateScore = clampNumber(extractNumber(debate.final_score, timingComposite), -1, 1);
-  const signal = payload.signal ?? debate.signal ?? timing.signal ?? "HOLD";
+type AnalyzeQueryConfig = {
+  depth: 1 | 2 | 3;
+  market_analyst: boolean;
+  fundamental_analyst: boolean;
+  news_analyst: boolean;
+  social_analyst: boolean;
+  sentiment_analysis: boolean;
+  risk_assessment: boolean;
+};
 
-  const technical = clampNumber(Math.round(((timingComposite + 1) / 2) * 60), 0, 60);
-  const structureRisk = clampNumber(Math.round(((debateScore + 1) / 2) * 25), 0, 25);
-  const eventDiscount = clampNumber(Math.round(Math.abs(timingComposite - debateScore) * 15), 0, 15);
-  const total = clampNumber(technical + structureRisk + eventDiscount, 0, 100);
-  const confidence = clampNumber(Math.round(55 + Math.abs(debateScore) * 35), 0, 100);
+function parseBoolFeature(themes: string[], key: string, fallback: boolean): boolean {
+  const hasAnyFeatureTag = themes.some((theme) => theme.startsWith("feature:"));
+  if (!hasAnyFeatureTag) return fallback;
+  return themes.includes(`feature:${key}`);
+}
 
-  const currentPrice = extractNumber(timing.price_range?.current_price, 0);
-  const buyLow = extractNumber(timing.price_range?.buy_range?.low, currentPrice ? currentPrice * 0.98 : 0);
-  const buyHigh = extractNumber(timing.price_range?.buy_range?.high, currentPrice ? currentPrice * 1.01 : 0);
-  const sellLow = extractNumber(timing.price_range?.sell_range?.low, currentPrice ? currentPrice * 0.99 : 0);
-  const sellHigh = extractNumber(timing.price_range?.sell_range?.high, currentPrice ? currentPrice * 1.03 : 0);
-  const focusLow = signal === "SELL" ? sellLow : buyLow;
-  const focusHigh = signal === "SELL" ? sellHigh : buyHigh;
-  const riskPrice = signal === "SELL" ? sellHigh : buyLow;
-  const targetPrice = signal === "SELL" ? sellLow : sellHigh;
+function buildAnalyzeQueryConfig(input: AnalysisInput): AnalyzeQueryConfig {
+  const themes = input.preference_snapshot?.themes ?? [];
+  const hasAnalystTags = themes.some((theme) => theme.startsWith("analyst:"));
+  const market_analyst = hasAnalystTags ? themes.includes("analyst:market") : true;
+  const fundamental_analyst = hasAnalystTags ? themes.includes("analyst:fundamental") : true;
+  const news_analyst = hasAnalystTags ? themes.includes("analyst:news") : false;
+  const social_analyst = hasAnalystTags ? themes.includes("analyst:social") : false;
+  const sentiment_analysis = parseBoolFeature(themes, "sentiment", true);
+  const risk_assessment = parseBoolFeature(themes, "risk_assessment", true);
+
+  // 后端当前仅支持 1~3；前端配置 4~5 统一映射到后端 3（全面分析）。
+  let depth: 1 | 2 | 3 = 3;
+  if (input.holding_horizon === "intraday_to_days" && input.risk_tier === "conservative") depth = 1;
+  else if (input.holding_horizon === "w1_to_w4") depth = 2;
+
+  return {
+    depth,
+    market_analyst,
+    fundamental_analyst,
+    news_analyst,
+    social_analyst,
+    sentiment_analysis,
+    risk_assessment,
+  };
+}
+
+function mapAnalyzeToTimingReport(input: AnalysisInput | null, payload: ApiAnalyzeResponse): TimingReport {
+  const signal = normalizeSignal(payload.final_signal ?? payload.technical_analysis?.signal);
+  const total = clampNumber(Math.round(extractNumber(payload.final_score, payload.ratings?.overall ?? 50)), 0, 100);
+  const technical = clampNumber(
+    Math.round(extractNumber(payload.ratings?.technical, (total / 100) * 60)),
+    0,
+    60,
+  );
+  const structureRisk = clampNumber(Math.round((total / 100) * 25), 0, 25);
+  const eventDiscount = clampNumber(100 - total - technical - structureRisk, 0, 15);
+  const confidence = clampNumber(Math.round(extractNumber(payload.technical_analysis?.confidence, 70)), 0, 100);
+
+  const currentPrice = extractNumber(payload.technical_analysis?.price_range?.current_price, 0);
+  const bestBuy = extractNumber(payload.strategy_position?.best_buy_price, currentPrice * 0.99);
+  const secondaryBuy = extractNumber(payload.strategy_position?.secondary_buy_price, currentPrice * 0.97);
+  const bestSell = extractNumber(payload.strategy_position?.best_sell_price, currentPrice * 1.01);
+  const secondarySell = extractNumber(payload.strategy_position?.secondary_sell_price, currentPrice * 1.03);
+  const stopLoss = extractNumber(payload.strategy_position?.stop_loss, currentPrice * 0.95);
+  const takeProfit = extractNumber(payload.strategy_position?.take_profit, currentPrice * 1.08);
+  const focusLow = Math.min(bestBuy || stopLoss, secondaryBuy || bestBuy || stopLoss);
+  const focusHigh = Math.max(bestSell || takeProfit, secondarySell || bestSell || takeProfit);
+  const riskPrice = stopLoss;
+  const targetPrice = takeProfit;
   const referenceForMetrics = currentPrice > 0 ? currentPrice : (focusLow + focusHigh) / 2;
   const plan_metrics = buildPlanMetrics(referenceForMetrics, targetPrice);
-
-  const bullArguments = Array.isArray(debate.bull?.arguments) ? debate.bull.arguments : [];
-  const bearRebuttals = Array.isArray(debate.bear?.rebuttals) ? debate.bear.rebuttals : [];
-  const bearRisks = Array.isArray(debate.bear?.risks) ? debate.bear.risks : [];
+  const market = inferMarket(input, payload);
+  const symbol = String(input?.symbol ?? payload.stock_info?.code ?? "").toUpperCase();
+  const executionPlan = payload.execution_plan ?? {};
+  const fundamental = payload.fundamental_analysis ?? {};
+  const basis = payload.basis_and_risks ?? {};
+  const bullish = normalizeStringArray(payload.debate_result?.bull_case);
+  const bearish = [
+    ...normalizeStringArray(payload.debate_result?.bear_case),
+    ...normalizeStringArray(fundamental.risks),
+  ];
+  const conflicts = normalizeStringArray(basis.key_risks);
+  const reminders = [
+    ...normalizeStringArray(payload.reflection?.lessons_learned),
+    ...normalizeStringArray(payload.reflection?.improvements),
+  ];
 
   return timingReportSchema.parse({
-    id: `api-${input.market}.${input.symbol}-${Date.now()}`,
-    symbol: input.symbol.toUpperCase(),
-    market: input.market,
-    timeframe: input.timeframe,
-    risk_tier: input.risk_tier,
-    holding_horizon: input.holding_horizon,
+    id: `api-${market}.${symbol}-${parseApiCreatedAt(payload.created_at)}`,
+    symbol,
+    market,
+    timeframe: input?.timeframe ?? "daily",
+    risk_tier: input?.risk_tier ?? "balanced",
+    holding_horizon: input?.holding_horizon ?? "m1_to_m3",
     action: toFiveState(signal),
     action_reason:
       signal === "BUY"
@@ -124,28 +262,30 @@ function mapAnalyzeToTimingReport(input: AnalysisInput, payload: ApiAnalyzeRespo
       total,
     },
     gate_downgraded: signal === "HOLD",
-    gate_reason: signal === "HOLD" ? "信号未形成明确方向，系统按中性策略处理。": null,
+    gate_reason: signal === "HOLD" ? "信号未形成明确方向，系统按中性策略处理。" : null,
     plan: {
-      focus_range: `${formatPrice(focusLow)} - ${formatPrice(focusHigh)}`,
-      risk_level_price: `${formatPrice(riskPrice)}`,
-      target_price: `${formatPrice(targetPrice)}`,
-      risk_exposure_pct:
-        input.risk_tier === "conservative"
-          ? "建议风险敞口约 3%～8%"
-          : input.risk_tier === "balanced"
-            ? "建议风险敞口约 5%～12%"
-            : "建议风险敞口约 8%～15%",
-      invalidation: "若价格偏离关注区间并连续失守关键风险位，应停止沿用当前结论。",
+      focus_range: executionPlan.focus_price_range || `${formatPrice(focusLow)} - ${formatPrice(focusHigh)}`,
+      risk_level_price: executionPlan.risk_price || `${formatPrice(riskPrice)}`,
+      target_price: executionPlan.monitor_target_price || `${formatPrice(targetPrice)}`,
+      risk_exposure_pct: executionPlan.risk_exposure || "建议风险敞口约 5%～12%",
+      invalidation: executionPlan.invalid_trigger || "若价格偏离关注区间并连续失守关键风险位，应停止沿用当前结论。",
       valid_until: "T+5 交易日内复核",
     },
     evidence_positive:
-      bullArguments.length > 0 ? bullArguments : ["技术与结构指标未出现明显冲突，趋势仍可跟踪。"],
+      bullish.length > 0
+        ? bullish
+        : normalizeStringArray(fundamental.thesis).length > 0
+          ? normalizeStringArray(fundamental.thesis)
+          : ["技术与结构指标未出现明显冲突，趋势仍可跟踪。"],
     evidence_negative:
-      bearRebuttals.length > 0 ? bearRebuttals : ["存在短线波动放大风险，需要更严格执行仓位控制。"],
-    evidence_conflicts: bearRisks.length > 0 ? bearRisks : undefined,
-    reminders: ["仅供研究参考，不构成投资建议。", "本产品不提供下单、委托或任何交易执行能力。"],
+      bearish.length > 0 ? bearish : ["存在短线波动放大风险，需要更严格执行仓位控制。"],
+    evidence_conflicts: conflicts.length > 0 ? conflicts : undefined,
+    reminders:
+      reminders.length > 0
+        ? reminders
+        : ["仅供研究参考，不构成投资建议。", "本产品不提供下单、委托或任何交易执行能力。"],
     data_version: "api-v1",
-    created_at: Date.now(),
+    created_at: parseApiCreatedAt(payload.created_at),
     plan_metrics,
   });
 }
@@ -166,12 +306,31 @@ export async function requestTimingReport(input: AnalysisInput): Promise<TimingR
 
   const url = new URL("/api/analyze", getPublicApiBaseUrl());
   url.searchParams.set("ticker", input.symbol);
-  url.searchParams.set("mode", "full");
+  const queryConfig = buildAnalyzeQueryConfig(input);
+  url.searchParams.set("depth", String(queryConfig.depth));
+  url.searchParams.set("market_analyst", String(queryConfig.market_analyst));
+  url.searchParams.set("fundamental_analyst", String(queryConfig.fundamental_analyst));
+  url.searchParams.set("news_analyst", String(queryConfig.news_analyst));
+  url.searchParams.set("social_analyst", String(queryConfig.social_analyst));
+  url.searchParams.set("sentiment_analysis", String(queryConfig.sentiment_analysis));
+  url.searchParams.set("risk_assessment", String(queryConfig.risk_assessment));
 
   const response = await state.authenticatedFetch(url.toString(), {
     method: "GET",
   });
   if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error("quota");
+    }
+    try {
+      const payload = (await response.json()) as { detail?: string; message?: string; error?: string };
+      const detail = payload.detail ?? payload.message ?? payload.error;
+      if (typeof detail === "string" && detail.trim().length > 0) {
+        throw new Error(detail);
+      }
+    } catch {
+      // Ignore parse errors and fall back to status code message.
+    }
     throw new Error(`请求失败（${response.status}）`);
   }
   const payload = (await response.json()) as ApiAnalyzeResponse;
@@ -179,4 +338,54 @@ export async function requestTimingReport(input: AnalysisInput): Promise<TimingR
     throw new Error(payload.error);
   }
   return mapAnalyzeToTimingReport(input, payload);
+}
+
+export async function requestAnalyzeHistory(): Promise<TimingReport[]> {
+  const state = useAuthStore.getState();
+  if (state.session !== "user" || !state.accessToken) return [];
+
+  const url = new URL("/api/history", getPublicApiBaseUrl());
+  const response = await state.authenticatedFetch(url.toString(), { method: "GET" });
+  if (!response.ok) {
+    throw new Error(`获取历史记录失败（${response.status}）`);
+  }
+
+  const payload = (await response.json()) as ApiHistoryResponse;
+  if (typeof payload.error === "string" && payload.error.trim().length > 0) {
+    throw new Error(payload.error);
+  }
+
+  const items = Array.isArray(payload.analysis_result) ? payload.analysis_result : [];
+  return items
+    .map((item) => {
+      try {
+        return mapAnalyzeToTimingReport(null, item);
+      } catch {
+        return null;
+      }
+    })
+    .filter((item): item is TimingReport => item !== null);
+}
+
+export async function requestReportFile(
+  ticker: string,
+  format: "markdown" | "pdf",
+): Promise<{ blob: Blob; contentType: string }> {
+  const state = useAuthStore.getState();
+  if (state.session !== "user" || !state.accessToken) {
+    throw new Error("当前未登录，请先登录后重试");
+  }
+
+  const url = new URL("/api/report", getPublicApiBaseUrl());
+  url.searchParams.set("ticker", ticker);
+  url.searchParams.set("format", format);
+
+  const response = await state.authenticatedFetch(url.toString(), { method: "GET" });
+  if (!response.ok) {
+    throw new Error(`获取报告失败（${response.status}）`);
+  }
+  return {
+    blob: await response.blob(),
+    contentType: response.headers.get("content-type") ?? "",
+  };
 }

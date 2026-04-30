@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -212,7 +211,7 @@ export function LoginPageClient() {
           <CardTitle className="text-2xl">登录</CardTitle>
           <p className="text-muted-foreground text-sm">
             还没有账号？
-            <Button variant="link" className="ml-1 h-auto p-0 text-sm" render={<Link href="/register" />}>
+            <Button type="button" variant="link" className="ml-1 h-auto p-0 text-sm" onClick={() => router.push("/register")}>
               去注册
             </Button>
           </p>
@@ -347,11 +346,11 @@ export function LoginPageClient() {
               <Checkbox checked={agree} onCheckedChange={(v) => setAgree(v === true)} className="mt-0.5" />
               <span className="text-muted-foreground leading-6">
                 我已阅读并同意
-                <Button variant="link" className="mx-1 h-auto p-0 text-sm" render={<Link href="/terms" />}>
+                <Button type="button" variant="link" className="mx-1 h-auto p-0 text-sm" onClick={() => router.push("/terms")}>
                   服务条款
                 </Button>
                 与
-                <Button variant="link" className="mx-1 h-auto p-0 text-sm" render={<Link href="/privacy" />}>
+                <Button type="button" variant="link" className="mx-1 h-auto p-0 text-sm" onClick={() => router.push("/privacy")}>
                   隐私政策
                 </Button>
               </span>

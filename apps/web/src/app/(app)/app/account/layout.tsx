@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { AppPageLayout } from "@/components/features/app-page-layout";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -17,14 +16,21 @@ const sections = [
       pathname === "/app/account" || pathname === "/app/account/",
   },
   {
+    href: "/app/account/subscription",
+    label: "订阅与用量",
+    hint: "套餐与配额",
+    isActive: (pathname: string) => pathname.startsWith("/app/account/subscription"),
+  },
+  {
     href: "/app/account/billing",
-    label: "账单",
-    hint: "订单与收据",
+    label: "账务与流水",
+    hint: "账单与调用记录",
     isActive: (pathname: string) => pathname.startsWith("/app/account/billing"),
   },
 ] as const;
 
 export default function AccountLayout({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const pathname = usePathname();
   const activeSectionLabel =
     sections.find((s) => s.isActive(pathname))?.label ?? "我的账号";
@@ -58,13 +64,8 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
                       "h-auto min-h-8 shrink-0 flex-col gap-0.5 px-3 py-2 text-left font-normal whitespace-normal lg:w-full",
                       "items-start justify-start",
                     )}
-                    render={
-                      <Link
-                        href={item.href}
-                        prefetch
-                        aria-current={active ? "page" : undefined}
-                      />
-                    }
+                    aria-current={active ? "page" : undefined}
+                    onClick={() => router.push(item.href)}
                   >
                     <span className="text-sm font-medium">{item.label}</span>
                     <span className="hidden text-xs text-muted-foreground lg:block">{item.hint}</span>

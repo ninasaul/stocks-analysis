@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -99,7 +98,7 @@ export function RegisterPageClient() {
           <CardTitle className="text-2xl">注册</CardTitle>
           <p className="text-muted-foreground text-sm">
             已有账号？
-            <Button variant="link" className="ml-1 h-auto p-0 text-sm" render={<Link href="/login" />}>
+            <Button type="button" variant="link" className="ml-1 h-auto p-0 text-sm" onClick={() => router.push("/login")}>
               去登录
             </Button>
           </p>
@@ -166,11 +165,11 @@ export function RegisterPageClient() {
                 <Checkbox checked={agree} onCheckedChange={(v) => setAgree(v === true)} className="mt-0.5" />
                 <span className="text-muted-foreground leading-6">
                   我已阅读并同意
-                  <Button variant="link" className="mx-1 h-auto p-0 text-sm" render={<Link href="/terms" />}>
+                  <Button type="button" variant="link" className="mx-1 h-auto p-0 text-sm" onClick={() => router.push("/terms")}>
                     服务条款
                   </Button>
                   与
-                  <Button variant="link" className="mx-1 h-auto p-0 text-sm" render={<Link href="/privacy" />}>
+                  <Button type="button" variant="link" className="mx-1 h-auto p-0 text-sm" onClick={() => router.push("/privacy")}>
                     隐私政策
                   </Button>
                 </span>

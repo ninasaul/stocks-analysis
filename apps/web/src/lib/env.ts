@@ -11,13 +11,13 @@ export function getPublicApiBaseUrl(): string {
 
 /**
  * Mock walkthrough mode for local verification.
- * - default: enabled in non-production
- * - override: NEXT_PUBLIC_USE_MOCK_FLOW=true/false
+ * - default: disabled (use real API)
+ * - override: NEXT_PUBLIC_USE_MOCK_FLOW=true enables mock flow
  */
 export function isMockFlowEnabled(): boolean {
   const raw = process.env.NEXT_PUBLIC_USE_MOCK_FLOW;
   if (!raw?.trim()) {
-    return process.env.NODE_ENV !== "production";
+    return false;
   }
   const normalized = raw.trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";

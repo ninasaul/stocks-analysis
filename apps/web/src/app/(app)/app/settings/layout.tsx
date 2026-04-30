@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { BellIcon, BotIcon, ChartLineIcon, Settings2Icon } from "lucide-react";
 import { AppPageLayout } from "@/components/features/app-page-layout";
 import { Button } from "@/components/ui/button";
@@ -38,6 +37,7 @@ const sections = [
 ] as const;
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const pathname = usePathname();
   const activeSectionLabel = sections.find((s) => s.isActive(pathname))?.label ?? "基础设置";
 
@@ -65,15 +65,10 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                   <Button
                     key={item.href}
                     type="button"
+                    aria-current={active ? "page" : undefined}
                     variant={active ? "secondary" : "ghost"}
                     className="w-auto justify-start lg:w-full"
-                    render={
-                      <Link
-                        href={item.href}
-                        prefetch
-                        aria-current={active ? "page" : undefined}
-                      />
-                    }
+                    onClick={() => router.push(item.href)}
                   >
                     <Icon data-icon="inline-start" aria-hidden />
                     {item.label}

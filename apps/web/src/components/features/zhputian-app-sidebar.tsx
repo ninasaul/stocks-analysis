@@ -1,8 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   ChartLineIcon,
   CircleUserIcon,
@@ -12,6 +10,7 @@ import {
   StarIcon,
   WalletIcon,
 } from "lucide-react";
+import { AppSidebarBrand } from "@/components/features/app-sidebar-brand";
 import {
   Sidebar,
   SidebarContent,
@@ -36,6 +35,7 @@ const nav = [
 ] as const;
 
 export function ZhputianAppSidebar() {
+  const router = useRouter();
   const pathname = usePathname();
   const settingsActive = pathname === "/app/settings" || pathname.startsWith("/app/settings/");
 
@@ -46,34 +46,12 @@ export function ZhputianAppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               size="lg"
-              render={<Link href="/app/analyze" prefetch />}
+              className="group-data-[collapsible=icon]:justify-center"
               tooltip="返回工作台首页"
               aria-label="返回工作台首页"
+              onClick={() => router.push("/app/analyze")}
             >
-              <span className="flex items-center justify-center">
-                <Image
-                  src="/logo_light.svg"
-                  alt="智谱投研 Logo"
-                  width={20}
-                  height={20}
-                  className="block dark:hidden"
-                />
-                <Image
-                  src="/logo_dark.svg"
-                  alt="智谱投研 Logo"
-                  width={20}
-                  height={20}
-                  className="hidden dark:block"
-                />
-              </span>
-              <span className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-                <span className="block truncate font-semibold tracking-tight">
-                  智谱投研
-                </span>
-                <span className="text-muted-foreground block truncate text-xs">
-                  股票研究与决策助手
-                </span>
-              </span>
+              <AppSidebarBrand collapsedTextClassName="group-data-[collapsible=icon]:hidden" />
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -91,8 +69,8 @@ export function ZhputianAppSidebar() {
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton
                       isActive={active}
-                      render={<Link href={item.href} prefetch />}
                       tooltip={item.label}
+                      onClick={() => router.push(item.href)}
                     >
                       <Icon />
                       <span>{item.label}</span>
@@ -109,8 +87,8 @@ export function ZhputianAppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               isActive={settingsActive}
-              render={<Link href="/app/settings" prefetch />}
               tooltip="设置"
+              onClick={() => router.push("/app/settings")}
             >
               <SettingsIcon />
               <span>设置</span>

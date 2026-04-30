@@ -89,23 +89,47 @@ async function copyMessageBody(text: string) {
 type InlineStock = {
   name: string;
   code: string;
+  displayCode?: string;
 };
-
-const STOCK_INLINE_PATTERN = /([\u4e00-\u9fa5A-Za-z0-9\-·]+)[（(](\d{6})[）)]/g;
 
 function extractInlineStocks(content: string): InlineStock[] {
   const result: InlineStock[] = [];
-  const seen = new Set<string>();
-  for (const match of content.matchAll(STOCK_INLINE_PATTERN)) {
-    const name = match[1]?.trim() ?? "";
-    const code = match[2]?.trim() ?? "";
-    if (!name || !code) continue;
-    const key = `${name}-${code}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push({ name, code });
+  const byCode = new Map<string, InlineStock>();
+  const addStock = (name: string, rawCode: string) => {
+    const normalizedCode = rawCode.trim().toUpperCase();
+    if (!normalizedCode) return;
+    const code = normalizedCode.split(".")[0]?.trim().toUpperCase() ?? "";
+    if (!name || !code) return;
+    const existing = byCode.get(code);
+    const next: InlineStock = { name, code, displayCode: normalizedCode };
+    if (!existing) {
+      byCode.set(code, next);
+      return;
+    }
+    if (!(existing.displayCode ?? "").includes(".") && normalizedCode.includes(".")) {
+      byCode.set(code, next);
+    }
+  };
+
+  const codeFirstBracketPattern =
+    /\b(\d{6}(?:\.[A-Za-z]{2})?)\b\s*[（(]\s*([A-Za-z0-9\u4E00-\u9FFF·\- ]{1,40})\s*[)）]/g;
+  for (const match of content.matchAll(codeFirstBracketPattern)) {
+    addStock(match[2]?.trim() ?? "", match[1]?.trim() ?? "");
   }
-  return result;
+
+  const codeFirstSpacePattern =
+    /\b(\d{6}(?:\.[A-Za-z]{2})?)\b[\s,，:：]+([A-Za-z0-9\u4E00-\u9FFF·\- ]{1,40})/g;
+  for (const match of content.matchAll(codeFirstSpacePattern)) {
+    addStock(match[2]?.trim() ?? "", match[1]?.trim() ?? "");
+  }
+
+  const nameFirstBracketPattern =
+    /([A-Za-z0-9\u4E00-\u9FFF·\- ]{1,40})\s*[（(]\s*(\d{6}(?:\.[A-Za-z]{2})?)\s*[)）]/g;
+  for (const match of content.matchAll(nameFirstBracketPattern)) {
+    addStock(match[1]?.trim() ?? "", match[2]?.trim() ?? "");
+  }
+
+  return Array.from(byCode.values());
 }
 
 export function PickerChatEmpty({ mode }: { mode: "consult" | "pick" | null }) {
@@ -189,14 +213,14 @@ export function PickerChatMessage({
                 return (
                   <HoverCard key={`${message.id}-${stock.code}`}>
                     <HoverCardTrigger className="inline-flex items-center rounded-md border px-1.5 py-0.5 text-xs transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
-                      {stock.name}（{stock.code}）
+                      {(stock.displayCode ?? stock.code).toUpperCase()}（{stock.name}）
                     </HoverCardTrigger>
                     <HoverCardContent side="top" align="start" className="w-72">
                       <div className="flex flex-col gap-2">
                         <div className="flex items-center gap-1.5">
                           <TrendingUpIcon className="text-muted-foreground size-4" />
                           <p className="text-sm font-medium leading-tight">
-                            {stock.name}（{stock.code}）
+                            {(stock.displayCode ?? stock.code).toUpperCase()}（{stock.name}）
                           </p>
                         </div>
                         <div className="flex items-center gap-1.5">

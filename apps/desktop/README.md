@@ -16,17 +16,17 @@ Then start Tauri in another terminal:
 npm run desktop:dev
 ```
 
-The desktop app loads `http://localhost:4000/login` in development, so first-time users see the login page and authenticated users continue into the product workspace.
+The desktop app loads `http://localhost:4000/app/analyze` in development (middleware or pages will redirect to login when required).
 
 ## Production Build
 
-Production builds package a local launcher page and point it at the configured web workspace. Set `DESKTOP_WEB_URL` before building:
+Production builds set the window initial URL to your remote Web origin (default path `/app/analyze` when `DESKTOP_WEB_URL` has no path). Set `DESKTOP_WEB_URL` before building:
 
 ```bash
 DESKTOP_WEB_URL=https://your-web-domain.com npm run desktop:build
 ```
 
-If `DESKTOP_WEB_URL` has no path, the launcher points to `/app/analyze`. You can override that with `DESKTOP_WEB_PATH`:
+Use `DESKTOP_WEB_PATH` to override the path:
 
 ```bash
 DESKTOP_WEB_URL=https://your-web-domain.com DESKTOP_WEB_PATH=/app/analyze npm run desktop:build
