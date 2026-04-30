@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# server-side quote CSV cache (see STOCK_QUOTE_CSV_PATH)
+/.data/
+
 # production
 /build
 

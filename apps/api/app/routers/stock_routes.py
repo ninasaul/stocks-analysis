@@ -44,23 +44,6 @@ def search_stocks(
     }
 
 
-@router.get("/{stock_code}/quote")
-def get_stock_quote(
-    stock_code: str,
-    current_user: User = Depends(get_current_user)
-) -> dict:
-    """获取股票实时行情"""
-    global stock_service
-    if stock_service is None:
-        stock_service = StockService()
-
-    logger.info(
-        f"用户 {current_user.id} ({current_user.username}) 查询股票行情: "
-        f"{stock_code}"
-    )
-    return stock_service.get_stock_quote(stock_code)
-
-
 @router.get("/analyzed")
 def get_analyzed_stocks(
     current_user: User = Depends(get_current_user)
