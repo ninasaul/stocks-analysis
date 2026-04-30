@@ -238,11 +238,11 @@ class DatabaseInitializer:
 
     def create_stock_analysis_results_table(self):
         """创建股票分析结果表"""
+        # Base table first so IF NOT EXISTS does not skip record_id/backfill steps on legacy schemas.
         sql = """
         CREATE TABLE IF NOT EXISTS stock_analysis_results (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL,
-            record_id VARCHAR(36) UNIQUE,
             stock_code VARCHAR(20) NOT NULL,
             analysis_date DATE NOT NULL,
             analysis_result JSONB NOT NULL,
@@ -250,9 +250,11 @@ class DatabaseInitializer:
             CONSTRAINT fk_stock_analysis_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
+        ALTER TABLE stock_analysis_results ADD COLUMN IF NOT EXISTS record_id VARCHAR(36);
+
         CREATE INDEX IF NOT EXISTS idx_stock_analysis_user_date ON stock_analysis_results(user_id, analysis_date);
         CREATE INDEX IF NOT EXISTS idx_stock_analysis_stock_date ON stock_analysis_results(stock_code, analysis_date);
-        CREATE INDEX IF NOT EXISTS idx_stock_analysis_record_id ON stock_analysis_results(record_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_analysis_record_id ON stock_analysis_results(record_id);
         """
         self.execute_sql(sql, "创建股票分析结果表")
 
@@ -501,8 +503,8 @@ class DatabaseInitializer:
         ALTER TABLE stock_analysis_results ALTER COLUMN created_at TYPE TIMESTAMP WITH TIME ZONE USING created_at AT TIME ZONE 'Asia/Shanghai';
 
         -- 添加record_id字段用于唯一标识分析记录
-        ALTER TABLE stock_analysis_results ADD COLUMN IF NOT EXISTS record_id VARCHAR(36) UNIQUE;
-        CREATE INDEX IF NOT EXISTS idx_stock_analysis_record_id ON stock_analysis_results(record_id);
+        ALTER TABLE stock_analysis_results ADD COLUMN IF NOT EXISTS record_id VARCHAR(36);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_analysis_record_id ON stock_analysis_results(record_id);
 
         -- 为旧记录生成UUID
         UPDATE stock_analysis_results SET record_id = gen_random_uuid()::VARCHAR WHERE record_id IS NULL;

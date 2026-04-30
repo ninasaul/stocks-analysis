@@ -4,7 +4,9 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChartLineIcon,
+  CircleHelpIcon,
   EllipsisVerticalIcon,
+  Clock3Icon,
   RotateCwIcon,
   Trash2Icon,
 } from "lucide-react";
@@ -30,6 +32,7 @@ import { isStockQuote } from "@/lib/stock-quote";
 import { AppPageLayout } from "@/components/features/app-page-layout";
 import { StockSearchCombobox } from "@/components/features/stock-search-combobox";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -222,6 +225,7 @@ function mergeQuotesForEntries(
 export default function WatchlistPage() {
   const router = useRouter();
   const authSession = useAuthStore((s) => s.session);
+  const accessToken = useAuthStore((s) => s.accessToken);
   const [query, setQuery] = useState("");
   const [entries, setEntries] = useState<WatchlistEntry[]>([]);
   const [remoteSearching, setRemoteSearching] = useState(false);
@@ -230,7 +234,7 @@ export default function WatchlistPage() {
   const [portfolioSyncError, setPortfolioSyncError] = useState<string | null>(null);
   const [quotesByKey, setQuotesByKey] = useState<Record<string, StockQuote>>({});
   const [quoteLoadingKeys, setQuoteLoadingKeys] = useState<Set<string>>(() => new Set());
-  const [quoteErrorKeys, setQuoteErrorKeys] = useState<Set<string>>(() => new Set());
+  const [, setQuoteErrorKeys] = useState<Set<string>>(() => new Set());
   const quoteRequestKeysRef = useRef<Set<string>>(new Set());
   const [deleteTargetKey, setDeleteTargetKey] = useState<string | null>(null);
 
@@ -366,6 +370,10 @@ export default function WatchlistPage() {
         return;
       }
 
+      if (!accessToken) {
+        return;
+      }
+
       const cnEntries = entries.filter((entry) => entry.market === "CN");
       const activeKeys = new Set(cnEntries.map((entry) => entryKey(entry)));
       for (const key of quoteRequestKeysRef.current) {
@@ -399,7 +407,15 @@ export default function WatchlistPage() {
 
         void requestStockQuote(entry.symbol)
           .then((quote) => {
-            if (canceled || !quote) return;
+            if (canceled) return;
+            if (!quote) {
+              setQuoteErrorKeys((prev) => {
+                const next = new Set(prev);
+                next.add(k);
+                return next;
+              });
+              return;
+            }
             writeWatchlistQuoteCache(k, quote);
             setQuotesByKey((prev) => ({ ...prev, [k]: quote }));
           })
@@ -426,10 +442,10 @@ export default function WatchlistPage() {
       canceled = true;
       window.clearTimeout(timer);
     };
-  }, [authSession, entries]);
+  }, [authSession, accessToken, entries]);
 
   const handleRefreshAllQuotes = useCallback(() => {
-    if (authSession !== "user") return;
+    if (authSession !== "user" || !accessToken) return;
     const cnEntries = entries.filter((e) => e.market === "CN");
     if (cnEntries.length === 0) return;
     setQuoteErrorKeys(new Set());
@@ -452,7 +468,8 @@ export default function WatchlistPage() {
           }
           setQuoteErrorKeys((prev) => {
             const next = new Set(prev);
-            next.delete(k);
+            if (q) next.delete(k);
+            else next.add(k);
             return next;
           });
         } catch {
@@ -471,7 +488,7 @@ export default function WatchlistPage() {
         }
       }),
     );
-  }, [authSession, entries]);
+  }, [authSession, accessToken, entries]);
 
   const cnQuoteCount = useMemo(() => entries.filter((e) => e.market === "CN").length, [entries]);
 
@@ -615,12 +632,35 @@ export default function WatchlistPage() {
       title="自选"
       actions={
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {authSession === "user" && cnQuoteCount > 0 ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="行情说明"
+                    className="text-muted-foreground"
+                  >
+                    <CircleHelpIcon />
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom" align="end" className="max-w-sm">
+                <div className="text-pretty leading-relaxed">
+                  A 股展示东方财富快照，服务端与本页均做短时缓存以降低请求频率；可随时点「刷新行情」强制更新。港股、美股暂不展示现价。
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
           <Button
             type="button"
             variant="outline"
             className="gap-1.5"
             disabled={
               authSession !== "user" ||
+              !accessToken ||
               cnQuoteCount === 0 ||
               portfolioLoading ||
               quoteLoadingKeys.size > 0
@@ -665,12 +705,6 @@ export default function WatchlistPage() {
         <p className="text-muted-foreground text-sm">正在同步自选股...</p>
       ) : null}
       {portfolioSyncError ? <p className="text-sm text-red-600 dark:text-red-500">{portfolioSyncError}</p> : null}
-      {authSession === "user" && cnQuoteCount > 0 ? (
-        <p className="text-muted-foreground text-xs leading-snug">
-          A 股展示东方财富快照，服务端与本页均做短时缓存以降低请求频率；可随时点「刷新行情」强制更新。
-          港股、美股暂不展示现价。
-        </p>
-      ) : null}
 
       {listEmpty ? (
         <Empty className="border">
@@ -698,7 +732,6 @@ export default function WatchlistPage() {
             const stockCode = `${entry.market}.${entry.symbol}`;
             const quote = quotesByKey[k];
             const quoteLoading = quoteLoadingKeys.has(k);
-            const quoteFailed = quoteErrorKeys.has(k);
             const quoteUnsupported = entry.market !== "CN";
             const tone = quote ? quoteToneClass(quote.changePercent) : "text-muted-foreground";
             const quoteMeta = quote ? quoteDataSubtitle(quote) : null;
@@ -723,20 +756,29 @@ export default function WatchlistPage() {
                       <div className="text-base font-semibold leading-none">
                         {quote ? quote.currentPrice.toFixed(2) : quoteLoading ? "--" : "--"}
                       </div>
-                      <div className="text-xs leading-tight">
-                        {quote
-                          ? formatSignedPct(quote.changePercent)
-                          : quoteUnsupported
-                            ? "未接入"
-                            : quoteFailed
-                              ? "获取失败"
-                              : "--"}
+                      <div className="flex items-center justify-end gap-1 text-xs leading-tight">
+                        <span>{quote ? formatSignedPct(quote.changePercent) : quoteUnsupported ? "未接入" : "--"}</span>
+                        {quoteMeta ? (
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-xs"
+                                  aria-label={`行情时间：${quoteMeta}`}
+                                  className="text-muted-foreground size-4"
+                                >
+                                  <Clock3Icon className="size-3.5" />
+                                </Button>
+                              }
+                            />
+                            <TooltipContent side="left" align="end" className="max-w-xs">
+                              {quoteMeta}
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : null}
                       </div>
-                      {quoteMeta ? (
-                        <div className="text-muted-foreground max-w-[10rem] truncate text-[10px] leading-tight">
-                          {quoteMeta}
-                        </div>
-                      ) : null}
                     </div>
                   </ItemContent>
                   <ItemActions>
