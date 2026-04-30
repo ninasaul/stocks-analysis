@@ -25,7 +25,7 @@ class RedisManager:
         return cls._instance
 
     def initialize(self):
-        """初始化Redis连接"""
+        """初始化Redis连接（延迟初始化，不阻塞启动）"""
         if self._client is not None:
             return
 
@@ -42,7 +42,7 @@ class RedisManager:
             logger.info(f"Redis连接成功: {REDIS_HOST}:{REDIS_PORT} (DB: {REDIS_DB})")
         except Exception as e:
             logger.error(f"Redis连接失败: {e}")
-            raise
+            # 不抛出异常，让应用继续运行，首次使用时再报错
 
     def close(self):
         """关闭Redis连接"""
@@ -55,6 +55,8 @@ class RedisManager:
         """获取Redis客户端"""
         if self._client is None:
             self.initialize()
+        if self._client is None:
+            raise ConnectionError("Redis客户端未初始化，请检查Redis服务是否可用")
         return self._client
 
 
