@@ -1,14 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .user_management import init_db
 from .core.database import db_manager
 from .core.scheduler import scheduler_manager
-from .core.stock_service import StockService
 from .core.logging import logger
 from .core.config import config
-from .core.redis_manager import redis_manager
-from .llm.llm_service import LLMService
 
 # 导入路由模块
 from .routers.auth_routes import router as auth_router
@@ -32,28 +28,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 初始化数据库
 @app.on_event("startup")
 async def startup_event():
-    """应用启动时的初始化"""
-    init_db()
-    redis_manager.initialize()
-    scheduler_manager.start()
-    global stock_service
-    stock_service = StockService()
-    logger.info("数据库连接已初始化")
-    logger.info("Redis连接已初始化")
-
-    count = LLMService.init_llm_presets_from_config()
-    if count > 0:
-        logger.info(f"从环境变量初始化了 {count} 个LLM预设")
+    """应用启动时的初始化（延迟初始化，不阻塞启动）"""
+    logger.info("应用启动完成（数据库/Redis将在首次使用时延迟初始化）")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """应用关闭时的清理"""
-    db_manager.close()
-    scheduler_manager.shutdown()
-    logger.info("数据库连接已关闭")
+    if db_manager._pool is not None:
+        db_manager.close()
+    if scheduler_manager._scheduler_started:
+        scheduler_manager.shutdown()
+    logger.info("应用关闭完成")
 
 # 注册路由
 app.include_router(auth_router)
@@ -66,6 +53,3 @@ app.include_router(trade_router)
 app.include_router(health_router)
 app.include_router(llm_router)
 app.include_router(llm_admin_router)
-
-# 全局实例
-stock_service = None

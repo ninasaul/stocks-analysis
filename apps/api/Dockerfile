@@ -7,7 +7,7 @@ FROM ${PY_IMAGE}
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
 
 # 安装 locales + git + vim（必须装 locales 才有 locale-gen！）
-RUN apt update && apt install -y locales git vim procps net-tools iputils-ping curl wget
+RUN apt update && apt install -y locales git vim procps net-tools iputils-ping curl wget redis-tools
 
 # 直接用系统自带 C.UTF-8，最稳、不报错、不折腾
 ENV LANG=C.UTF-8
