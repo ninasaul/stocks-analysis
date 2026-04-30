@@ -47,9 +47,12 @@ export function buildSyntheticTimingReport(input: AnalysisInput): TimingReport {
         }
       : undefined;
 
+  const sy = input.symbol.trim().toUpperCase();
+  const stock_market_cn = input.market === "CN" ? "A股" : input.market === "HK" ? "港股" : "美股";
+
   return timingReportSchema.parse({
     id: `r-${Date.now()}-${h % 1000}`,
-    symbol: input.symbol.toUpperCase(),
+    symbol: sy,
     market: input.market,
     timeframe: input.timeframe,
     risk_tier: input.risk_tier,
@@ -101,5 +104,20 @@ export function buildSyntheticTimingReport(input: AnalysisInput): TimingReport {
     data_version: "synthetic-v1",
     created_at: Date.now(),
     plan_metrics,
+    stock_info: {
+      name: `${sy}`,
+      code: sy,
+      market: stock_market_cn,
+      exchange:
+        input.market === "HK"
+          ? "HKEX"
+          : input.market === "US"
+            ? "US"
+            : sy.startsWith("6")
+              ? "上证"
+              : sy.startsWith("920") || sy.startsWith("8")
+                ? "北证"
+                : "深证",
+    },
   });
 }

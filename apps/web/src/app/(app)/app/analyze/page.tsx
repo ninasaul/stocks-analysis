@@ -123,6 +123,40 @@ const styleLabels: Record<PreferenceSnapshot["style"], string> = {
   no_preference: "无明确风格偏好",
 };
 
+function resolveAnalyzeListPrimaryName(
+  report: TimingReport | null,
+  market: AnalysisInput["market"],
+  symbol: string,
+  searchName?: string,
+): string {
+  const si = report?.stock_info;
+  const rawName = typeof si?.name === "string" ? si.name.trim() : "";
+  if (rawName) return rawName;
+  const code = typeof si?.code === "string" ? si.code.trim().toUpperCase() : "";
+  if (code) return code;
+  if (searchName?.trim()) return searchName.trim();
+  return formatAnalyzeBoardSymbol(market, symbol);
+}
+
+function resolveAnalyzeListDetailLine(
+  report: TimingReport | null,
+  market: AnalysisInput["market"],
+  symbol: string,
+): string {
+  const si = report?.stock_info;
+  if (si) {
+    const exch = typeof si.exchange === "string" ? si.exchange.trim() : "";
+    const mkt = typeof si.market === "string" ? si.market.trim() : "";
+    const code =
+      typeof si.code === "string" && si.code.trim().length > 0
+        ? si.code.trim().toUpperCase()
+        : symbol.trim().toUpperCase();
+    const parts = [exch, mkt, code].filter((x) => x.length > 0);
+    if (parts.length > 0) return parts.join(" · ");
+  }
+  return formatAnalyzeBoardSymbol(market, symbol);
+}
+
 type SearchItem = AnalyzeSymbolSearchItem;
 
 type AnalysisListItem = {
@@ -182,6 +216,8 @@ type AnalysisHistoryRunningRow = {
   market: AnalysisInput["market"];
   symbol: string;
   name: string;
+  /** 取自 stock_info（交易所 · 市场 · 代码）；无则用板块代码格式 */
+  detailLine: string;
 };
 
 type AnalysisHistoryDoneRow = AnalysisHistoryRunningRow & {
@@ -216,8 +252,8 @@ function AnalysisHistoryList({
             >
               <ItemContent className="min-w-0 gap-0.5">
                 <ItemTitle className="w-full truncate leading-5">{item.name}</ItemTitle>
-                <ItemDescription className="line-clamp-1 font-mono text-xs tabular-nums leading-4">
-                  {formatAnalyzeBoardSymbol(item.market, item.symbol)}
+                <ItemDescription className="text-muted-foreground line-clamp-2 text-xs leading-4 whitespace-normal wrap-break-word">
+                  {item.detailLine}
                 </ItemDescription>
               </ItemContent>
               <ItemActions className="pt-0.5">
@@ -249,8 +285,8 @@ function AnalysisHistoryList({
           >
             <ItemContent className="min-w-0 gap-0.5">
               <ItemTitle className="w-full truncate leading-5">{item.name}</ItemTitle>
-              <ItemDescription className="line-clamp-1 font-mono text-xs tabular-nums leading-4">
-                {formatAnalyzeBoardSymbol(item.market, item.symbol)}
+              <ItemDescription className="text-muted-foreground line-clamp-2 text-xs leading-4 whitespace-normal wrap-break-word">
+                {item.detailLine}
               </ItemDescription>
             </ItemContent>
             <ItemActions className="pt-0.5">
@@ -567,6 +603,7 @@ function AnalyzePageContent() {
   const setPendingHandoff = useAnalysisStore((s) => s.setPendingHandoff);
   const report = useAnalysisStore((s) => s.report);
   const loading = useAnalysisStore((s) => s.loading);
+  const progress = useAnalysisStore((s) => s.progress);
   const generateReport = useAnalysisStore((s) => s.generateReport);
   const buildMarkdown = useAnalysisStore((s) => s.buildMarkdown);
   const currentInput = useAnalysisStore((s) => s.currentInput);
@@ -665,7 +702,14 @@ function AnalyzePageContent() {
       for (const k of recentKeys) {
         if (byKey.has(k)) continue;
         const [mk, sym] = k.split(".") as [AnalysisInput["market"], string];
-        if (mk && sym) byKey.set(k, { key: k, market: mk, symbol: sym, name: "最近分析" });
+        if (mk && sym) {
+          byKey.set(k, {
+            key: k,
+            market: mk,
+            symbol: sym,
+            name: formatAnalyzeBoardSymbol(mk, sym),
+          });
+        }
       }
     }
     const list = Array.from(byKey.values());
@@ -775,8 +819,15 @@ function AnalyzePageContent() {
     const display = analysisListItems.map((item) => {
       const key = `${item.market}.${item.symbol}`;
       const report = byKey.get(key) ?? null;
-      const name = searchItemNameByKey.get(key) ?? "最近分析";
-      return { ...item, key, report, name };
+      const searchFallback = searchItemNameByKey.get(key);
+      const name = resolveAnalyzeListPrimaryName(
+        report,
+        item.market,
+        item.symbol,
+        searchFallback,
+      );
+      const detailLine = resolveAnalyzeListDetailLine(report, item.market, item.symbol);
+      return { ...item, key, report, name, detailLine };
     });
     const running = display.filter((x) => x.status === "running");
     const done = display.filter((x) => x.status === "done");
@@ -853,7 +904,13 @@ function AnalyzePageContent() {
   const activeIsLatest = !!(activeReport && report && activeReport.id === report.id);
   const activeSymbolName = useMemo(() => {
     if (!activeReport) return "未命名标的";
-    return searchItemNameByKey.get(`${activeReport.market}.${activeReport.symbol}`) ?? "未命名标的";
+    const key = `${activeReport.market}.${activeReport.symbol}`;
+    return resolveAnalyzeListPrimaryName(
+      activeReport,
+      activeReport.market,
+      activeReport.symbol,
+      searchItemNameByKey.get(key),
+    );
   }, [activeReport, searchItemNameByKey]);
   const activeRealtimeFacts = useMemo(() => {
     if (!activeReport) return [];
@@ -1156,7 +1213,7 @@ function AnalyzePageContent() {
   };
 
   const statusLiveMessage = loading
-    ? "报告生成中，请稍候。"
+    ? `报告生成中，请稍候。${progress?.message ? `当前进度：${progress.progress}%（${progress.message}）` : ""}`
     : error === "unknown"
       ? "报告生成失败，请调整参数后重试。"
       : activeReport
@@ -1211,7 +1268,9 @@ function AnalyzePageContent() {
             {loading ? (
               <>
                 <Spinner />
-                分析中
+                {progress?.progress && progress.progress > 0
+                  ? `分析中 ${progress.progress}%`
+                  : "分析中"}
               </>
             ) : (
               "分析"
@@ -1275,7 +1334,11 @@ function AnalyzePageContent() {
           <PageLoadingState
             className="print:analyze-hide"
             title="正在生成择时报告"
-            description="正在计算评分与结论。"
+            description={
+              progress?.message
+                ? `${progress.message}${progress.progress > 0 ? `（${progress.progress}%）` : ""}`
+                : "正在计算评分与结论。"
+            }
           />
         ) : null}
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { CheckIcon, CircleAlertIcon, EyeIcon, EyeOffIcon, PencilIcon, PlayIcon, PlusIcon, RefreshCwIcon, TrashIcon } from "lucide-react";
+import { BotIcon, CheckIcon, CircleAlertIcon, EyeIcon, EyeOffIcon, PencilIcon, PlayIcon, PlusIcon, RefreshCwIcon, TrashIcon } from "lucide-react";
 import { toast } from "sonner";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
@@ -10,7 +10,9 @@ import { useLlmRuntimeOptionsStore, type LlmProviderOption } from "@/stores/use-
 import {
   requestDeleteLlmConfig,
   requestLlmConfigById,
+  requestLlmPresets,
   requestSaveLlmSettings,
+  requestSetLlmPresetPreference,
   requestSetUserLlmPreference,
   requestTestLlmConfig,
   requestUserLlmConfig,
@@ -56,6 +58,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 type ConfigOption = { id: number; name: string; provider: LlmProviderOption; isActive: boolean };
+type SystemPresetOption = { id: number; name: string; provider: LlmProviderOption; model: string; isActive: boolean };
 type DeleteTargetConfig = Pick<ConfigOption, "id" | "name">;
 type AdvancedPresetKey = "precise" | "balanced" | "creative" | "long";
 type ProviderLogo = { light: string; dark: string };
@@ -84,9 +87,30 @@ const PROVIDER_LOGOS: Partial<Record<LlmProviderOption, ProviderLogo>> = {
   xai: { light: "/logo/light/Grok.svg", dark: "/logo/dark/Grok.svg" },
 };
 
+function inferProviderFromModelName(modelName: string): LlmProviderOption {
+  const name = modelName.toLowerCase();
+  if (name.includes("gpt") || name.includes("openai")) return "openai";
+  if (name.includes("claude") || name.includes("anthropic")) return "anthropic";
+  if (name.includes("gemini") || name.includes("google")) return "google";
+  if (name.includes("deepseek")) return "deepseek";
+  if (name.includes("qwen") || name.includes("aliyun") || name.includes("通义")) return "aliyun";
+  if (name.includes("glm") || name.includes("zhipu") || name.includes("智谱")) return "zhipu";
+  if (name.includes("kimi") || name.includes("moonshot")) return "moonshot";
+  if (name.includes("grok") || name.includes("xai")) return "xai";
+  if (name.includes("openrouter")) return "openrouter";
+  return "custom";
+}
+
 function ProviderLogoIcon({ provider, label, className = "size-4" }: { provider: LlmProviderOption; label: string; className?: string }) {
   const logo = PROVIDER_LOGOS[provider];
-  if (!logo) return null;
+  if (!logo) {
+    return (
+      <>
+        <BotIcon aria-hidden="true" className={`${className} shrink-0 text-muted-foreground`} />
+        <span className="sr-only">{label}</span>
+      </>
+    );
+  }
 
   return (
     <>
@@ -158,13 +182,16 @@ export default function SettingsLlmPage() {
   const [testingRemote, setTestingRemote] = useState(false);
   const [loadingModels, setLoadingModels] = useState(false);
   const [settingDefaultId, setSettingDefaultId] = useState<number | null>(null);
+  const [settingPresetId, setSettingPresetId] = useState<number | null>(null);
   const [openingConfigId, setOpeningConfigId] = useState<number | null>(null);
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [showValidationHint, setShowValidationHint] = useState(false);
   const [creatingNew, setCreatingNew] = useState(false);
   const [configOptions, setConfigOptions] = useState<ConfigOption[]>([]);
+  const [systemPresetOptions, setSystemPresetOptions] = useState<SystemPresetOption[]>([]);
   const [deleteTargetConfig, setDeleteTargetConfig] = useState<DeleteTargetConfig | null>(null);
   const [defaultConfigId, setDefaultConfigId] = useState<number | undefined>();
+  const [defaultPresetId, setDefaultPresetId] = useState<number | undefined>();
   const [remoteConfigId, setRemoteConfigId] = useState<number | undefined>();
   const [configName, setConfigName] = useState("");
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
@@ -224,15 +251,21 @@ export default function SettingsLlmPage() {
 
   const hydrateFromRemote = useCallback(async () => {
     await syncSession();
-    const [configs, preference] = await Promise.all([
+    const [configs, preference, presets] = await Promise.all([
       requestUserLlmConfigs(authenticatedFetch),
       requestUserLlmPreference(authenticatedFetch),
+      requestLlmPresets(authenticatedFetch).catch(() => []),
     ]);
 
     setConfigOptions(configs.map((item) => ({ id: item.id, name: item.name, provider: item.provider, isActive: item.isActive })));
+    setSystemPresetOptions(
+      presets.map((item) => ({ id: item.id, name: item.name, provider: item.provider, model: item.model, isActive: item.isActive })),
+    );
 
     const currentConfigId = preference.configId;
+    const currentPresetId = preference.presetId;
     setDefaultConfigId(currentConfigId);
+    setDefaultPresetId(currentPresetId);
     setRemoteConfigId(currentConfigId);
     setCreatingNew(false);
 
@@ -457,6 +490,20 @@ export default function SettingsLlmPage() {
     }
   };
 
+  const handleActivatePreset = async (presetId: number) => {
+    try {
+      setSettingPresetId(presetId);
+      setCreatingNew(false);
+      await requestSetLlmPresetPreference(presetId, authenticatedFetch);
+      await hydrateFromRemote();
+      toast.success("已启用系统预设");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "启用系统预设失败");
+    } finally {
+      setSettingPresetId(null);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4" role="region" aria-labelledby="settings-subsection-llm">
       <div className="grid gap-4">
@@ -472,7 +519,7 @@ export default function SettingsLlmPage() {
               onClick={openCreateDialog}
             >
               <PlusIcon data-icon="inline-start" />
-              新建
+              添加自定义
             </Button>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
@@ -488,6 +535,52 @@ export default function SettingsLlmPage() {
                 <AlertDescription>正在同步后端配置...</AlertDescription>
               </Alert>
             ) : null}
+            {systemPresetOptions.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-foreground">系统预设模型</p>
+                {systemPresetOptions.map((item) => {
+                  const isActivePreset = defaultPresetId === item.id;
+                  const iconProvider = inferProviderFromModelName(item.name);
+                  const providerName = PROVIDERS.find((providerOption) => providerOption.value === item.provider)?.label ?? item.provider;
+
+                  return (
+                    <div key={`preset-${item.id}`} className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex size-10 shrink-0 items-center justify-center">
+                          <ProviderLogoIcon provider={iconProvider} label={providerName} className="size-7" />
+                        </span>
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <p className="truncate text-sm font-medium">{item.name}</p>
+                            {isActivePreset ? (
+                              <Badge variant="secondary">
+                                <CheckIcon data-icon="inline-start" />
+                                启用中
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <p className="text-sm text-muted-foreground">{providerName}{item.model ? ` · ${item.model}` : ""}</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2 sm:justify-end">
+                        <Button
+                          variant={isActivePreset ? "secondary" : "outline"}
+                          size="xs"
+                          disabled={settingPresetId === item.id || isActivePreset}
+                          onClick={() => {
+                            void handleActivatePreset(item.id);
+                          }}
+                        >
+                          <PlayIcon data-icon="inline-start" />
+                          {settingPresetId === item.id ? "启用中" : isActivePreset ? "已启用" : "启用"}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+            <p className="pt-1 text-sm font-medium text-foreground">用户自定义配置</p>
             {configOptions.map((item) => {
               const isActivePreference = defaultConfigId === item.id;
               const providerName = PROVIDERS.find((providerOption) => providerOption.value === item.provider)?.label ?? item.provider;
