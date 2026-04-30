@@ -9,6 +9,11 @@ docker exec stock-end bash -c "
 cd /app/apps/api &&
 
 echo '==================='
+echo '拷贝env文件...'
+cp .env.example .env &&
+echo '==================='
+
+echo '==================='
 echo '检查并安装依赖...'
 pip install -r requirements.txt -q
 echo '依赖安装完成'

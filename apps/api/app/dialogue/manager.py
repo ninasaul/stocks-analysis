@@ -22,14 +22,34 @@ class DialogueManager:
 
     def __init__(self):
         if not DialogueManager._initialized:
-            self._redis_client = get_redis_client()
+            self._redis_client = None  # 延迟初始化
             self._sessions_key_prefix = "dialogue:session:"
+            
+            # 使用 Redis 分布式锁确保只有一个进程打印初始化日志
+            try:
+                temp_redis = get_redis_client()
+                lock_key = "dialogue:manager:init_lock"
+                # 尝试获取锁（10秒过期）
+                acquired = temp_redis.set(lock_key, "locked", ex=10, nx=True)
+                if acquired:
+                    logger.info("DialogueManager 初始化完成")
+                    # 设置持久化标志（有效期1小时）
+                    temp_redis.setex("dialogue:manager:initialized", 3600, "true")
+            except Exception as e:
+                # 如果 Redis 不可用，仍允许初始化，但每个进程都会打印日志
+                logger.info("DialogueManager 初始化完成")
+            
             DialogueManager._initialized = True
-            logger.info("DialogueManager 初始化完成")
-    
+
+    def _ensure_redis(self):
+        """延迟获取 Redis 客户端（首次使用时才连接）"""
+        if self._redis_client is None:
+            self._redis_client = get_redis_client()
+
     @property
     def sessions(self):
         """兼容旧代码的会话字典属性（从Redis获取）"""
+        self._ensure_redis()
         pattern = f"{self._sessions_key_prefix}*"
         keys = self._redis_client.keys(pattern)
         sessions_dict = {}
@@ -42,6 +62,7 @@ class DialogueManager:
 
     def _get_session(self, session_id: Optional[str], user_id: Optional[int] = None) -> Dict:
         """获取或创建会话"""
+        self._ensure_redis()
         if not session_id:
             return {"history": [], "criteria": {}}
 
@@ -80,6 +101,7 @@ class DialogueManager:
 
     def _save_session(self, session_id: str, session_data: Dict):
         """保存会话到Redis"""
+        self._ensure_redis()
         key = f"{self._sessions_key_prefix}{session_id}"
         self._redis_client.setex(key, 86400, json.dumps(session_data, ensure_ascii=False))
 
@@ -216,6 +238,7 @@ class DialogueManager:
 
     def load_sessions_from_db(self, user_id: int) -> None:
         """从数据库加载用户的对话会话"""
+        self._ensure_redis()
         try:
             # 获取用户的所有会话
             sessions_query = """
@@ -575,6 +598,7 @@ class DialogueManager:
 
     def clear_history(self, session_id: Optional[str] = None, user_id: Optional[int] = None) -> bool:
         """清除对话历史"""
+        self._ensure_redis()
         if session_id:
             # 清除指定会话
             key = f"{self._sessions_key_prefix}{session_id}"
@@ -609,6 +633,7 @@ class DialogueManager:
 
     def update_topic(self, session_id: str, topic: str, user_id: int) -> bool:
         """更新会话主题"""
+        self._ensure_redis()
         key = f"{self._sessions_key_prefix}{session_id}"
         if self._redis_client.exists(key):
             session_data = json.loads(self._redis_client.get(key))
@@ -655,6 +680,7 @@ class DialogueManager:
 
     def delete_message(self, session_id: str, message_id: int, user_id: int) -> bool:
         """删除会话中的某条消息"""
+        self._ensure_redis()
         key = f"{self._sessions_key_prefix}{session_id}"
         if not self._redis_client.exists(key):
             logger.warning(f"会话 {session_id} 不存在")
@@ -693,5 +719,3 @@ class DialogueManager:
             return False
         
         return True
-
-dialogue_manager = DialogueManager()
