@@ -23,7 +23,7 @@ class DatabaseManager:
         return cls._instance
 
     def initialize(self):
-        """初始化数据库连接池"""
+        """初始化数据库连接池（延迟初始化，不阻塞启动）"""
         if self._pool is not None:
             return
 
@@ -41,7 +41,7 @@ class DatabaseManager:
             logger.info("数据库连接池初始化成功")
         except Exception as e:
             logger.error(f"数据库连接池初始化失败: {e}")
-            raise
+            # 不抛出异常，让应用继续运行，首次使用时再报错
 
     def close(self):
         """关闭数据库连接池"""
@@ -55,6 +55,10 @@ class DatabaseManager:
         """获取数据库连接（上下文管理器）"""
         if self._pool is None:
             self.initialize()
+
+        # 如果连接池仍然为 None（初始化失败），抛出异常
+        if self._pool is None:
+            raise ConnectionError("数据库连接池未初始化，请检查数据库服务是否可用")
 
         conn = None
         try:
