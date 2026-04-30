@@ -22,6 +22,25 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PageLoadingState } from "@/components/features/page-state";
 
+function userStatusLabel(status: string | null | undefined): string {
+  switch (status) {
+    case "active":
+      return "正常";
+    case "idle":
+      return "未激活";
+    case "disabled":
+      return "已禁用";
+    case "suspended":
+      return "已冻结";
+    case "unknown":
+    case null:
+    case undefined:
+      return "未知";
+    default:
+      return status;
+  }
+}
+
 export default function AccountPage() {
   const router = useRouter();
   const authHydrated = useStoreHydrated(useAuthStore);
@@ -232,7 +251,7 @@ export default function AccountPage() {
               <div className="space-y-1 md:col-span-2">
                 <p className="text-muted-foreground text-xs">账号状态</p>
                 <Badge variant="secondary" className="w-fit">
-                  {profile?.status ?? "unknown"}
+                  {userStatusLabel(profile?.status)}
                 </Badge>
               </div>
             </div>

@@ -14,6 +14,7 @@ import { ThemeSwitcher } from "@/components/features/theme-switcher";
 import { AppMessageNotificationsTrigger } from "@/components/features/app-message-notifications-trigger";
 import { subscriptionTierPublicCopy } from "@/lib/copy";
 import { cn } from "@/lib/utils";
+import { requestCurrentMembership } from "@/lib/api/subscription";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useSubscriptionStore } from "@/stores/use-subscription-store";
@@ -25,9 +26,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const authHydrated = useStoreHydrated(useAuthStore);
   const syncSession = useAuthStore((s) => s.syncSession);
   const session = useAuthStore((s) => s.session);
-  const planName = useSubscriptionStore((s) => s.getPlan(s.currentPlanId).name);
+  const accessToken = useAuthStore((s) => s.accessToken);
+  const localPlanName = useSubscriptionStore((s) => s.getPlan(s.currentPlanId).name);
+  const localPlanId = useSubscriptionStore((s) => s.currentPlanId);
+  const localBillingCycle = useSubscriptionStore((s) => s.billingCycle);
   const sessionSyncDoneRef = useRef(false);
   const [authGateReady, setAuthGateReady] = useState(false);
+  const [remotePlanLabel, setRemotePlanLabel] = useState<string | null>(null);
+  const localPlanLabel =
+    localPlanId === "pro"
+      ? `${localPlanName}·${localBillingCycle === "month" ? "月付" : localBillingCycle === "quarter" ? "季付" : "年付"}`
+      : localPlanName;
+  const planName = remotePlanLabel ?? localPlanLabel;
 
   useEffect(() => {
     if (!authHydrated || sessionSyncDoneRef.current) return;
@@ -44,6 +54,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const next = pathname ? `?next=${encodeURIComponent(pathname)}` : "";
     router.replace(`/login${next}`);
   }, [authGateReady, authHydrated, pathname, router, session]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!authHydrated || !authGateReady || session !== "user" || !accessToken) {
+      setRemotePlanLabel(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void (async () => {
+      try {
+        const membership = await requestCurrentMembership(accessToken);
+        if (cancelled) return;
+        const name =
+          membership.type === "normal"
+            ? "免费版"
+            : membership.type === "premium_quarterly"
+              ? "专业版·季付"
+              : membership.type === "premium_yearly"
+                ? "专业版·年付"
+                : "专业版·月付";
+        setRemotePlanLabel(name);
+      } catch {
+        if (!cancelled) {
+          setRemotePlanLabel(null);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, authGateReady, authHydrated, session]);
 
   if (!authHydrated || !authGateReady || session === "guest") {
     return (
@@ -76,9 +120,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Badge variant="outline" className="hidden text-xs sm:inline-flex">
                 {planName}
               </Badge>
-              <Button type="button" size="sm" variant="ghost" onClick={() => router.push("/app/account")}>
-                我的账号
-              </Button>
               <Button type="button" size="sm" variant="secondary" onClick={() => router.push("/app/account/subscription")}>
                 {subscriptionTierPublicCopy.ctaViewPlansShort}
               </Button>

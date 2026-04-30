@@ -132,6 +132,13 @@ export function StockSearchCombobox({
           {items.length > 0 ? (
             <ul id={listId} role="listbox" aria-labelledby={inputId} className="flex max-h-64 flex-col gap-1 overflow-y-auto">
               {items.map((item, index) => (
+                // 名称与代码一致时避免重复显示（如 "SZ:000572  SZ:000572"）。
+                // 常见于最近使用回填或缺少公司简称的场景。
+                (() => {
+                  const codeText = formatCode(item).trim();
+                  const nameText = item.name.trim();
+                  const shouldShowCode = nameText.toUpperCase() !== codeText.toUpperCase();
+                  return (
                 <li key={item.key}>
                   <button
                     type="button"
@@ -151,10 +158,14 @@ export function StockSearchCombobox({
                   >
                     <span className="min-w-0 flex-1 truncate">
                       <span className="font-medium">{item.name}</span>
-                      <span className="text-muted-foreground ml-2 tabular-nums">{formatCode(item)}</span>
+                      {shouldShowCode ? (
+                        <span className="text-muted-foreground ml-2 tabular-nums">{codeText}</span>
+                      ) : null}
                     </span>
                   </button>
                 </li>
+                  );
+                })()
               ))}
             </ul>
           ) : loading ? (

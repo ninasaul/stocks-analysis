@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type FormEvent } from "react";
 import {
   BarChart3Icon,
   BookOpenIcon,
@@ -18,8 +18,10 @@ import { ANALYZE_MODEL_OPTIONS, coerceAnalyzeModel } from "@/lib/analyze-prefere
 import { useAnalyzePreferencesStore } from "@/stores/use-analyze-preferences-store";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
 import {
+  formatAnalyzeBoardSymbol,
   fuzzyAnalyzeSymbolScore,
   parseAnalyzeSearchInput,
+  resolveAnalyzeExchange,
   type AnalyzeSymbolSearchItem,
 } from "@/lib/analyze-symbol-search";
 import { Button } from "@/components/ui/button";
@@ -54,6 +56,7 @@ import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { StockSearchCombobox } from "@/components/features/stock-search-combobox";
 
 const MODEL_OPTIONS = ANALYZE_MODEL_OPTIONS;
@@ -298,6 +301,8 @@ function buildPreferenceSnapshot(args: {
 export type AnalyzeRunConfigConfirm = {
   input: AnalysisInput;
   displayKeyword: string;
+  stockName: string;
+  stockExchange?: string;
 };
 
 type AnalyzeRunConfigDialogProps = {
@@ -470,30 +475,6 @@ export function AnalyzeRunConfigDialog({
     };
   }, [analysts, depth, previewNonce]);
 
-  const handleDepthKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
-      let next: AnalysisDepth | null = null;
-      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
-        event.preventDefault();
-        if (depth < 5) next = ((depth + 1) as AnalysisDepth);
-      } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
-        event.preventDefault();
-        if (depth > 1) next = ((depth - 1) as AnalysisDepth);
-      } else if (event.key === "Home") {
-        event.preventDefault();
-        next = 1;
-      } else if (event.key === "End") {
-        event.preventDefault();
-        next = 5;
-      }
-      if (next !== null) {
-        setDepth(next);
-        queueMicrotask(() => document.getElementById(`${fieldId}-depth-${next}`)?.focus());
-      }
-    },
-    [depth, fieldId],
-  );
-
   const handleDialogOpenChange = useCallback(
     (next: boolean) => {
       if (!next && loading) return;
@@ -550,7 +531,9 @@ export function AnalyzeRunConfigDialog({
       preference_snapshot,
     };
     const displayKeyword = `${parsed.market}.${parsed.symbol}`;
-    const ok = await onConfirm({ input, displayKeyword });
+    const stockName = selectedSearchItem?.name?.trim() || parsed.symbol;
+    const stockExchange = selectedSearchItem?.exchange?.trim() || resolveAnalyzeExchange(parsed.market, parsed.symbol);
+    const ok = await onConfirm({ input, displayKeyword, stockName, stockExchange });
     if (ok) {
       useAnalyzePreferencesStore.getState().syncFromDialog({
         depth,
@@ -604,7 +587,7 @@ export function AnalyzeRunConfigDialog({
                 <FieldLegend variant="label" className="px-0">
                   必填信息
                 </FieldLegend>
-                <FieldGroup className="gap-4">
+                <FieldGroup className="grid gap-4 sm:grid-cols-2">
                   <Field>
                     <FieldLabel htmlFor={`${fieldId}-search`}>
                       <span>搜索标的</span>
@@ -627,7 +610,7 @@ export function AnalyzeRunConfigDialog({
                       ariaLabel="分析配置标的搜索"
                       inputId={`${fieldId}-search`}
                       listId={`${fieldId}-search-listbox`}
-                      formatCode={(item) => `${item.market}.${item.symbol}`}
+                      formatCode={(item) => formatAnalyzeBoardSymbol(item.market, item.symbol)}
                       onSelect={applySearchItem}
                       openOnFocus={false}
                       onResolveEnter={(rawQuery, activeItem) => {
@@ -669,47 +652,46 @@ export function AnalyzeRunConfigDialog({
                     content="深度越高，报告覆盖的假设与验证步骤越多，耗时与算力预估同步上升。可用方向键、Home、End 切换。"
                   />
                 </FieldLegend>
-                <FieldGroup
-                  data-slot="radio-group"
-                  role="radiogroup"
+                <RadioGroup
                   aria-labelledby={depthLegendId}
-                  aria-required="true"
+                  value={String(depth)}
+                  onValueChange={(value) => {
+                    const parsed = Number(value);
+                    if (parsed >= 1 && parsed <= 5) setDepth(parsed as AnalysisDepth);
+                  }}
                   className="grid gap-2 sm:grid-cols-2"
-                  onKeyDown={handleDepthKeyDown}
+                  disabled={loading}
                 >
                   {([1, 2, 3, 4, 5] as const).map((level) => {
                     const meta = DEPTH_META[level];
                     const Icon = meta.Icon;
                     const selected = depth === level;
+                    const radioId = `${fieldId}-depth-${level}`;
                     return (
-                      <Button
+                      <Field
                         key={level}
-                        id={`${fieldId}-depth-${level}`}
-                        type="button"
-                        role="radio"
-                        tabIndex={selected ? 0 : -1}
-                        aria-checked={selected}
-                        aria-setsize={5}
-                        aria-posinset={level}
-                        variant={selected ? "secondary" : "outline"}
-                        className="h-auto min-h-8 w-full flex-col items-start gap-1 whitespace-normal py-3 text-wrap"
-                        onClick={() => {
-                          setDepth(level);
-                          queueMicrotask(() => document.getElementById(`${fieldId}-depth-${level}`)?.focus());
-                        }}
+                        orientation="horizontal"
+                        className="items-start gap-3 rounded-lg border p-3"
                       >
-                        <span className="flex w-full items-center gap-2 text-left font-medium">
-                          <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-                          {meta.title}
-                        </span>
-                        <span className="w-full text-left text-xs font-normal text-muted-foreground">
-                          {meta.description}
-                        </span>
-                        <span className="text-xs text-muted-foreground">{meta.duration}</span>
-                      </Button>
+                        <RadioGroupItem id={radioId} value={String(level)} disabled={loading} className="mt-0.5" />
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <FieldLabel htmlFor={radioId} className="w-full cursor-pointer gap-2 leading-snug">
+                            <span className="flex w-full items-center justify-between gap-2 font-medium">
+                              <span className="flex min-w-0 items-center gap-2">
+                                <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                                <span className="truncate">{meta.title}</span>
+                              </span>
+                              <span className="shrink-0 text-[11px] font-normal text-muted-foreground/80">
+                                {meta.duration}
+                              </span>
+                            </span>
+                          </FieldLabel>
+                          <FieldDescription>{meta.description}</FieldDescription>
+                        </div>
+                      </Field>
                     );
                   })}
-                </FieldGroup>
+                </RadioGroup>
               </FieldSet>
 
               <FieldSet className="min-w-0 gap-3 border-0 p-0" disabled={loading}>
@@ -749,15 +731,19 @@ export function AnalyzeRunConfigDialog({
                         />
                         <div className="min-w-0 flex-1 space-y-1">
                           <FieldLabel htmlFor={boxId} className="w-full cursor-pointer gap-2 leading-snug">
-                            <span className="flex items-center gap-2 font-medium">
-                              <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-                              {row.title}
+                            <span className="flex w-full items-center justify-between gap-2 font-medium">
+                              <span className="flex min-w-0 items-center gap-2">
+                                <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                                <span className="truncate">{row.title}</span>
+                              </span>
+                              {disabled ? (
+                                <span className="shrink-0 text-[11px] font-normal text-muted-foreground/80">
+                                  A 股不可用
+                                </span>
+                              ) : null}
                             </span>
                           </FieldLabel>
                           <FieldDescription>{row.description}</FieldDescription>
-                          {disabled ? (
-                            <FieldDescription>A 股市场下该角色不可用。</FieldDescription>
-                          ) : null}
                         </div>
                       </Field>
                     );
@@ -766,18 +752,18 @@ export function AnalyzeRunConfigDialog({
               </FieldSet>
             </FieldGroup>
 
-            <FieldGroup className="gap-5 rounded-lg border bg-muted/20 p-4 lg:border-0 lg:bg-transparent lg:p-0">
-              <FieldSet className="gap-4 border-0 p-0" disabled={loading}>
-                <FieldLegend variant="label" className="flex items-center gap-1 px-0">
+            <FieldGroup className="gap-3 rounded-lg border bg-muted/20 p-4 lg:border-0 lg:bg-transparent lg:p-0">
+              <FieldSet className="gap-0 border-0 p-0" disabled={loading}>
+                <FieldLegend variant="label" className="mb-0 flex items-center gap-1 px-0">
                   <span>高级选项</span>
                 </FieldLegend>
               </FieldSet>
 
-              <Separator />
+              <Separator className="my-0" />
 
               <FieldGroup className="gap-4">
-                <Field orientation="responsive">
-                  <FieldContent>
+                <Field orientation="horizontal">
+                  <FieldContent className="min-w-0 flex-1">
                     <FieldTitle id={sentimentLabelId} className="flex items-center gap-1">
                       <span>情绪分析</span>
                       <HelpTip
@@ -793,8 +779,8 @@ export function AnalyzeRunConfigDialog({
                     aria-labelledby={sentimentLabelId}
                   />
                 </Field>
-                <Field orientation="responsive">
-                  <FieldContent>
+                <Field orientation="horizontal">
+                  <FieldContent className="min-w-0 flex-1">
                     <FieldTitle id={riskLabelId} className="flex items-center gap-1">
                       <span>风险评估</span>
                       <HelpTip

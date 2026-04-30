@@ -1,9 +1,10 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   CircleHelpIcon,
+  Clock3Icon,
   EyeIcon,
   FolderDownIcon,
   FileDownIcon,
@@ -16,16 +17,19 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { AnalysisInput, PreferenceSnapshot, TimingReport } from "@/lib/contracts/domain";
-import { timingReportSchema } from "@/lib/contracts/domain";
 import {
-  ANALYZE_SYMBOL_MOCK_UNIVERSE,
   formatAnalyzeBoardSymbol,
   fuzzyAnalyzeSymbolScore,
   parseAnalyzeSearchInput,
   type AnalyzeSymbolSearchItem,
 } from "@/lib/analyze-symbol-search";
 import { requestStockQuote, requestStockSearch, type StockQuote } from "@/lib/api/stocks";
-import { requestAnalyzeHistory, requestReportFile } from "@/lib/api/timing";
+import {
+  requestAnalyzeHistory,
+  requestAnalyzeHistoryByRecordId,
+  requestAnalyzeTaskStatus,
+  requestReportFile,
+} from "@/lib/api/timing";
 import { hashCode } from "@/lib/mock-base-quote";
 import { analyzeCopy, subscriptionTierPublicCopy } from "@/lib/copy";
 import { useAnalysisStore } from "@/stores/use-analysis-store";
@@ -62,6 +66,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Item,
@@ -89,6 +94,51 @@ const actionLabels: Record<string, string> = {
   reduce: "减仓",
   exit: "离场",
 };
+
+const PENDING_ANALYZE_TASK_KEY = "analyze-pending-task-v1";
+type PendingAnalyzeTaskPayload = {
+  taskId?: string;
+  createdAt?: number;
+  symbol?: string;
+  market?: AnalysisInput["market"];
+  exchange?: string;
+  stockName?: string;
+};
+
+function readPendingAnalyzeTasks(): PendingAnalyzeTaskPayload[] {
+  try {
+    const raw = window.localStorage.getItem(PENDING_ANALYZE_TASK_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as PendingAnalyzeTaskPayload | PendingAnalyzeTaskPayload[] | null;
+    const list = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+    return list
+      .map((item) => ({
+        taskId: String(item?.taskId ?? "").trim() || undefined,
+        createdAt: typeof item?.createdAt === "number" ? item.createdAt : undefined,
+        symbol: String(item?.symbol ?? "").trim().toUpperCase() || undefined,
+        market: item?.market,
+        exchange: String(item?.exchange ?? "").trim() || undefined,
+        stockName: String(item?.stockName ?? "").trim() || undefined,
+      }))
+      .filter((item) => Boolean(item.taskId));
+  } catch {
+    return [];
+  }
+}
+
+function writePendingAnalyzeTasks(list: PendingAnalyzeTaskPayload[]) {
+  if (!list.length) {
+    window.localStorage.removeItem(PENDING_ANALYZE_TASK_KEY);
+    return;
+  }
+  window.localStorage.setItem(PENDING_ANALYZE_TASK_KEY, JSON.stringify(list));
+}
+
+function pickActivePendingAnalyzeTask(list: PendingAnalyzeTaskPayload[]): PendingAnalyzeTaskPayload | null {
+  if (!list.length) return null;
+  const sorted = [...list].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  return sorted[0] ?? null;
+}
 
 const actionBadgeClassNames: Record<string, string> = {
   wait:
@@ -193,7 +243,6 @@ type TargetPriceRow = {
 
 type QuoteViewStatus = "idle" | "cached" | "live" | "error";
 
-const LOCAL_ANALYSIS_HISTORY_KEY = "zhputian-analysis-history-v1";
 const LOCAL_ANALYSIS_ACTIVE_ID_KEY = "zhputian-analysis-active-id-v1";
 const sentimentChartConfig = {
   score: { label: "指数", color: "var(--chart-2)" },
@@ -225,6 +274,7 @@ function InfoTip({ label, children }: { label: string; children: ReactNode }) {
 
 type AnalysisHistoryRunningRow = {
   id: string;
+  recordId?: string;
   market: AnalysisInput["market"];
   symbol: string;
   name: string;
@@ -245,7 +295,7 @@ function AnalysisHistoryList({
   running: AnalysisHistoryRunningRow[];
   done: AnalysisHistoryDoneRow[];
   activeAnalysisId: string | null;
-  onSelect: (item: { id: string; market: AnalysisInput["market"]; symbol: string }) => void;
+  onSelect: (item: { id: string; recordId?: string; market: AnalysisInput["market"]; symbol: string }) => void;
 }) {
   return (
     <ItemGroup className="gap-1">
@@ -260,7 +310,9 @@ function AnalysisHistoryList({
               render={
                 <button type="button" />
               }
-              onClick={() => onSelect({ id: item.id, market: item.market, symbol: item.symbol })}
+              onClick={() =>
+                onSelect({ id: item.id, recordId: item.recordId, market: item.market, symbol: item.symbol })
+              }
             >
               <ItemContent className="min-w-0 gap-0.5">
                 <ItemTitle className="w-full truncate leading-5">{item.name}</ItemTitle>
@@ -293,7 +345,9 @@ function AnalysisHistoryList({
             render={
               <button type="button" />
             }
-            onClick={() => onSelect({ id: item.id, market: item.market, symbol: item.symbol })}
+            onClick={() =>
+              onSelect({ id: item.id, recordId: item.recordId, market: item.market, symbol: item.symbol })
+            }
           >
             <ItemContent className="min-w-0 gap-0.5">
               <ItemTitle className="w-full truncate leading-5">{item.name}</ItemTitle>
@@ -314,19 +368,6 @@ function AnalysisHistoryList({
 }
 
 const parseSearchInput = parseAnalyzeSearchInput;
-
-function parseStockCodeParam(raw: string) {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const prefixed = trimmed.match(/^(CN|HK|US)\.(.+)$/i);
-  if (prefixed) {
-    return {
-      market: prefixed[1].toUpperCase() as AnalysisInput["market"],
-      symbol: prefixed[2].trim(),
-    };
-  }
-  return { market: null, symbol: trimmed };
-}
 
 const fuzzySearchScore = fuzzyAnalyzeSymbolScore;
 
@@ -620,6 +661,12 @@ function AnalyzePageContent() {
   const [holdingHorizon, setHoldingHorizon] = useState<AnalysisInput["holding_horizon"]>("m1_to_m3");
   const [quotaOpen, setQuotaOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
+  const [configSubmitting, setConfigSubmitting] = useState(false);
+  const [taskDoneOpen, setTaskDoneOpen] = useState(false);
+  const [taskDoneRecordId, setTaskDoneRecordId] = useState<string | null>(null);
+  const [taskDoneStockLabel, setTaskDoneStockLabel] = useState<string | null>(null);
+  const [taskErrorOpen, setTaskErrorOpen] = useState(false);
+  const [taskErrorMessage, setTaskErrorMessage] = useState<string>("");
   const [linkedPreference, setLinkedPreference] = useState<PreferenceSnapshot | null>(null);
   const [activeAnalysisId, setActiveAnalysisId] = useState<string | null>(null);
   const [localHistoryLoaded, setLocalHistoryLoaded] = useState(false);
@@ -631,60 +678,41 @@ function AnalyzePageContent() {
   const [searchComboboxOpen, setSearchComboboxOpen] = useState(false);
   const [remoteSearching, setRemoteSearching] = useState(false);
   const [remoteSearchItems, setRemoteSearchItems] = useState<SearchItem[]>([]);
-  const analyzeReportScrollRef = useRef<HTMLDivElement | null>(null);
-  const stockCodeParam = searchParams.get("stockCode");
+  const [taskQueryProgress, setTaskQueryProgress] = useState<{ progress: number; message: string } | null>(null);
+  const [taskQueryTaskId, setTaskQueryTaskId] = useState<string | null>(null);
+  const [taskPendingList, setTaskPendingList] = useState<PendingAnalyzeTaskPayload[]>([]);
+  const [taskQueryStock, setTaskQueryStock] = useState<{
+    market: AnalysisInput["market"];
+    symbol: string;
+    exchange?: string;
+    stockName?: string;
+  } | null>(null);
+  const recordIdParam = searchParams.get("record_id");
 
   useEffect(() => {
-    if (authSession === "user") {
-      let canceled = false;
-      setLocalHistoryLoaded(false);
-      void requestAnalyzeHistory()
-        .then((items) => {
-          if (!canceled) setLocalHistory(items.slice(0, 100));
-        })
-        .catch(() => {
-          if (!canceled) setLocalHistory([]);
-        })
-        .finally(() => {
-          if (!canceled) setLocalHistoryLoaded(true);
-        });
-      return () => {
-        canceled = true;
-      };
-    }
-
-    try {
-      const raw = localStorage.getItem(LOCAL_ANALYSIS_HISTORY_KEY);
-      if (!raw) {
-        setLocalHistoryLoaded(true);
-        return;
-      }
-      const parsed = JSON.parse(raw) as unknown[];
-      const valid = parsed
-        .map((item) => {
-          const result = timingReportSchema.safeParse(item);
-          return result.success ? result.data : null;
-        })
-        .filter((item): item is TimingReport => item !== null)
-        .slice(0, 100);
-      setLocalHistory(valid);
-    } catch {
-      setLocalHistory([]);
-    } finally {
-      setLocalHistoryLoaded(true);
-    }
+    let canceled = false;
+    setLocalHistoryLoaded(false);
+    void requestAnalyzeHistory()
+      .then((items) => {
+        if (!canceled) setLocalHistory(items.slice(0, 100));
+      })
+      .catch(() => {
+        if (!canceled) setLocalHistory([]);
+      })
+      .finally(() => {
+        if (!canceled) setLocalHistoryLoaded(true);
+      });
+    return () => {
+      canceled = true;
+    };
   }, [authSession]);
 
   useEffect(() => {
     if (!localHistoryLoaded || !report) return;
     setLocalHistory((prev) => {
-      const next = [report, ...prev.filter((x) => x.id !== report.id)].slice(0, 100);
-      if (authSession !== "user") {
-        localStorage.setItem(LOCAL_ANALYSIS_HISTORY_KEY, JSON.stringify(next));
-      }
-      return next;
+      return [report, ...prev.filter((x) => x.id !== report.id)].slice(0, 100);
     });
-  }, [authSession, localHistoryLoaded, report]);
+  }, [localHistoryLoaded, report]);
 
   const recentKeys = useMemo(() => {
     const keys: string[] = [];
@@ -700,7 +728,6 @@ function AnalyzePageContent() {
 
   const searchItems = useMemo(() => {
     const byKey = new Map<string, SearchItem>();
-    for (const m of ANALYZE_SYMBOL_MOCK_UNIVERSE) byKey.set(m.key, m);
     for (const item of remoteSearchItems) byKey.set(item.key, item);
     if (archiveHydrated) {
       for (const k of recentKeys) {
@@ -777,20 +804,43 @@ function AnalyzePageContent() {
   }, [searchItems]);
 
   const analysisEntries = useMemo(() => {
-    const list: TimingReport[] = [];
-    if (report) list.push(report);
-    for (const item of localHistory) {
-      if (!list.some((x) => x.id === item.id)) list.push(item);
+    const merged: TimingReport[] = [];
+    if (report) merged.push(report);
+    merged.push(...localHistory);
+
+    const deduped: TimingReport[] = [];
+    const seen = new Set<string>();
+    for (const item of merged) {
+      // 同一条分析记录优先按 record_id 去重，避免轮询结果与历史接口结果双份显示。
+      const key = item.record_id?.trim() || item.id;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(item);
     }
-    for (const a of archives) {
-      if (!list.some((x) => x.id === a.id)) list.push(a);
-    }
-    return list;
-  }, [archives, localHistory, report]);
+    return deduped;
+  }, [localHistory, report]);
+
+  useEffect(() => {
+    if (!recordIdParam) return;
+    if (analysisEntries.some((item) => item.record_id === recordIdParam)) return;
+    let canceled = false;
+    void requestAnalyzeHistoryByRecordId(recordIdParam)
+      .then((item) => {
+        if (canceled) return;
+        setLocalHistory((prev) => [item, ...prev.filter((x) => x.id !== item.id)].slice(0, 100));
+      })
+      .catch(() => {
+        // Ignore detail fetch errors; page will fall back to existing history/empty state.
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [analysisEntries, recordIdParam]);
 
   const analysisListItems = useMemo(() => {
-    const list: AnalysisListItem[] = analysisEntries.map((item) => ({
+    const list: Array<AnalysisListItem & { recordId?: string }> = analysisEntries.map((item) => ({
       id: item.id,
+      recordId: item.record_id,
       market: item.market,
       symbol: item.symbol,
       status: "done",
@@ -803,6 +853,7 @@ function AnalyzePageContent() {
         if (!exists) {
           list.unshift({
             id: `running-${key}`,
+            recordId: undefined,
             market: parsed.market,
             symbol: parsed.symbol,
             status: "running",
@@ -839,41 +890,136 @@ function AnalyzePageContent() {
     return { running, done };
   }, [analysisEntries, analysisListItems, searchItemNameByKey]);
 
-  const stockCodeKey = useMemo(() => {
-    if (!stockCodeParam) return null;
-    const parsed = parseStockCodeParam(stockCodeParam);
-    if (!parsed?.symbol) return null;
-    if (parsed.market) return `${parsed.market}.${parsed.symbol}`;
-    const matched = analysisListItems.find(
-      (item) => item.symbol.toLowerCase() === parsed.symbol.toLowerCase(),
-    );
-    return matched ? `${matched.market}.${matched.symbol}` : null;
-  }, [analysisListItems, stockCodeParam]);
-
-  const updateStockCodeParam = useCallback(
-    (code: string) => {
+  const updateAnalyzeQueryParam = useCallback(
+    (query: { recordId?: string | null }) => {
       const next = new URLSearchParams(searchParams.toString());
-      next.set("stockCode", code);
-      const query = next.toString();
-      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+      next.delete("record_id");
+      if (query.recordId) next.set("record_id", query.recordId);
+      const qs = next.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
     [pathname, router, searchParams],
   );
 
+  useEffect(() => {
+    // URL 仅保留 record_id；但只要存在 pending task，页面刷新后也应继续任务态。
+    const pendingTasks = readPendingAnalyzeTasks();
+    setTaskPendingList(pendingTasks);
+    const activeTask = pickActivePendingAnalyzeTask(pendingTasks);
+    if (!activeTask) {
+      setTaskQueryTaskId(null);
+      setTaskQueryStock(null);
+      return;
+    }
+    const symbol = String(activeTask.symbol ?? "").trim().toUpperCase();
+    const market = activeTask.market;
+    const exchange = String(activeTask.exchange ?? "").trim() || undefined;
+    const stockName = String(activeTask.stockName ?? "").trim() || undefined;
+    if (!activeTask.taskId || !symbol || (market !== "CN" && market !== "HK" && market !== "US")) {
+      setTaskQueryTaskId(null);
+      setTaskQueryStock(null);
+      return;
+    }
+    setTaskQueryTaskId(activeTask.taskId);
+    setTaskQueryStock({ market, symbol, exchange, stockName });
+  }, [recordIdParam, taskQueryTaskId]);
+
+  useEffect(() => {
+    if (!taskQueryTaskId || loading) {
+      setTaskQueryProgress(null);
+      return;
+    }
+
+    let canceled = false;
+    const poll = async () => {
+      try {
+        const task = await requestAnalyzeTaskStatus(taskQueryTaskId);
+        if (canceled) return;
+        const progressValue =
+          typeof task.progress === "number" && Number.isFinite(task.progress)
+            ? Math.max(0, Math.min(100, Math.round(task.progress)))
+            : 0;
+        const progressMessage = String(task.progress_message ?? "").trim() || "正在分析中...";
+        setTaskQueryProgress({ progress: progressValue, message: progressMessage });
+
+        const status = String(task.status ?? "").toUpperCase();
+        const hasResult = task.result !== null && task.result !== undefined;
+        const taskError = String(task.error ?? "").trim();
+        if (taskError) {
+          try {
+            const rest = readPendingAnalyzeTasks().filter((x) => x.taskId !== taskQueryTaskId);
+            writePendingAnalyzeTasks(rest);
+            setTaskPendingList(rest);
+          } catch {
+            // Ignore localStorage failures.
+          }
+          setTaskErrorMessage(taskError);
+          setTaskErrorOpen(true);
+          setTaskQueryTaskId(null);
+          return;
+        }
+        if (status === "COMPLETED" || status === "SUCCESS" || status === "DONE" || hasResult) {
+          const recordId = String(task.record_id ?? "").trim();
+          try {
+            const rest = readPendingAnalyzeTasks().filter((x) => x.taskId !== taskQueryTaskId);
+            writePendingAnalyzeTasks(rest);
+            setTaskPendingList(rest);
+          } catch {
+            // Ignore localStorage failures.
+          }
+          setTaskDoneStockLabel(
+            taskQueryStock
+              ? taskQueryStock.stockName
+                ? `${taskQueryStock.stockName}（${formatAnalyzeBoardSymbol(taskQueryStock.market, taskQueryStock.symbol)}）`
+                : formatAnalyzeBoardSymbol(taskQueryStock.market, taskQueryStock.symbol)
+              : null,
+          );
+          setTaskDoneRecordId(recordId || null);
+          setTaskDoneOpen(true);
+          setTaskQueryTaskId(null);
+          return;
+        }
+        if (status === "FAILED" || status === "ERROR" || status === "CANCELLED") {
+          try {
+            const rest = readPendingAnalyzeTasks().filter((x) => x.taskId !== taskQueryTaskId);
+            writePendingAnalyzeTasks(rest);
+            setTaskPendingList(rest);
+          } catch {
+            // Ignore localStorage failures.
+          }
+          const errorMessage = String(task.error ?? "").trim() || "分析任务执行失败";
+          setTaskQueryProgress({ progress: progressValue, message: errorMessage });
+        }
+      } catch {
+        // Keep the task loading state; next polling round may recover.
+      }
+    };
+
+    void poll();
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 5000);
+
+    return () => {
+      canceled = true;
+      window.clearInterval(timer);
+    };
+  }, [loading, taskQueryTaskId, updateAnalyzeQueryParam]);
+
   const focusReportPanel = useCallback(() => {
     requestAnimationFrame(() => {
-      analyzeReportScrollRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      window.scrollTo({ top: 0, behavior: "smooth" });
     });
   }, []);
 
   const selectAnalysisFromHistory = useCallback(
-    (item: { id: string; market: AnalysisInput["market"]; symbol: string }) => {
+    (item: { id: string; recordId?: string; market: AnalysisInput["market"]; symbol: string }) => {
       setActiveAnalysisId(item.id);
       setMarket(item.market);
-      updateStockCodeParam(`${item.market}.${item.symbol}`);
+      updateAnalyzeQueryParam({ recordId: item.recordId ?? null });
       focusReportPanel();
     },
-    [focusReportPanel, updateStockCodeParam],
+    [focusReportPanel, updateAnalyzeQueryParam],
   );
 
   useEffect(() => {
@@ -883,8 +1029,8 @@ function AnalyzePageContent() {
       return;
     }
     setActiveAnalysisId((prev) => {
-      if (stockCodeKey) {
-        const matched = analysisListItems.find((item) => `${item.market}.${item.symbol}` === stockCodeKey);
+      if (recordIdParam) {
+        const matched = analysisListItems.find((item) => item.recordId === recordIdParam);
         if (matched) return matched.id;
       }
       if (prev && analysisListItems.some((x) => x.id === prev)) return prev;
@@ -892,7 +1038,7 @@ function AnalyzePageContent() {
       if (saved && analysisListItems.some((x) => x.id === saved)) return saved;
       return analysisListItems[0].id;
     });
-  }, [analysisListItems, localHistoryLoaded, stockCodeKey]);
+  }, [analysisListItems, localHistoryLoaded, recordIdParam]);
 
   useEffect(() => {
     if (!localHistoryLoaded) return;
@@ -904,8 +1050,34 @@ function AnalyzePageContent() {
     () => analysisEntries.find((x) => x.id === activeAnalysisId) ?? report ?? null,
     [analysisEntries, activeAnalysisId, report],
   );
+  const isTaskQueryMode = Boolean(taskQueryTaskId);
 
   const activeIsLatest = !!(activeReport && report && activeReport.id === report.id);
+  const shouldShowTaskProgress = loading || isTaskQueryMode;
+  const loadingStockLabel = useMemo(() => {
+    if (!currentInput?.symbol) return null;
+    const key = `${currentInput.market}.${currentInput.symbol}`;
+    const name = searchItemNameByKey.get(key)?.trim();
+    const code = formatAnalyzeBoardSymbol(currentInput.market, currentInput.symbol);
+    return name ? `${name}（${code}）` : code;
+  }, [currentInput?.market, currentInput?.symbol, searchItemNameByKey]);
+  const taskPendingRows = useMemo(() => {
+    return taskPendingList
+      .map((item) => {
+        const symbol = String(item.symbol ?? "").trim().toUpperCase();
+        const market = item.market;
+        if (!symbol || (market !== "CN" && market !== "HK" && market !== "US")) return null;
+        const code = formatAnalyzeBoardSymbol(market, symbol);
+        const stockName = String(item.stockName ?? "").trim();
+        return {
+          taskId: String(item.taskId ?? "").trim(),
+          label: stockName ? `${stockName}（${code}）` : code,
+          createdAt: item.createdAt ?? 0,
+        };
+      })
+      .filter((x): x is { taskId: string; label: string; createdAt: number } => Boolean(x?.taskId))
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }, [taskPendingList]);
   const activeSymbolName = useMemo(() => {
     if (!activeReport) return "未命名标的";
     const key = `${activeReport.market}.${activeReport.symbol}`;
@@ -1083,17 +1255,6 @@ function AnalyzePageContent() {
   }, [pendingHandoff, setPendingHandoff]);
 
   useEffect(() => {
-    if (searchKeyword.trim() || recentKeys.length === 0) return;
-    const first = recentKeys[0];
-    const [mk, sym] = first.split(".") as [AnalysisInput["market"], string];
-    if (mk && sym) {
-      setSearchKeyword(first);
-      setSelectedSearchKey(null);
-      setMarket(mk);
-    }
-  }, [recentKeys, searchKeyword]);
-
-  useEffect(() => {
     const keyword = searchKeyword.trim();
     // 输入框未聚焦/下拉关闭时，不应继续触发远程搜索。
     if (!searchComboboxOpen) {
@@ -1147,18 +1308,62 @@ function AnalyzePageContent() {
     setSearchKeyword(`${item.name}（${formatAnalyzeBoardSymbol(item.market, item.symbol)}）`);
   };
 
-  const executeAnalysis = async (input: AnalysisInput, displayKeyword: string) => {
+  const executeAnalysis = async (
+    input: AnalysisInput,
+    displayKeyword: string,
+    stockName?: string,
+    stockExchange?: string,
+  ) => {
+    setConfigSubmitting(true);
     setMarket(input.market);
     setSearchKeyword(displayKeyword);
     setSelectedSearchKey(null);
-    updateStockCodeParam(`${input.market}.${input.symbol}`);
+    updateAnalyzeQueryParam({ recordId: null });
     setRiskTier(input.risk_tier);
     setHoldingHorizon(input.holding_horizon);
     setLinkedPreference(input.preference_snapshot ?? null);
-    const ok = await generateReport(input);
-    if (ok && useNotificationPreferencesStore.getState().notifyTaskComplete) {
-      toast.success("报告已更新");
-    } else if (useAnalysisStore.getState().error === "quota") setQuotaOpen(true);
+    const ok = await generateReport(input, {
+      onTaskCreated: ({ taskId }) => {
+        setConfigSubmitting(false);
+        setSearchKeyword("");
+        setSelectedSearchKey(null);
+        try {
+          const prev = readPendingAnalyzeTasks().filter((x) => x.taskId !== taskId);
+          prev.push({
+            taskId,
+            createdAt: Date.now(),
+            symbol: input.symbol,
+            market: input.market,
+            exchange: stockExchange?.trim() || undefined,
+            stockName: stockName?.trim() || undefined,
+          });
+          writePendingAnalyzeTasks(prev);
+          setTaskPendingList(prev);
+        } catch {
+          // Ignore localStorage failures.
+        }
+        setTaskQueryTaskId(taskId);
+      },
+    });
+    setConfigSubmitting(false);
+    if (ok) {
+      const latest = useAnalysisStore.getState().report;
+      if (latest?.record_id) {
+        try {
+          const rest = readPendingAnalyzeTasks().filter((x) => x.taskId !== taskQueryTaskId);
+          writePendingAnalyzeTasks(rest);
+          setTaskPendingList(rest);
+        } catch {
+          // Ignore localStorage failures.
+        }
+        setTaskQueryTaskId(null);
+      }
+      if (useNotificationPreferencesStore.getState().notifyTaskComplete) {
+        toast.success("报告已更新");
+      }
+    } else if (useAnalysisStore.getState().error === "quota") {
+      setQuotaOpen(true);
+    }
     return ok;
   };
 
@@ -1222,7 +1427,8 @@ function AnalyzePageContent() {
   const openWebReport = () => {
     if (!activeReport) return;
     const next = new URLSearchParams(searchParams.toString());
-    next.set("stockCode", `${activeReport.market}.${activeReport.symbol}`);
+    if (activeReport.record_id) next.set("record_id", activeReport.record_id);
+    else next.delete("record_id");
     const query = next.toString();
     const href = query ? `${pathname}?${query}` : pathname;
     window.open(href, "_blank", "noopener,noreferrer");
@@ -1230,6 +1436,12 @@ function AnalyzePageContent() {
 
   const statusLiveMessage = loading
     ? `报告生成中，请稍候。${progress?.message ? `当前进度：${progress.progress}%（${progress.message}）` : ""}`
+    : isTaskQueryMode
+      ? `分析任务进行中，正在等待结果。${
+          taskQueryProgress
+            ? `当前进度：${taskQueryProgress.progress}%（${taskQueryProgress.message}）`
+            : ""
+        }`
     : error === "unknown"
       ? "报告生成失败，请调整参数后重试。"
       : activeReport
@@ -1263,7 +1475,7 @@ function AnalyzePageContent() {
             ariaLabel="搜索股票"
             inputId="analyze-stock-search-input"
             listId="analyze-stock-search-listbox"
-            formatCode={(item) => `${item.market}.${item.symbol}`}
+            formatCode={(item) => formatAnalyzeBoardSymbol(item.market, item.symbol)}
             onSelect={(item) => applySearchItem(item)}
             onOpenChange={setSearchComboboxOpen}
             onResolveEnter={(rawQuery, activeItem) => {
@@ -1280,25 +1492,56 @@ function AnalyzePageContent() {
               setConfigOpen(true);
             }}
           />
-          <Button type="button" disabled={loading} onClick={() => setConfigOpen(true)}>
-            {loading ? (
-              <>
-                <Spinner />
-                {progress?.progress && progress.progress > 0
-                  ? `分析中 ${progress.progress}%`
-                  : "分析中"}
-              </>
-            ) : (
-              "分析"
-            )}
+          <Button type="button" onClick={() => setConfigOpen(true)}>
+            分析
           </Button>
           <InfoTip label="搜索格式说明">
             <span className="block">支持代码或简称搜索；使用 CN.600519 可指定市场。</span>
           </InfoTip>
         </div>
-        <Button type="button" variant="outline" className="shrink-0" onClick={() => router.push("/app/pick")}>
-          选股
-        </Button>
+        <div className="flex items-center gap-2">
+          {(shouldShowTaskProgress || taskPendingRows.length > 0) && (
+            <Popover>
+              <PopoverTrigger
+                render={
+                  <Button type="button" variant="outline" className="shrink-0">
+                    {shouldShowTaskProgress ? <Spinner /> : null}
+                    任务进度
+                    {taskPendingRows.length > 0 ? `（${taskPendingRows.length}）` : ""}
+                  </Button>
+                }
+              />
+              <PopoverContent align="end" className="w-[360px] p-3">
+                <div className="space-y-2">
+                  <p className="flex items-center gap-1.5 text-sm font-medium leading-none">
+                    <Clock3Icon className="size-4" />
+                    分析任务
+                  </p>
+                  <div className="space-y-1 text-sm">
+                    {taskPendingRows.length ? (
+                      taskPendingRows.slice(0, 8).map((task) => (
+                        <div key={task.taskId} className="flex items-center justify-between gap-2">
+                          <span className="truncate">{task.label}</span>
+                          <span className="text-muted-foreground shrink-0 text-xs">
+                            {task.taskId === taskQueryTaskId
+                              ? `${taskQueryProgress?.progress ? `${taskQueryProgress.progress}%` : "进行中"}`
+                              : "排队中"}
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-muted-foreground text-xs">当前无进行中的任务。</p>
+                    )}
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => router.push("/app/pick")}>
+            <TargetIcon data-icon="inline-start" />
+            选股
+          </Button>
+        </div>
       </div>
       {linkedPreference ? (
         <div className="flex flex-wrap items-center gap-2 print:hidden">
@@ -1346,18 +1589,6 @@ function AnalyzePageContent() {
         {isInitialHydrating ? (
           <AnalyzeReportSkeleton />
         ) : null}
-        {loading && !report ? (
-          <PageLoadingState
-            className="print:analyze-hide"
-            title="正在生成择时报告"
-            description={
-              progress?.message
-                ? `${progress.message}${progress.progress > 0 ? `（${progress.progress}%）` : ""}`
-                : "正在计算评分与结论。"
-            }
-          />
-        ) : null}
-
         {error === "unknown" ? (
           <PageErrorState
             className="print:analyze-hide"
@@ -1387,11 +1618,7 @@ function AnalyzePageContent() {
 
         {activeReport ? (
           <>
-            <div
-              ref={analyzeReportScrollRef}
-              id="analyze-report-root"
-              className="flex min-w-0 flex-col gap-6 print:break-inside-avoid"
-            >
+            <div id="analyze-report-root" className="flex min-w-0 flex-col gap-6 print:break-inside-avoid">
               <header className="sticky top-4 z-20 border-b bg-background/95 py-3 backdrop-blur supports-backdrop-filter:bg-background/80 print:static print:border-0">
                 <div className="flex w-full flex-col gap-2">
                   <div className="flex items-start justify-between gap-2">
@@ -1597,17 +1824,25 @@ function AnalyzePageContent() {
                               ? new Date(liveQuote.updatedAt).toLocaleTimeString("zh-CN", { hour12: false })
                               : "--:--:--"}
                           </Badge>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-7 gap-1.5 px-2"
-                            onClick={() => void handleRefreshAnalyzeQuote()}
-                            disabled={quoteRefreshing}
-                          >
-                            <RotateCwIcon className={`size-3.5 ${quoteRefreshing ? "animate-spin" : ""}`} />
-                            刷新
-                          </Button>
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="icon-sm"
+                                  aria-label="刷新行情"
+                                  onClick={() => void handleRefreshAnalyzeQuote()}
+                                  disabled={quoteRefreshing}
+                                >
+                                  <RotateCwIcon className={`size-3.5 ${quoteRefreshing ? "animate-spin" : ""}`} />
+                                </Button>
+                              }
+                            />
+                            <TooltipContent side="bottom" align="end">
+                              刷新行情
+                            </TooltipContent>
+                          </Tooltip>
                         </div>
                       </div>
                       <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2 xl:grid-cols-3">
@@ -1631,8 +1866,7 @@ function AnalyzePageContent() {
                     </section>
 
                     <section className="rounded-md border p-3">
-                      <p className="text-muted-foreground text-xs">市场情绪</p>
-                      <p className="text-sm">恐惧贪婪指数</p>
+                      <h2 className="text-sm font-medium">市场情绪（恐惧贪婪指数）</h2>
                       <div className="mt-2 flex items-end justify-between">
                         <p className="text-2xl font-semibold">51</p>
                         <Badge variant="secondary">{getSentimentLabel(51)}</Badge>
@@ -1788,16 +2022,16 @@ function AnalyzePageContent() {
       <AnalyzeRunConfigDialog
         open={configOpen}
         onOpenChange={setConfigOpen}
-        loading={loading}
+        loading={configSubmitting}
         symbolSearchItems={searchItems}
         searchKeyword={searchKeyword}
         market={market}
         riskTier={riskTier}
         holdingHorizon={holdingHorizon}
         linkedPreference={linkedPreference}
-        onConfirm={async ({ input, displayKeyword }) => {
+        onConfirm={async ({ input, displayKeyword, stockName, stockExchange }) => {
           setConfigOpen(false);
-          return await executeAnalysis(input, displayKeyword);
+          return await executeAnalysis(input, displayKeyword, stockName, stockExchange);
         }}
       />
 
@@ -1815,6 +2049,61 @@ function AnalyzePageContent() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <AlertDialog open={taskDoneOpen} onOpenChange={setTaskDoneOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>分析任务已完成</AlertDialogTitle>
+            <AlertDialogDescription>
+              {taskDoneStockLabel ? `标的 ${taskDoneStockLabel} 的分析报告已生成。` : "你的分析报告已生成。"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setTaskDoneOpen(false);
+                setTaskDoneRecordId(null);
+                setTaskDoneStockLabel(null);
+              }}
+            >
+              我知道了
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setTaskDoneOpen(false);
+                setTaskDoneStockLabel(null);
+                if (!taskDoneRecordId) return;
+                updateAnalyzeQueryParam({ recordId: taskDoneRecordId });
+              }}
+            >
+              去查看
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={taskErrorOpen} onOpenChange={setTaskErrorOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>分析任务异常</AlertDialogTitle>
+            <AlertDialogDescription>{taskErrorMessage || "任务执行失败，请稍后重试。"}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="sm:justify-end">
+            <Button
+              type="button"
+              onClick={() => {
+                setTaskErrorOpen(false);
+                setTaskErrorMessage("");
+              }}
+            >
+              我知道了
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
     </AppPageLayout>
   );
 }

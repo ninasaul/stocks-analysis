@@ -99,6 +99,8 @@ export type PlanMetrics = z.infer<typeof planMetricsSchema>;
 
 export const timingReportSchema = z.object({
   id: z.string(),
+  record_id: z.string().optional(),
+  task_id: z.string().optional(),
   symbol: z.string(),
   market: marketSchema,
   timeframe: z.enum(["daily", "weekly"]),

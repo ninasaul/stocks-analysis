@@ -21,7 +21,10 @@ type AnalysisState = {
   loading: boolean;
   progress: AnalyzeProgress | null;
   error: string | null;
-  generateReport: (input: AnalysisInput) => Promise<boolean>;
+  generateReport: (
+    input: AnalysisInput,
+    options?: { onTaskCreated?: (task: { taskId: string; recordId?: string }) => void },
+  ) => Promise<boolean>;
   buildMarkdown: () => string;
   clearReport: () => void;
 };
@@ -35,12 +38,13 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
   progress: null,
   error: null,
   clearReport: () => set({ report: null, error: null, currentInput: null, progress: null }),
-  generateReport: async (input) => {
+  generateReport: async (input, options) => {
     const isGuest = useAuthStore.getState().session === "guest";
     set({ loading: true, progress: null, error: null, currentInput: input });
     try {
       const report = await requestTimingReport(input, {
         onProgress: (progress) => set({ progress }),
+        onTaskCreated: options?.onTaskCreated,
       });
       timingReportSchema.parse(report);
       set({ report, loading: false, progress: null, error: null });

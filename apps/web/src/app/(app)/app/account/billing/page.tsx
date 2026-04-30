@@ -207,14 +207,15 @@ export default function AccountBillingPage() {
           ) : null}
           {orderError ? <p className="text-sm text-destructive">{orderError}</p> : null}
           {remoteApiCalls.length > 0 ? (
-            <ul className="divide-border flex flex-col divide-y rounded-md border">
+            <ul className="flex flex-col gap-2">
               {remoteApiCalls.map((item) => (
-                <li key={item.id} className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <li
+                  key={item.id}
+                  className="bg-muted/30 flex flex-col gap-2 rounded-md px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                >
                   <div className="min-w-0 space-y-1">
                     <p className="text-sm font-medium truncate">{item.endpoint}</p>
-                    <p className="text-muted-foreground text-xs tabular-nums">
-                      {formatPlacedAt(item.call_time)} · 日志 {item.id}
-                    </p>
+                    <p className="text-muted-foreground text-xs tabular-nums">{formatPlacedAt(item.call_time)}</p>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
                     <span className="text-sm font-medium tabular-nums">{item.method}</span>
