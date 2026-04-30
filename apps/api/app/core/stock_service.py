@@ -18,6 +18,7 @@ from .logging import logger
 
 class StockService:
     _instance = None
+    _data_loaded = False  # 类级标志，跨进程共享
     
     def __new__(cls):
         if cls._instance is None:
@@ -25,7 +26,7 @@ class StockService:
         return cls._instance
     
     def __init__(self):
-        if not hasattr(self, 'initialized'):
+        if not StockService._data_loaded:
             # 定义数据文件路径
             data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data')
             os.makedirs(data_dir, exist_ok=True)
@@ -106,8 +107,7 @@ class StockService:
             else:
                 self._fetch_and_save_concept_data(concept_file)
 
-            self.stock_quote_cache = {}
-            self.initialized = True
+            StockService._data_loaded = True
     
     def _fetch_and_save_stock_data(self, csv_file):
         """从网络获取股票数据并保存到文件"""
