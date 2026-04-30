@@ -702,34 +702,7 @@ async def create_analyze_task(
     )
 
 
-@router.get("/analyze/{task_id}", response_model=AnalyzeStatusResponse)
-async def get_analyze_task_status(
-    task_id: str,
-    current_user: User = Depends(get_current_user)
-) -> AnalyzeStatusResponse:
-    """
-    获取异步股票分析任务状态和结果
-    
-    Args:
-        task_id: 任务ID
-        
-    Returns:
-        任务状态、进度和结果（如果已完成）
-    """
-    task = task_manager.get_task_for_user(task_id, current_user.id)
-    
-    if task is None:
-        raise HTTPException(status_code=404, detail="任务不存在或无权访问")
-    
-    return AnalyzeStatusResponse(
-        task_id=task["task_id"],
-        record_id=task.get("params", {}).get("record_id"),
-        status=task["status"],
-        progress=task["progress"],
-        progress_message=task["progress_message"],
-        result=task.get("result"),
-        error=task.get("error")
-    )
+
 
 
 @router.get("/analyze", deprecated=True)
@@ -1801,3 +1774,33 @@ def get_history_by_record_id(
     except Exception as e:
         logger.error(f"获取单条历史分析记录失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取历史记录失败: {str(e)}")
+
+
+@router.get("/analyze/{task_id}", response_model=AnalyzeStatusResponse)
+async def get_analyze_task_status(
+    task_id: str,
+    current_user: User = Depends(get_current_user)
+) -> AnalyzeStatusResponse:
+    """
+    获取异步股票分析任务状态和结果
+    
+    Args:
+        task_id: 任务ID
+        
+    Returns:
+        任务状态、进度和结果（如果已完成）
+    """
+    task = task_manager.get_task_for_user(task_id, current_user.id)
+    
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在或无权访问")
+    
+    return AnalyzeStatusResponse(
+        task_id=task["task_id"],
+        record_id=task.get("params", {}).get("record_id"),
+        status=task["status"],
+        progress=task["progress"],
+        progress_message=task["progress_message"],
+        result=task.get("result"),
+        error=task.get("error")
+    )
