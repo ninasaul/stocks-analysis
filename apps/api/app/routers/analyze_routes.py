@@ -122,7 +122,7 @@ def save_analysis_result(user_id: int, ticker: str, result: dict, record_id: str
         return False
 
 
-async def generate_target_price_and_execution_plan(stock_name: str, ticker: str, price_range: dict, signal: str, fundamental_result: dict, llm, current_user, preset_id: int = None, user_config_id: int = None) -> tuple:
+async def generate_target_price_and_execution_plan(stock_name: str, ticker: str, price_range: dict, signal: str, fundamental_result: dict, llm, user_id: int = None, preset_id: int = None, user_config_id: int = None) -> tuple:
     """
     生成目标价格分析和执行计划
     
@@ -133,7 +133,7 @@ async def generate_target_price_and_execution_plan(stock_name: str, ticker: str,
         signal: 交易信号
         fundamental_result: 基本面分析结果
         llm: LLM客户端
-        current_user: 当前用户对象（用于记录使用量）
+        user_id: 用户ID（用于记录使用量）
         preset_id: 预设ID（用于记录使用量）
         user_config_id: 用户配置ID（用于记录使用量）
     
@@ -185,7 +185,7 @@ async def generate_target_price_and_execution_plan(stock_name: str, ticker: str,
         # 异步调用LLM生成目标价格分析
         target_price_response, target_price_tokens = await LLMService.wrap_chat(
             llm_client=llm,
-            user_id=current_user.id,
+            user_id=user_id,
             prompt=target_price_prompt,
             response_format="json",
             preset_id=preset_id,
@@ -243,7 +243,7 @@ async def generate_target_price_and_execution_plan(stock_name: str, ticker: str,
         # 异步调用LLM生成执行计划
         execution_plan_response, execution_plan_tokens = await LLMService.wrap_chat(
             llm_client=llm,
-            user_id=current_user.id,
+            user_id=user_id,
             prompt=execution_plan_prompt,
             response_format="json",
             preset_id=preset_id,
@@ -520,7 +520,7 @@ async def run_analysis_background(task_id: str, user_id: int, params: dict):
             task_manager.update_task_progress(task_id, 80, "正在生成目标价格和执行计划...")
             try:
                 target_price_analysis, execution_plan, llm_error, llm_error_detail, target_tokens = await generate_target_price_and_execution_plan(
-                    stock_name, ticker, price_range, final_signal, fundamental_result, llm, None,
+                    stock_name, ticker, price_range, final_signal, fundamental_result, llm, user_id,
                     preset_id=preset_id, user_config_id=user_config_id
                 )
                 token_usage["target_price"] = target_tokens
@@ -1011,7 +1011,7 @@ async def analyze_stock(
     if depth >= 3:
         try:
             target_price_analysis, execution_plan, llm_error, llm_error_detail, target_tokens = await generate_target_price_and_execution_plan(
-                stock_name, ticker, price_range, final_signal, fundamental_result, llm, current_user,
+                stock_name, ticker, price_range, final_signal, fundamental_result, llm, current_user.id,
                 preset_id=preset_id, user_config_id=user_config_id
             )
             token_usage["target_price"] = target_tokens
