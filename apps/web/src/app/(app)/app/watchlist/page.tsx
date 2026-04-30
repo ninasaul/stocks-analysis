@@ -3,10 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowDownIcon,
+  ArrowUpIcon,
   ChartLineIcon,
   CircleHelpIcon,
   EllipsisVerticalIcon,
-  Clock3Icon,
+  MinusIcon,
   RotateCwIcon,
   Trash2Icon,
 } from "lucide-react";
@@ -54,7 +56,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import {
   Item,
-  ItemActions,
   ItemContent,
   ItemDescription,
   ItemHeader,
@@ -135,8 +136,8 @@ function quoteDataSubtitle(quote: StockQuote): string | null {
   const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return null;
   const hm = d.toLocaleTimeString("zh-CN", { hour12: false });
-  if (quote.source?.includes("eastmoney")) return `东方财富 · ${hm}`;
-  return hm;
+  if (quote.source?.includes("eastmoney")) return `来源：东方财富｜更新于 ${hm}`;
+  return `更新于 ${hm}`;
 }
 
 function inferExchange(market: AnalysisInput["market"], symbol: string): string {
@@ -723,10 +724,7 @@ export default function WatchlistPage() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <ul
-          className="grid grid-cols-[repeat(auto-fit,minmax(15rem,1fr))] gap-3 2xl:grid-cols-5"
-          aria-label="自选标的列表"
-        >
+        <ul className="grid grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-3 2xl:grid-cols-5" aria-label="自选标的列表">
           {filteredEntries.map((entry) => {
             const k = entryKey(entry);
             const stockCode = `${entry.market}.${entry.symbol}`;
@@ -735,61 +733,71 @@ export default function WatchlistPage() {
             const quoteUnsupported = entry.market !== "CN";
             const tone = quote ? quoteToneClass(quote.changePercent) : "text-muted-foreground";
             const quoteMeta = quote ? quoteDataSubtitle(quote) : null;
+            const trend =
+              quote && quote.changePercent > 0 ? "up" : quote && quote.changePercent < 0 ? "down" : "flat";
             return (
-              <Item
-                key={k}
-                render={<li />}
-                variant="outline"
-                size="sm"
-              >
+              <Item key={k} render={<li />} variant="outline" size="sm" className="group relative">
                 <ItemHeader>
-                  <ItemContent>
-                    <ItemTitle>{entry.name}</ItemTitle>
-                    <ItemDescription>
-                      <span className="text-xs">{compactBoardCode(entry.market, entry.symbol)}</span>
-                      {" "}
+                  <ItemContent className="gap-0">
+                    <ItemTitle className="max-w-[10.5rem] truncate">{entry.name}</ItemTitle>
+                    <ItemDescription className="mt-0.5 flex items-center gap-1.5">
+                      <span className="text-muted-foreground text-[11px] tracking-wide">
+                        {compactBoardCode(entry.market, entry.symbol)}
+                      </span>
                       <Badge variant="secondary">{entry.market === "CN" ? "A股" : entry.market}</Badge>
                     </ItemDescription>
                   </ItemContent>
                   <ItemContent>
-                    <div className={cn("flex flex-col gap-1 text-right tabular-nums", tone)}>
-                      <div className="text-base font-semibold leading-none">
-                        {quote ? quote.currentPrice.toFixed(2) : quoteLoading ? "--" : "--"}
+                    <div className={cn("flex min-w-[6.8rem] flex-col items-end gap-0.5 text-right tabular-nums", tone)}>
+                      <div className={cn("text-base font-semibold leading-none", quoteLoading && "animate-pulse")}>
+                        {quote ? quote.currentPrice.toFixed(2) : "--"}
                       </div>
-                      <div className="flex items-center justify-end gap-1 text-xs leading-tight">
-                        <span>{quote ? formatSignedPct(quote.changePercent) : quoteUnsupported ? "未接入" : "--"}</span>
-                        {quoteMeta ? (
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon-xs"
-                                  aria-label={`行情时间：${quoteMeta}`}
-                                  className="text-muted-foreground size-4"
-                                >
-                                  <Clock3Icon className="size-3.5" />
-                                </Button>
-                              }
-                            />
-                            <TooltipContent side="left" align="end" className="max-w-xs">
-                              {quoteMeta}
-                            </TooltipContent>
-                          </Tooltip>
-                        ) : null}
+                      <div className="flex items-center justify-end gap-1 text-[11px] leading-tight">
+                        <span className={cn("inline-flex items-center gap-0.5", !quote && "text-muted-foreground")}>
+                          {quote ? (
+                            trend === "up" ? (
+                              <ArrowUpIcon className="size-3" />
+                            ) : trend === "down" ? (
+                              <ArrowDownIcon className="size-3" />
+                            ) : (
+                              <MinusIcon className="size-3" />
+                            )
+                          ) : null}
+                          {quote ? (
+                            quoteMeta ? (
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <span className="cursor-help decoration-dotted underline-offset-2">
+                                      {formatSignedPct(quote.changePercent)}
+                                    </span>
+                                  }
+                                />
+                                <TooltipContent side="left" align="end" className="max-w-xs">
+                                  {quoteMeta}
+                                </TooltipContent>
+                              </Tooltip>
+                            ) : (
+                              formatSignedPct(quote.changePercent)
+                            )
+                          ) : quoteUnsupported ? (
+                            "未接入"
+                          ) : (
+                            "--"
+                          )}
+                        </span>
                       </div>
                     </div>
                   </ItemContent>
-                  <ItemActions>
+                  <div className="pointer-events-none absolute top-2 right-2 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         render={
                           <Button
                             type="button"
                             size="icon-sm"
-                            variant="ghost"
-                            className="text-muted-foreground"
+                            variant="outline"
+                            className="text-foreground bg-background/95 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/85"
                             aria-label={`操作：${entry.name}`}
                           >
                             <EllipsisVerticalIcon />
@@ -813,7 +821,7 @@ export default function WatchlistPage() {
                         </DropdownMenuGroup>
                       </DropdownMenuContent>
                     </DropdownMenu>
-                  </ItemActions>
+                  </div>
                 </ItemHeader>
               </Item>
             );

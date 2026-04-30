@@ -11,6 +11,7 @@ import {
   GlobeIcon,
   HistoryIcon,
   MapPinIcon,
+  RotateCwIcon,
   TargetIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -23,9 +24,9 @@ import {
   parseAnalyzeSearchInput,
   type AnalyzeSymbolSearchItem,
 } from "@/lib/analyze-symbol-search";
-import { requestStockSearch } from "@/lib/api/stocks";
+import { requestStockQuote, requestStockSearch, type StockQuote } from "@/lib/api/stocks";
 import { requestAnalyzeHistory, requestReportFile } from "@/lib/api/timing";
-import { buildMockBaseQuote, hashCode, type MockBaseQuote } from "@/lib/mock-base-quote";
+import { hashCode } from "@/lib/mock-base-quote";
 import { analyzeCopy, subscriptionTierPublicCopy } from "@/lib/copy";
 import { useAnalysisStore } from "@/stores/use-analysis-store";
 import { useArchiveStore } from "@/stores/use-archive-store";
@@ -165,7 +166,17 @@ type AnalysisListItem = {
   status: "done" | "running";
 };
 
-type BasicQuote = MockBaseQuote;
+type BasicQuote = {
+  price: number;
+  change: number;
+  changePct: number;
+  open: number;
+  high: number;
+  low: number;
+  volume: number;
+  turnover: number;
+  updatedAt: number;
+};
 
 type FactItem = {
   label: string;
@@ -179,6 +190,8 @@ type TargetPriceRow = {
   target: string;
   rationale: string;
 };
+
+type QuoteViewStatus = "idle" | "cached" | "live" | "error";
 
 const LOCAL_ANALYSIS_HISTORY_KEY = "zhputian-analysis-history-v1";
 const LOCAL_ANALYSIS_ACTIVE_ID_KEY = "zhputian-analysis-active-id-v1";
@@ -317,25 +330,17 @@ function parseStockCodeParam(raw: string) {
 
 const fuzzySearchScore = fuzzyAnalyzeSymbolScore;
 
-function tickQuote(prev: BasicQuote): BasicQuote {
-  const jitter = (Math.random() - 0.5) * 0.004;
-  const price = Number((prev.price * (1 + jitter)).toFixed(2));
-  const change = Number((prev.change + prev.price * jitter * 0.4).toFixed(2));
-  const changePct = Number(((change / (prev.price - change || 1)) * 100).toFixed(2));
-  const high = Number(Math.max(prev.high, price).toFixed(2));
-  const low = Number(Math.min(prev.low, price).toFixed(2));
-  const volume = prev.volume + Math.floor(60_000 + Math.random() * 140_000);
-  const turnover = Number((prev.turnover + price * 100_000).toFixed(0));
+function toBasicQuote(quote: StockQuote): BasicQuote {
   return {
-    ...prev,
-    price,
-    change,
-    changePct,
-    high,
-    low,
-    volume,
-    turnover,
-    updatedAt: Date.now(),
+    price: quote.currentPrice,
+    change: quote.change,
+    changePct: quote.changePercent,
+    open: quote.open ?? quote.currentPrice,
+    high: quote.high ?? quote.currentPrice,
+    low: quote.low ?? quote.currentPrice,
+    volume: quote.volume ?? 0,
+    turnover: quote.amount ?? 0,
+    updatedAt: quote.cachedAt,
   };
 }
 
@@ -620,6 +625,8 @@ function AnalyzePageContent() {
   const [localHistoryLoaded, setLocalHistoryLoaded] = useState(false);
   const [localHistory, setLocalHistory] = useState<TimingReport[]>([]);
   const [liveQuote, setLiveQuote] = useState<BasicQuote | null>(null);
+  const [quoteViewStatus, setQuoteViewStatus] = useState<QuoteViewStatus>("idle");
+  const [quoteRefreshing, setQuoteRefreshing] = useState(false);
   const [selectedSearchKey, setSelectedSearchKey] = useState<string | null>(null);
   const [searchComboboxOpen, setSearchComboboxOpen] = useState(false);
   const [remoteSearching, setRemoteSearching] = useState(false);
@@ -998,17 +1005,64 @@ function AnalyzePageContent() {
 
   const targetPriceCurrency = activeReport ? getCurrencyLabel(activeReport.market) : "HK$";
 
+  const quoteStatusLabel = useMemo(() => {
+    if (quoteViewStatus === "live") return "实时";
+    if (quoteViewStatus === "cached") return "缓存";
+    if (quoteViewStatus === "error") return "更新失败";
+    return "未启用";
+  }, [quoteViewStatus]);
+
+  const handleRefreshAnalyzeQuote = useCallback(async () => {
+    if (!activeReport || activeReport.market !== "CN") return;
+    setQuoteRefreshing(true);
+    try {
+      const quote = await requestStockQuote(activeReport.symbol, { force: true });
+      setLiveQuote(quote ? toBasicQuote(quote) : null);
+      setQuoteViewStatus(quote ? "live" : "error");
+    } catch {
+      setQuoteViewStatus("error");
+    } finally {
+      setQuoteRefreshing(false);
+    }
+  }, [activeReport]);
+
   useEffect(() => {
     if (!activeReport) {
       setLiveQuote(null);
+      setQuoteViewStatus("idle");
       return;
     }
-    const base = buildMockBaseQuote(activeReport.market, activeReport.symbol);
-    setLiveQuote(base);
+    let canceled = false;
+    const shouldFetch = activeReport.market === "CN";
+
+    if (!shouldFetch) {
+      setLiveQuote(null);
+      setQuoteViewStatus("idle");
+      return;
+    }
+
+    const pull = async (force: boolean) => {
+      try {
+        const quote = await requestStockQuote(activeReport.symbol, { force });
+        if (canceled) return;
+        setLiveQuote(quote ? toBasicQuote(quote) : null);
+        setQuoteViewStatus(quote ? (force ? "live" : "cached") : "error");
+      } catch {
+        if (canceled) return;
+        setQuoteViewStatus("error");
+        // 保留上一次有效行情，避免接口抖动导致展示闪断。
+      }
+    };
+
+    void pull(false);
     const timer = window.setInterval(() => {
-      setLiveQuote((prev) => (prev ? tickQuote(prev) : base));
-    }, 3000);
-    return () => window.clearInterval(timer);
+      void pull(true);
+    }, 15_000);
+
+    return () => {
+      canceled = true;
+      window.clearInterval(timer);
+    };
   }, [activeReport]);
 
   useEffect(() => {
@@ -1530,14 +1584,31 @@ function AnalyzePageContent() {
                   </section>
                 ) : null}
 
-                {liveQuote ? (
+                {activeReport?.market === "CN" ? (
                   <div id="analyze-quote" className="scroll-mt-28 grid gap-3 lg:grid-cols-[3fr_2fr]">
                     <section className="flex flex-col gap-3 rounded-md border p-3">
                       <div className="flex items-center justify-between gap-2">
-                        <h2 className="text-sm font-medium">实时基础行情（模拟）</h2>
-                        <Badge variant="outline">
-                          更新于 {new Date(liveQuote.updatedAt).toLocaleTimeString("zh-CN", { hour12: false })}
-                        </Badge>
+                        <h2 className="text-sm font-medium">行情</h2>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline">{quoteStatusLabel}</Badge>
+                          <Badge variant="outline">
+                            更新于{" "}
+                            {liveQuote
+                              ? new Date(liveQuote.updatedAt).toLocaleTimeString("zh-CN", { hour12: false })
+                              : "--:--:--"}
+                          </Badge>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 gap-1.5 px-2"
+                            onClick={() => void handleRefreshAnalyzeQuote()}
+                            disabled={quoteRefreshing}
+                          >
+                            <RotateCwIcon className={`size-3.5 ${quoteRefreshing ? "animate-spin" : ""}`} />
+                            刷新
+                          </Button>
+                        </div>
                       </div>
                       <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2 xl:grid-cols-3">
                         {activeRealtimeFacts.map((fact) => (
