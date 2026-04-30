@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import type { AnalysisInput, Market, PreferenceSnapshot, TimingReport } from "@/lib/contracts/domain";
 import { archiveEntrySchema, timingReportSchema } from "@/lib/contracts/domain";
-import { requestTimingReport } from "@/lib/api/timing";
+import { requestTimingReport, type AnalyzeProgress } from "@/lib/api/timing";
 import { useArchiveStore } from "@/stores/use-archive-store";
 import { useAuthStore } from "@/stores/use-auth-store";
 
@@ -19,6 +19,7 @@ type AnalysisState = {
   currentInput: AnalysisInput | null;
   report: TimingReport | null;
   loading: boolean;
+  progress: AnalyzeProgress | null;
   error: string | null;
   generateReport: (input: AnalysisInput) => Promise<boolean>;
   buildMarkdown: () => string;
@@ -31,15 +32,18 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
   currentInput: null,
   report: null,
   loading: false,
+  progress: null,
   error: null,
-  clearReport: () => set({ report: null, error: null, currentInput: null }),
+  clearReport: () => set({ report: null, error: null, currentInput: null, progress: null }),
   generateReport: async (input) => {
     const isGuest = useAuthStore.getState().session === "guest";
-    set({ loading: true, error: null, currentInput: input });
+    set({ loading: true, progress: null, error: null, currentInput: input });
     try {
-      const report = await requestTimingReport(input);
+      const report = await requestTimingReport(input, {
+        onProgress: (progress) => set({ progress }),
+      });
       timingReportSchema.parse(report);
-      set({ report, loading: false, error: null });
+      set({ report, loading: false, progress: null, error: null });
       const entry = archiveEntrySchema.parse({
         ...report,
         title: `${report.market}.${report.symbol} 择时快照`,
@@ -49,10 +53,10 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       if (message === "quota") {
-        set({ loading: false, error: "quota" });
+        set({ loading: false, progress: null, error: "quota" });
         return false;
       }
-      set({ loading: false, error: "unknown" });
+      set({ loading: false, progress: null, error: "unknown" });
       return false;
     }
   },

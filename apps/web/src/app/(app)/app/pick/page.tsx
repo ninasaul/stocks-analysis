@@ -758,7 +758,10 @@ function ChatTimelineSection({
   composerDesktopBounds: { left?: number; width?: number };
 }) {
   return (
-    <section className="flex h-full min-h-0 flex-1 flex-col gap-3 px-1 pb-2 md:px-0 md:pb-0" aria-label="对话消息区域">
+    <section
+      className="flex h-full min-h-0 flex-1 flex-col gap-3 px-1 pt-2 pb-2 md:px-0 md:pt-3 md:pb-0"
+      aria-label="对话消息区域"
+    >
       <div className="relative h-full min-h-0 flex-1">
         <ScrollArea
           className="size-full overscroll-contain"

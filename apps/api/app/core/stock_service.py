@@ -361,7 +361,7 @@ class StockService:
             raise HTTPException(status_code=404, detail=f"Stock {stock_code} not found")
         
         data = []
-        stock_name = self._get_stock_name(stock_code)
+        stock_name = self.get_stock_name(stock_code)
         
         for row in df.itertuples():
             data.append({

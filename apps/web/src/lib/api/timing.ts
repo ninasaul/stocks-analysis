@@ -14,6 +14,7 @@ type ApiAnalyzeResponse = {
   stock_info?: {
     name?: string;
     code?: string;
+    exchange?: string;
     market?: string;
   };
   final_signal?: "BUY" | "SELL" | "HOLD";
@@ -80,6 +81,27 @@ type ApiAnalyzeResponse = {
   };
   created_at?: string;
   error?: string;
+};
+
+type ApiAnalyzeCreateResponse = {
+  task_id?: string;
+  record_id?: string;
+  message?: string;
+};
+
+type ApiAnalyzeTaskStatusResponse = {
+  task_id?: string;
+  record_id?: string | null;
+  status?: string;
+  progress?: number;
+  progress_message?: string;
+  result?: ApiAnalyzeResponse | null;
+  error?: string | null;
+};
+
+export type AnalyzeProgress = {
+  progress: number;
+  message: string;
 };
 
 type ApiHistoryResponse = {
@@ -239,6 +261,16 @@ function mapAnalyzeToTimingReport(input: AnalysisInput | null, payload: ApiAnaly
     ...normalizeStringArray(payload.reflection?.improvements),
   ];
 
+  const rawSi = payload.stock_info;
+  const stock_info = rawSi
+    ? {
+        name: typeof rawSi.name === "string" ? rawSi.name.trim() : undefined,
+        code: typeof rawSi.code === "string" ? rawSi.code.trim().toUpperCase() : undefined,
+        exchange: typeof rawSi.exchange === "string" ? rawSi.exchange.trim() : undefined,
+        market: typeof rawSi.market === "string" ? rawSi.market.trim() : undefined,
+      }
+    : undefined;
+
   return timingReportSchema.parse({
     id: `api-${market}.${symbol}-${parseApiCreatedAt(payload.created_at)}`,
     symbol,
@@ -287,6 +319,7 @@ function mapAnalyzeToTimingReport(input: AnalysisInput | null, payload: ApiAnaly
     data_version: "api-v1",
     created_at: parseApiCreatedAt(payload.created_at),
     plan_metrics,
+    stock_info,
   });
 }
 
@@ -296,7 +329,63 @@ async function syntheticTimingReportWithDelay(input: AnalysisInput): Promise<Tim
   return buildSyntheticTimingReport(input);
 }
 
-export async function requestTimingReport(input: AnalysisInput): Promise<TimingReport> {
+const ANALYZE_POLL_INTERVAL_MS = 1500;
+const ANALYZE_POLL_TIMEOUT_MS = 3 * 60 * 1000;
+
+async function pollAnalyzeResult(
+  taskId: string,
+  fetcher: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+  onProgress?: (progress: AnalyzeProgress) => void,
+): Promise<ApiAnalyzeResponse> {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < ANALYZE_POLL_TIMEOUT_MS) {
+    const statusUrl = new URL(`/api/analyze/${encodeURIComponent(taskId)}`, getPublicApiBaseUrl());
+    const statusResponse = await fetcher(statusUrl.toString(), { method: "GET" });
+    if (!statusResponse.ok) {
+      if (statusResponse.status === 429) {
+        throw new Error("quota");
+      }
+      throw new Error(`查询分析任务失败（${statusResponse.status}）`);
+    }
+
+    const statusPayload = (await statusResponse.json()) as ApiAnalyzeTaskStatusResponse;
+    const status = String(statusPayload.status ?? "").toUpperCase();
+    onProgress?.({
+      progress: clampNumber(Math.round(extractNumber(statusPayload.progress, 0)), 0, 100),
+      message: String(statusPayload.progress_message ?? "").trim() || "正在分析中...",
+    });
+    if (status === "COMPLETED" || status === "SUCCESS" || status === "DONE") {
+      const result = statusPayload.result;
+      if (!result) {
+        throw new Error("分析任务已完成，但未返回结果");
+      }
+      if (typeof result.error === "string" && result.error.trim().length > 0) {
+        throw new Error(result.error);
+      }
+      return result;
+    }
+
+    if (status === "FAILED" || status === "ERROR" || status === "CANCELLED") {
+      const errorMessage =
+        typeof statusPayload.error === "string" && statusPayload.error.trim().length > 0
+          ? statusPayload.error
+          : "分析任务执行失败";
+      throw new Error(errorMessage);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, ANALYZE_POLL_INTERVAL_MS));
+  }
+
+  throw new Error("分析任务超时，请稍后重试");
+}
+
+export async function requestTimingReport(
+  input: AnalysisInput,
+  options?: {
+    onProgress?: (progress: AnalyzeProgress) => void;
+  },
+): Promise<TimingReport> {
   const state = useAuthStore.getState();
   const canCallLiveAnalyze = state.session === "user" && Boolean(state.accessToken);
   // 与额度 mock 一致：mock 流程下择时报告仍走本地合成数据，暂不调用后端 /api/analyze。
@@ -304,26 +393,29 @@ export async function requestTimingReport(input: AnalysisInput): Promise<TimingR
     return syntheticTimingReportWithDelay(input);
   }
 
-  const url = new URL("/api/analyze", getPublicApiBaseUrl());
-  url.searchParams.set("ticker", input.symbol);
   const queryConfig = buildAnalyzeQueryConfig(input);
-  url.searchParams.set("depth", String(queryConfig.depth));
-  url.searchParams.set("market_analyst", String(queryConfig.market_analyst));
-  url.searchParams.set("fundamental_analyst", String(queryConfig.fundamental_analyst));
-  url.searchParams.set("news_analyst", String(queryConfig.news_analyst));
-  url.searchParams.set("social_analyst", String(queryConfig.social_analyst));
-  url.searchParams.set("sentiment_analysis", String(queryConfig.sentiment_analysis));
-  url.searchParams.set("risk_assessment", String(queryConfig.risk_assessment));
-
-  const response = await state.authenticatedFetch(url.toString(), {
-    method: "GET",
+  const createUrl = new URL("/api/analyze", getPublicApiBaseUrl());
+  options?.onProgress?.({ progress: 0, message: "正在创建分析任务..." });
+  const createResponse = await state.authenticatedFetch(createUrl.toString(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ticker: input.symbol,
+      depth: queryConfig.depth,
+      market_analyst: queryConfig.market_analyst,
+      fundamental_analyst: queryConfig.fundamental_analyst,
+      news_analyst: queryConfig.news_analyst,
+      social_analyst: queryConfig.social_analyst,
+      sentiment_analysis: queryConfig.sentiment_analysis,
+      risk_assessment: queryConfig.risk_assessment,
+    }),
   });
-  if (!response.ok) {
-    if (response.status === 429) {
+  if (!createResponse.ok) {
+    if (createResponse.status === 429) {
       throw new Error("quota");
     }
     try {
-      const payload = (await response.json()) as { detail?: string; message?: string; error?: string };
+      const payload = (await createResponse.json()) as { detail?: string; message?: string; error?: string };
       const detail = payload.detail ?? payload.message ?? payload.error;
       if (typeof detail === "string" && detail.trim().length > 0) {
         throw new Error(detail);
@@ -331,9 +423,17 @@ export async function requestTimingReport(input: AnalysisInput): Promise<TimingR
     } catch {
       // Ignore parse errors and fall back to status code message.
     }
-    throw new Error(`请求失败（${response.status}）`);
+    throw new Error(`请求失败（${createResponse.status}）`);
   }
-  const payload = (await response.json()) as ApiAnalyzeResponse;
+
+  const createPayload = (await createResponse.json()) as ApiAnalyzeCreateResponse;
+  const taskId = String(createPayload.task_id ?? "").trim();
+  if (!taskId) {
+    throw new Error("创建分析任务失败：缺少 task_id");
+  }
+
+  options?.onProgress?.({ progress: 5, message: "任务创建成功，开始轮询进度..." });
+  const payload = await pollAnalyzeResult(taskId, state.authenticatedFetch, options?.onProgress);
   if (typeof payload.error === "string" && payload.error.trim().length > 0) {
     throw new Error(payload.error);
   }
@@ -344,7 +444,7 @@ export async function requestAnalyzeHistory(): Promise<TimingReport[]> {
   const state = useAuthStore.getState();
   if (state.session !== "user" || !state.accessToken) return [];
 
-  const url = new URL("/api/history", getPublicApiBaseUrl());
+  const url = new URL("/api/analyze/history", getPublicApiBaseUrl());
   const response = await state.authenticatedFetch(url.toString(), { method: "GET" });
   if (!response.ok) {
     throw new Error(`获取历史记录失败（${response.status}）`);
@@ -376,7 +476,7 @@ export async function requestReportFile(
     throw new Error("当前未登录，请先登录后重试");
   }
 
-  const url = new URL("/api/report", getPublicApiBaseUrl());
+  const url = new URL("/api/analyze/report", getPublicApiBaseUrl());
   url.searchParams.set("ticker", ticker);
   url.searchParams.set("format", format);
 

@@ -79,6 +79,15 @@ export const timingPlanSchema = z.object({
 });
 export type TimingPlan = z.infer<typeof timingPlanSchema>;
 
+/** 与后端分析结果 `stock_info` 对齐；历史记录可能缺失部分字段。 */
+export const stockInfoSchema = z.object({
+  name: z.string().optional(),
+  code: z.string().optional(),
+  exchange: z.string().optional(),
+  market: z.string().optional(),
+});
+export type StockInfo = z.infer<typeof stockInfoSchema>;
+
 /** Numeric snapshot for history / recap; optional for older persisted archives. */
 export const planMetricsSchema = z.object({
   reference_price: z.number(),
@@ -110,6 +119,7 @@ export const timingReportSchema = z.object({
   data_version: z.string(),
   created_at: z.number(),
   plan_metrics: planMetricsSchema.optional(),
+  stock_info: stockInfoSchema.optional(),
 });
 export type TimingReport = z.infer<typeof timingReportSchema>;
 

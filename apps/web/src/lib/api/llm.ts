@@ -37,6 +37,14 @@ export type UserLlmConfigItem = {
   provider: LlmProviderOption;
 };
 
+export type LlmPresetItem = {
+  id: number;
+  name: string;
+  provider: LlmProviderOption;
+  model: string;
+  isActive: boolean;
+};
+
 export type LlmConfigTestResult = {
   success: boolean;
   message: string;
@@ -79,6 +87,7 @@ type PreferencePayload = {
   has_preference?: boolean;
   preference?: {
     user_config_id?: number;
+    preset_id?: number;
   };
 };
 
@@ -277,7 +286,7 @@ export async function requestUserLlmConfigs(
 
 export async function requestUserLlmPreference(
   authenticatedFetch: FetchLike,
-): Promise<{ configId?: number }> {
+): Promise<{ configId?: number; presetId?: number }> {
   const response = await authenticatedFetch(joinUrl("/api/llm/user/preference"), { method: "GET" });
   if (!response.ok) {
     throw new Error(await parseApiError(response));
@@ -285,6 +294,7 @@ export async function requestUserLlmPreference(
   const payload = (await response.json()) as PreferencePayload;
   return {
     configId: payload.preference?.user_config_id,
+    presetId: payload.preference?.preset_id,
   };
 }
 
@@ -309,6 +319,59 @@ export async function requestSetUserLlmPreference(configId: number, authenticate
   if (response) {
     throw new Error(await parseApiError(response));
   }
+}
+
+export async function requestLlmPresets(authenticatedFetch: FetchLike): Promise<LlmPresetItem[]> {
+  const payload = await requestWithCandidates<
+    | { presets?: UserConfigPayload[]; items?: UserConfigPayload[]; data?: UserConfigPayload[] }
+    | UserConfigPayload[]
+  >(
+    [
+      { path: "/api/llm/presets", init: { method: "GET" } },
+      { path: "/llm/presets", init: { method: "GET" } },
+    ],
+    authenticatedFetch,
+  );
+
+  const source = Array.isArray(payload) ? payload : payload.presets ?? payload.items ?? payload.data ?? [];
+
+  return source.map((item, index) => ({
+    id: Number(item.id ?? index + 1),
+    name: String(item.name ?? `系统预设-${item.id ?? index + 1}`),
+    provider: item.provider ?? "default",
+    // 系统预设列表以 name 作为大模型名称来源
+    model: String(item.name ?? item.model ?? ""),
+    isActive: Boolean(item.is_active ?? false),
+  }));
+}
+
+export async function requestSetLlmPresetPreference(presetId: number, authenticatedFetch: FetchLike): Promise<void> {
+  const bodyCandidates = [
+    { preset_id: presetId },
+    { llm_preset_id: presetId },
+    { presetId },
+  ];
+
+  let lastResponse: Response | null = null;
+  for (const bodyValue of bodyCandidates) {
+    const candidates: CandidateRequest[] = [
+      {
+        path: "/api/llm/user/preference",
+        init: { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(bodyValue) },
+      },
+      {
+        path: "/api/llm/user/preference",
+        init: { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(bodyValue) },
+      },
+    ];
+    for (const candidate of candidates) {
+      const response = await authenticatedFetch(joinUrl(candidate.path), candidate.init);
+      if (response.ok) return;
+      lastResponse = response;
+      if (!canFallback(response.status)) break;
+    }
+  }
+  throw new Error(await parseApiError(lastResponse));
 }
 
 export async function requestDeleteUserLlmPreference(authenticatedFetch: FetchLike): Promise<void> {

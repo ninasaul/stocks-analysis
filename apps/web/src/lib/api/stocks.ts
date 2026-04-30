@@ -1,7 +1,19 @@
 import type { AnalysisInput } from "@/lib/contracts/domain";
 import { getPublicApiBaseUrl } from "@/lib/env";
 import type { AnalyzeSymbolSearchItem } from "@/lib/analyze-symbol-search";
+import { type StockQuote, isStockQuote } from "@/lib/stock-quote";
 import { useAuthStore } from "@/stores/use-auth-store";
+
+/** 同源 Next Route：东方财富快照（服务端拉取）。`fresh=1` 时跳过服务端内存与 CSV，仍写入新缓存。 */
+function quoteUrlPath(stockCode: string, bypassServerCache: boolean) {
+  const base = `/api/stocks/${encodeURIComponent(stockCode)}/quote`;
+  return bypassServerCache ? `${base}?fresh=1` : base;
+}
+
+export type RequestStockQuoteOptions = {
+  /** 跳过浏览器侧 TTL 缓存，并附带 `fresh=1` 拉最新快照 */
+  force?: boolean;
+};
 
 type ApiStockSearchItem = {
   code?: string;
@@ -32,74 +44,33 @@ type ApiPortfolioMutationResponse = {
   data?: ApiPortfolioStock;
 };
 
-type ApiStockQuoteResponse = {
-  stock_code?: string;
-  stock_name?: string | null;
-  current_price?: unknown;
-  change?: unknown;
-  change_percent?: unknown;
-  open?: unknown;
-  high?: unknown;
-  low?: unknown;
-  prev_close?: unknown;
-  volume?: unknown;
-  amount?: unknown;
-  update_time?: string | null;
-  source?: string | null;
-};
-
-export type StockQuote = {
-  stockCode: string;
-  stockName: string;
-  currentPrice: number;
-  change: number;
-  changePercent: number;
-  open: number | null;
-  high: number | null;
-  low: number | null;
-  prevClose: number | null;
-  volume: number | null;
-  amount: number | null;
-  updateTime: string | null;
-  source: string | null;
-  cachedAt: number;
-};
+export type { StockQuote };
 
 const STOCK_QUOTE_CACHE_KEY = "app-stock-quotes-v1";
-const STOCK_QUOTE_CACHE_TTL_MS = 30 * 60 * 1000;
+/** 与 `getCachedStockQuote` / 自选自动刷新阈值一致（毫秒）。 */
+export const STOCK_QUOTE_CLIENT_CACHE_TTL_MS = 30 * 60 * 1000;
+const STOCK_QUOTE_CACHE_TTL_MS = STOCK_QUOTE_CLIENT_CACHE_TTL_MS;
 const stockQuoteMemoryCache = new Map<string, StockQuote>();
 
 function normalizeStockCode(value: string) {
   return value.trim().toUpperCase();
 }
 
-function parseOptionalNumber(value: unknown): number | null {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "string") {
-    const normalized = value.replace(/,/g, "").trim();
-    if (!normalized || normalized === "-") return null;
-    const parsed = Number(normalized);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
 function isFreshQuote(quote: StockQuote, now = Date.now()) {
   return now - quote.cachedAt < STOCK_QUOTE_CACHE_TTL_MS;
 }
 
-function isStockQuote(value: unknown): value is StockQuote {
-  if (!value || typeof value !== "object") return false;
-  const quote = value as Partial<StockQuote>;
-  return (
-    typeof quote.stockCode === "string" &&
-    typeof quote.stockName === "string" &&
-    typeof quote.currentPrice === "number" &&
-    quote.currentPrice > 0 &&
-    typeof quote.change === "number" &&
-    typeof quote.changePercent === "number" &&
-    typeof quote.cachedAt === "number"
-  );
+function writeCachedStockQuote(quote: StockQuote) {
+  const key = normalizeStockCode(quote.stockCode);
+  stockQuoteMemoryCache.set(key, quote);
+  if (typeof window === "undefined") return;
+  try {
+    const cache = readStockQuoteStorage();
+    cache[key] = quote;
+    window.localStorage.setItem(STOCK_QUOTE_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // Ignore localStorage write failures; the in-memory cache still works for this session.
+  }
 }
 
 function readStockQuoteStorage(): Record<string, StockQuote> {
@@ -151,46 +122,6 @@ function getCachedStockQuote(stockCode: string): StockQuote | null {
     return storageHit;
   }
   return null;
-}
-
-function writeCachedStockQuote(quote: StockQuote) {
-  const key = normalizeStockCode(quote.stockCode);
-  stockQuoteMemoryCache.set(key, quote);
-  if (typeof window === "undefined") return;
-  try {
-    const cache = readStockQuoteStorage();
-    cache[key] = quote;
-    window.localStorage.setItem(STOCK_QUOTE_CACHE_KEY, JSON.stringify(cache));
-  } catch {
-    // Ignore localStorage write failures; the in-memory cache still works for this session.
-  }
-}
-
-function toStockQuote(payload: ApiStockQuoteResponse, fallbackCode: string): StockQuote {
-  const currentPrice = parseOptionalNumber(payload.current_price);
-  const change = parseOptionalNumber(payload.change);
-  const changePercent = parseOptionalNumber(payload.change_percent);
-  if (currentPrice === null || currentPrice <= 0 || change === null || changePercent === null) {
-    throw new Error("行情数据字段缺失，请稍后重试");
-  }
-
-  const stockCode = normalizeStockCode(String(payload.stock_code ?? fallbackCode));
-  return {
-    stockCode,
-    stockName: String(payload.stock_name ?? "").trim() || stockCode,
-    currentPrice,
-    change,
-    changePercent,
-    open: parseOptionalNumber(payload.open),
-    high: parseOptionalNumber(payload.high),
-    low: parseOptionalNumber(payload.low),
-    prevClose: parseOptionalNumber(payload.prev_close),
-    volume: parseOptionalNumber(payload.volume),
-    amount: parseOptionalNumber(payload.amount),
-    updateTime: payload.update_time ?? null,
-    source: payload.source ?? null,
-    cachedAt: Date.now(),
-  };
 }
 
 function toAnalyzeMarket(item: ApiStockSearchItem): AnalysisInput["market"] {
@@ -330,23 +261,35 @@ export async function requestDeleteStockPortfolio(symbol: string): Promise<void>
   }
 }
 
-export async function requestStockQuote(stockCode: string): Promise<StockQuote | null> {
+/** 服务端东方财富快照 + 本地短缓存（与后端 FastAPI 无关）。 */
+export async function requestStockQuote(
+  stockCode: string,
+  options?: RequestStockQuoteOptions,
+): Promise<StockQuote | null> {
   const normalized = normalizeStockCode(stockCode);
   if (!normalized) return null;
 
-  const cached = getCachedStockQuote(normalized);
-  if (cached) return cached;
+  const force = options?.force === true;
+
+  if (!force) {
+    const cached = getCachedStockQuote(normalized);
+    if (cached) return cached;
+  }
 
   const state = useAuthStore.getState();
   if (state.session !== "user" || !state.accessToken) return null;
 
-  const url = new URL(`/api/stocks/${encodeURIComponent(normalized)}/quote`, getPublicApiBaseUrl());
-  const response = await state.authenticatedFetch(url.toString(), { method: "GET" });
+  const response = await state.authenticatedFetch(quoteUrlPath(normalized, force), {
+    method: "GET",
+  });
   if (!response.ok) {
     throw new Error(`获取行情失败（${response.status}）`);
   }
 
-  const quote = toStockQuote((await response.json()) as ApiStockQuoteResponse, normalized);
-  writeCachedStockQuote(quote);
-  return quote;
+  const data: unknown = await response.json();
+  if (!isStockQuote(data)) {
+    throw new Error("行情数据格式异常");
+  }
+  writeCachedStockQuote(data);
+  return data;
 }

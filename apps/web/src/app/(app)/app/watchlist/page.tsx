@@ -2,7 +2,14 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChartLineIcon, EllipsisVerticalIcon, Trash2Icon } from "lucide-react";
+import {
+  ChartLineIcon,
+  CircleHelpIcon,
+  EllipsisVerticalIcon,
+  Clock3Icon,
+  RotateCwIcon,
+  Trash2Icon,
+} from "lucide-react";
 import type { AnalysisInput } from "@/lib/contracts/domain";
 import {
   ANALYZE_SYMBOL_MOCK_UNIVERSE,
@@ -12,6 +19,7 @@ import {
   type AnalyzeSymbolSearchItem,
 } from "@/lib/analyze-symbol-search";
 import {
+  STOCK_QUOTE_CLIENT_CACHE_TTL_MS,
   getStoredStockQuote,
   requestAddStockPortfolio,
   requestDeleteStockPortfolio,
@@ -20,9 +28,11 @@ import {
   requestStockSearch,
   type StockQuote,
 } from "@/lib/api/stocks";
+import { isStockQuote } from "@/lib/stock-quote";
 import { AppPageLayout } from "@/components/features/app-page-layout";
 import { StockSearchCombobox } from "@/components/features/stock-search-combobox";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -119,6 +129,16 @@ function formatSignedPct(n: number) {
   return `${fixed}%`;
 }
 
+function quoteDataSubtitle(quote: StockQuote): string | null {
+  const raw = quote.updateTime?.trim();
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  const hm = d.toLocaleTimeString("zh-CN", { hour12: false });
+  if (quote.source?.includes("eastmoney")) return `东方财富 · ${hm}`;
+  return hm;
+}
+
 function inferExchange(market: AnalysisInput["market"], symbol: string): string {
   const normalized = symbol.trim().toUpperCase();
   if (market === "HK") return "HK";
@@ -134,20 +154,6 @@ function quoteToneClass(changePct: number) {
   if (changePct > 0) return "text-red-600 dark:text-red-500";
   if (changePct < 0) return "text-emerald-600 dark:text-emerald-500";
   return "text-muted-foreground";
-}
-
-function isStockQuote(value: unknown): value is StockQuote {
-  if (!value || typeof value !== "object") return false;
-  const quote = value as Partial<StockQuote>;
-  return (
-    typeof quote.stockCode === "string" &&
-    typeof quote.stockName === "string" &&
-    typeof quote.currentPrice === "number" &&
-    quote.currentPrice > 0 &&
-    typeof quote.change === "number" &&
-    typeof quote.changePercent === "number" &&
-    typeof quote.cachedAt === "number"
-  );
 }
 
 function readWatchlistQuoteCache() {
@@ -219,6 +225,7 @@ function mergeQuotesForEntries(
 export default function WatchlistPage() {
   const router = useRouter();
   const authSession = useAuthStore((s) => s.session);
+  const accessToken = useAuthStore((s) => s.accessToken);
   const [query, setQuery] = useState("");
   const [entries, setEntries] = useState<WatchlistEntry[]>([]);
   const [remoteSearching, setRemoteSearching] = useState(false);
@@ -227,9 +234,8 @@ export default function WatchlistPage() {
   const [portfolioSyncError, setPortfolioSyncError] = useState<string | null>(null);
   const [quotesByKey, setQuotesByKey] = useState<Record<string, StockQuote>>({});
   const [quoteLoadingKeys, setQuoteLoadingKeys] = useState<Set<string>>(() => new Set());
-  const [quoteErrorKeys, setQuoteErrorKeys] = useState<Set<string>>(() => new Set());
+  const [, setQuoteErrorKeys] = useState<Set<string>>(() => new Set());
   const quoteRequestKeysRef = useRef<Set<string>>(new Set());
-  const quoteRefreshedKeysRef = useRef<Set<string>>(new Set());
   const [deleteTargetKey, setDeleteTargetKey] = useState<string | null>(null);
 
   const keySet = useMemo(() => new Set(entries.map((e) => entryKey(e))), [entries]);
@@ -361,7 +367,10 @@ export default function WatchlistPage() {
         setQuoteLoadingKeys(new Set());
         setQuoteErrorKeys(new Set());
         quoteRequestKeysRef.current.clear();
-        quoteRefreshedKeysRef.current.clear();
+        return;
+      }
+
+      if (!accessToken) {
         return;
       }
 
@@ -370,20 +379,21 @@ export default function WatchlistPage() {
       for (const key of quoteRequestKeysRef.current) {
         if (!activeKeys.has(key)) quoteRequestKeysRef.current.delete(key);
       }
-      for (const key of quoteRefreshedKeysRef.current) {
-        if (!activeKeys.has(key)) quoteRefreshedKeysRef.current.delete(key);
-      }
 
       for (const entry of cnEntries) {
         const k = entryKey(entry);
-        const storedQuote = getStoredQuoteForEntry(entry);
-        if (storedQuote) {
-          setQuotesByKey((prev) => (prev[k] ? prev : { ...prev, [k]: storedQuote }));
+        const merged = getStoredQuoteForEntry(entry);
+        const freshEnough =
+          merged &&
+          isStockQuote(merged) &&
+          Date.now() - merged.cachedAt < STOCK_QUOTE_CLIENT_CACHE_TTL_MS;
+        if (freshEnough) {
+          setQuotesByKey((prev) => ({ ...prev, [k]: merged }));
+          continue;
         }
-        if (quoteRequestKeysRef.current.has(k) || quoteRefreshedKeysRef.current.has(k)) continue;
+        if (quoteRequestKeysRef.current.has(k)) continue;
 
         quoteRequestKeysRef.current.add(k);
-        quoteRefreshedKeysRef.current.add(k);
         setQuoteLoadingKeys((prev) => {
           const next = new Set(prev);
           next.add(k);
@@ -397,7 +407,15 @@ export default function WatchlistPage() {
 
         void requestStockQuote(entry.symbol)
           .then((quote) => {
-            if (canceled || !quote) return;
+            if (canceled) return;
+            if (!quote) {
+              setQuoteErrorKeys((prev) => {
+                const next = new Set(prev);
+                next.add(k);
+                return next;
+              });
+              return;
+            }
             writeWatchlistQuoteCache(k, quote);
             setQuotesByKey((prev) => ({ ...prev, [k]: quote }));
           })
@@ -424,7 +442,55 @@ export default function WatchlistPage() {
       canceled = true;
       window.clearTimeout(timer);
     };
-  }, [authSession, entries]);
+  }, [authSession, accessToken, entries]);
+
+  const handleRefreshAllQuotes = useCallback(() => {
+    if (authSession !== "user" || !accessToken) return;
+    const cnEntries = entries.filter((e) => e.market === "CN");
+    if (cnEntries.length === 0) return;
+    setQuoteErrorKeys(new Set());
+
+    void Promise.all(
+      cnEntries.map(async (entry) => {
+        const k = entryKey(entry);
+        if (quoteRequestKeysRef.current.has(k)) return;
+        quoteRequestKeysRef.current.add(k);
+        setQuoteLoadingKeys((prev) => {
+          const next = new Set(prev);
+          next.add(k);
+          return next;
+        });
+        try {
+          const q = await requestStockQuote(entry.symbol, { force: true });
+          if (q) {
+            writeWatchlistQuoteCache(k, q);
+            setQuotesByKey((prev) => ({ ...prev, [k]: q }));
+          }
+          setQuoteErrorKeys((prev) => {
+            const next = new Set(prev);
+            if (q) next.delete(k);
+            else next.add(k);
+            return next;
+          });
+        } catch {
+          setQuoteErrorKeys((prev) => {
+            const next = new Set(prev);
+            next.add(k);
+            return next;
+          });
+        } finally {
+          quoteRequestKeysRef.current.delete(k);
+          setQuoteLoadingKeys((prev) => {
+            const next = new Set(prev);
+            next.delete(k);
+            return next;
+          });
+        }
+      }),
+    );
+  }, [authSession, accessToken, entries]);
+
+  const cnQuoteCount = useMemo(() => entries.filter((e) => e.market === "CN").length, [entries]);
 
   const searchItems = useMemo(() => {
     const byKey = new Map<string, AnalyzeSymbolSearchItem>();
@@ -565,9 +631,50 @@ export default function WatchlistPage() {
     <AppPageLayout
       title="自选"
       actions={
-        <Button type="button" variant="outline" onClick={() => router.push("/app/analyze")}>
-          去预测
-        </Button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {authSession === "user" && cnQuoteCount > 0 ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="行情说明"
+                    className="text-muted-foreground"
+                  >
+                    <CircleHelpIcon />
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom" align="end" className="max-w-sm">
+                <div className="text-pretty leading-relaxed">
+                  A 股展示东方财富快照，服务端与本页均做短时缓存以降低请求频率；可随时点「刷新行情」强制更新。港股、美股暂不展示现价。
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-1.5"
+            disabled={
+              authSession !== "user" ||
+              !accessToken ||
+              cnQuoteCount === 0 ||
+              portfolioLoading ||
+              quoteLoadingKeys.size > 0
+            }
+            onClick={handleRefreshAllQuotes}
+            aria-label="刷新全部 A 股行情"
+          >
+            <RotateCwIcon className="size-4" />
+            刷新行情
+          </Button>
+          <Button type="button" variant="outline" onClick={() => router.push("/app/analyze")}>
+            去预测
+          </Button>
+        </div>
       }
       contentClassName="gap-4"
     >
@@ -625,9 +732,9 @@ export default function WatchlistPage() {
             const stockCode = `${entry.market}.${entry.symbol}`;
             const quote = quotesByKey[k];
             const quoteLoading = quoteLoadingKeys.has(k);
-            const quoteFailed = quoteErrorKeys.has(k);
             const quoteUnsupported = entry.market !== "CN";
             const tone = quote ? quoteToneClass(quote.changePercent) : "text-muted-foreground";
+            const quoteMeta = quote ? quoteDataSubtitle(quote) : null;
             return (
               <Item
                 key={k}
@@ -649,14 +756,28 @@ export default function WatchlistPage() {
                       <div className="text-base font-semibold leading-none">
                         {quote ? quote.currentPrice.toFixed(2) : quoteLoading ? "--" : "--"}
                       </div>
-                      <div className="text-xs leading-tight">
-                        {quote
-                          ? formatSignedPct(quote.changePercent)
-                          : quoteUnsupported
-                            ? "未接入"
-                            : quoteFailed
-                              ? "获取失败"
-                              : "--"}
+                      <div className="flex items-center justify-end gap-1 text-xs leading-tight">
+                        <span>{quote ? formatSignedPct(quote.changePercent) : quoteUnsupported ? "未接入" : "--"}</span>
+                        {quoteMeta ? (
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-xs"
+                                  aria-label={`行情时间：${quoteMeta}`}
+                                  className="text-muted-foreground size-4"
+                                >
+                                  <Clock3Icon className="size-3.5" />
+                                </Button>
+                              }
+                            />
+                            <TooltipContent side="left" align="end" className="max-w-xs">
+                              {quoteMeta}
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : null}
                       </div>
                     </div>
                   </ItemContent>
