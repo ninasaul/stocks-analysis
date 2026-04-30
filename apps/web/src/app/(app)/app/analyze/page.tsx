@@ -3,15 +3,15 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  ChevronDownIcon,
   CircleHelpIcon,
-  CopyIcon,
   EyeIcon,
   FolderDownIcon,
   FileDownIcon,
   FileTextIcon,
   GlobeIcon,
   HistoryIcon,
+  MapPinIcon,
+  TargetIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { AnalysisInput, PreferenceSnapshot, TimingReport } from "@/lib/contracts/domain";
@@ -61,7 +61,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Item,
@@ -621,8 +620,6 @@ function AnalyzePageContent() {
   const [localHistoryLoaded, setLocalHistoryLoaded] = useState(false);
   const [localHistory, setLocalHistory] = useState<TimingReport[]>([]);
   const [liveQuote, setLiveQuote] = useState<BasicQuote | null>(null);
-  const [actionReasonOpen, setActionReasonOpen] = useState(false);
-  const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [selectedSearchKey, setSelectedSearchKey] = useState<string | null>(null);
   const [searchComboboxOpen, setSearchComboboxOpen] = useState(false);
   const [remoteSearching, setRemoteSearching] = useState(false);
@@ -1015,11 +1012,6 @@ function AnalyzePageContent() {
   }, [activeReport]);
 
   useEffect(() => {
-    setActionReasonOpen(false);
-    setEvidenceOpen(false);
-  }, [activeReport?.id]);
-
-  useEffect(() => {
     if (!pendingHandoff) return;
     const h = pendingHandoff;
     queueMicrotask(() => {
@@ -1180,36 +1172,6 @@ function AnalyzePageContent() {
     const query = next.toString();
     const href = query ? `${pathname}?${query}` : pathname;
     window.open(href, "_blank", "noopener,noreferrer");
-  };
-
-  const copyText = async (value: string, label: string) => {
-    const text = value.trim();
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      if (useNotificationPreferencesStore.getState().notifyWorkspaceActions) {
-        toast.success(`${label}已复制`);
-      }
-      return;
-    } catch {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.setAttribute("readonly", "true");
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      try {
-        document.execCommand("copy");
-        if (useNotificationPreferencesStore.getState().notifyWorkspaceActions) {
-          toast.success(`${label}已复制`);
-        }
-      } catch {
-        toast.error("复制失败，请手动复制");
-      } finally {
-        document.body.removeChild(ta);
-      }
-    }
   };
 
   const statusLiveMessage = loading
@@ -1436,50 +1398,59 @@ function AnalyzePageContent() {
               </header>
 
               <div className="flex w-full flex-col gap-6">
-                <div className="grid gap-2 sm:grid-cols-3">
-                  <section
-                    id="analyze-executive-summary"
-                    className="scroll-mt-28 col-span-full rounded-md border bg-muted/20 p-3"
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className={actionBadgeClassNames[activeReport.action] ?? actionBadgeClassNames.wait}>
-                        当前建议：{actionLabels[activeReport.action] ?? activeReport.action}
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                  <section id="analyze-executive-summary" className="scroll-mt-28 rounded-md border p-3">
+                    <p className="text-muted-foreground text-xs">当前建议</p>
+                    <p className="mt-1 text-sm font-medium">
+                      <Badge
+                        variant="outline"
+                        className={actionBadgeClassNames[activeReport.action] ?? actionBadgeClassNames.wait}
+                      >
+                        {actionLabels[activeReport.action] ?? activeReport.action}
                       </Badge>
-                      <Badge variant="outline">风险等级：{activeReport.risk_level}</Badge>
-                      <Badge variant="outline">仓位建议：{activeReport.plan.risk_exposure_pct}</Badge>
-                      <Badge variant="outline">失效条件：见执行计划</Badge>
-                      <Badge variant="outline">有效期：{activeReport.plan.valid_until}</Badge>
-                    </div>
+                    </p>
                   </section>
                   <section className="scroll-mt-28 rounded-md border p-3">
-                    <p className="text-muted-foreground text-xs">结论说明</p>
-                    <Collapsible open={actionReasonOpen} onOpenChange={setActionReasonOpen}>
-                      <p className="text-muted-foreground mt-1 line-clamp-2 text-xs leading-5">
-                        {activeReport.action_reason}
-                      </p>
-                      <CollapsibleTrigger className="text-muted-foreground hover:text-foreground mt-1 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline">
-                        {actionReasonOpen ? "收起说明" : "展开说明"}
-                        <ChevronDownIcon
-                          className={`size-3 transition-transform ${actionReasonOpen ? "rotate-180" : ""}`}
-                        />
-                      </CollapsibleTrigger>
-                      <CollapsibleContent className="text-muted-foreground mt-1 text-xs leading-5">
-                        {activeReport.action_reason}
-                      </CollapsibleContent>
-                    </Collapsible>
+                    <p className="text-muted-foreground text-xs">风险等级</p>
+                    <p className="mt-1 text-sm font-medium">{activeReport.risk_level}</p>
+                  </section>
+                  <section className="scroll-mt-28 rounded-md border p-3">
+                    <p className="text-muted-foreground text-xs">仓位建议</p>
+                    <p className="mt-1 text-sm font-medium">{activeReport.plan.risk_exposure_pct}</p>
+                  </section>
+                  <section className="scroll-mt-28 rounded-md border p-3">
+                    <p className="text-muted-foreground text-xs">失效条件</p>
+                    <p className="mt-1 text-sm font-medium">见执行计划</p>
+                  </section>
+                  <section className="scroll-mt-28 rounded-md border p-3">
+                    <p className="text-muted-foreground text-xs">有效期</p>
+                    <p className="mt-1 text-sm font-medium">{activeReport.plan.valid_until}</p>
+                  </section>
+                  <section className="scroll-mt-28 rounded-md border p-3 xl:col-span-3 xl:row-span-2">
+                    <p className="text-muted-foreground flex items-center gap-1 text-xs font-medium">
+                      <FileTextIcon className="size-3.5" />
+                      结论说明
+                    </p>
+                    <p className="text-foreground mt-2 text-sm leading-6">{activeReport.action_reason}</p>
                   </section>
                   <section className="scroll-mt-28 rounded-md border p-3">
                     <p className="text-muted-foreground text-xs">综合得分</p>
                     <p className="mt-1 text-base font-semibold tabular-nums">{activeReport.score_breakdown.total}</p>
-                    <p className="text-muted-foreground mt-1 text-xs">置信度：{activeReport.confidence}</p>
+                  </section>
+                  <section className="scroll-mt-28 rounded-md border p-3">
+                    <p className="text-muted-foreground text-xs">置信度</p>
+                    <p className="mt-1 text-base font-semibold tabular-nums">{activeReport.confidence}</p>
                   </section>
                   <section className="scroll-mt-28 rounded-md border p-3">
                     <p className="text-muted-foreground text-xs">技术信号</p>
                     <p className="mt-1 text-base font-semibold">
                       {getTechnicalSignal(activeReport.score_breakdown.technical)}
                     </p>
-                    <p className="text-muted-foreground mt-1 text-xs tabular-nums">
-                      技术分：{activeReport.score_breakdown.technical}/60
+                  </section>
+                  <section className="scroll-mt-28 rounded-md border p-3">
+                    <p className="text-muted-foreground text-xs">技术分</p>
+                    <p className="mt-1 text-base font-semibold tabular-nums">
+                      {activeReport.score_breakdown.technical}/60
                     </p>
                   </section>
                 </div>
@@ -1487,51 +1458,22 @@ function AnalyzePageContent() {
                 {strategyLevels ? (
                   <section id="analyze-strategy" className="scroll-mt-28 flex flex-col gap-3 rounded-md border p-3">
                     <div className="flex items-center justify-between gap-2">
-                      <h2 className="text-sm font-medium">策略点位</h2>
+                      <h2 className="flex items-center gap-1.5 text-sm font-medium">
+                        <MapPinIcon className="size-3.5 text-muted-foreground" />
+                        策略点位
+                      </h2>
                       <Badge variant="outline">执行参考</Badge>
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                       <div className="py-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-muted-foreground text-xs">理想买入点</p>
-                          {strategyLevels.idealBuy !== null ? (
-                            <Button
-                              type="button"
-                              size="icon-xs"
-                              variant="ghost"
-                              aria-label="复制理想买入点"
-                              onClick={() => {
-                                if (strategyLevels.idealBuy === null) return;
-                                void copyText(strategyLevels.idealBuy.toFixed(2), "理想买入点");
-                              }}
-                            >
-                              <CopyIcon />
-                            </Button>
-                          ) : null}
-                        </div>
+                        <p className="text-muted-foreground text-xs">理想买入点</p>
                         <p className="text-base font-semibold">
                           {strategyLevels.idealBuy !== null ? `${strategyLevels.idealBuy.toFixed(2)} 元` : "见关注区间"}
                         </p>
                         <p className="text-muted-foreground text-xs">回踩支撑区优先布局</p>
                       </div>
                       <div className="py-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-muted-foreground text-xs">次优买入点</p>
-                          {strategyLevels.secondaryBuy !== null ? (
-                            <Button
-                              type="button"
-                              size="icon-xs"
-                              variant="ghost"
-                              aria-label="复制次优买入点"
-                              onClick={() => {
-                                if (strategyLevels.secondaryBuy === null) return;
-                                void copyText(strategyLevels.secondaryBuy.toFixed(2), "次优买入点");
-                              }}
-                            >
-                              <CopyIcon />
-                            </Button>
-                          ) : null}
-                        </div>
+                        <p className="text-muted-foreground text-xs">次优买入点</p>
                         <p className="text-base font-semibold">
                           {strategyLevels.secondaryBuy !== null
                             ? `${strategyLevels.secondaryBuy.toFixed(2)} 元`
@@ -1540,46 +1482,14 @@ function AnalyzePageContent() {
                         <p className="text-muted-foreground text-xs">二次回落时分批介入</p>
                       </div>
                       <div className="py-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-muted-foreground text-xs">止损位</p>
-                          {strategyLevels.stopLoss !== null ? (
-                            <Button
-                              type="button"
-                              size="icon-xs"
-                              variant="ghost"
-                              aria-label="复制止损位"
-                              onClick={() => {
-                                if (strategyLevels.stopLoss === null) return;
-                                void copyText(strategyLevels.stopLoss.toFixed(2), "止损位");
-                              }}
-                            >
-                              <CopyIcon />
-                            </Button>
-                          ) : null}
-                        </div>
+                        <p className="text-muted-foreground text-xs">止损位</p>
                         <p className="text-base font-semibold">
                           {strategyLevels.stopLoss !== null ? `${strategyLevels.stopLoss.toFixed(2)} 元` : "见风险位"}
                         </p>
                         <p className="text-muted-foreground text-xs">跌破关键位严格执行</p>
                       </div>
                       <div className="py-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-muted-foreground text-xs">目标位</p>
-                          {strategyLevels.takeProfit !== null ? (
-                            <Button
-                              type="button"
-                              size="icon-xs"
-                              variant="ghost"
-                              aria-label="复制目标位"
-                              onClick={() => {
-                                if (strategyLevels.takeProfit === null) return;
-                                void copyText(strategyLevels.takeProfit.toFixed(2), "目标位");
-                              }}
-                            >
-                              <CopyIcon />
-                            </Button>
-                          ) : null}
-                        </div>
+                        <p className="text-muted-foreground text-xs">目标位</p>
                         <p className="text-base font-semibold">
                           {strategyLevels.takeProfit !== null
                             ? `${strategyLevels.takeProfit.toFixed(2)} 元`
@@ -1593,7 +1503,10 @@ function AnalyzePageContent() {
 
                 {targetPriceRows.length ? (
                   <section id="analyze-target-prices" className="scroll-mt-28 flex flex-col gap-3 rounded-md border p-3">
-                    <h2 className="text-sm font-medium">目标价格分析</h2>
+                    <h2 className="flex items-center gap-1.5 text-sm font-medium">
+                      <TargetIcon className="size-3.5 text-muted-foreground" />
+                      目标价格分析
+                    </h2>
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -1733,59 +1646,50 @@ function AnalyzePageContent() {
                     <Badge variant="outline">冲突 {activeReport.evidence_conflicts?.length ?? 0}</Badge>
                     <Badge variant="outline">提醒 {activeReport.reminders.length}</Badge>
                   </div>
-                  <Collapsible open={evidenceOpen} onOpenChange={setEvidenceOpen}>
-                    <div className="text-muted-foreground text-xs">
-                      {!evidenceOpen ? "默认收起详细证据，展开后可查看完整依据与执行提醒。" : "已展开完整依据与提醒。"}
-                    </div>
-                    <CollapsibleTrigger className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline">
-                      {evidenceOpen ? "收起详细依据" : "展开详细依据"}
-                      <ChevronDownIcon className={`size-3 transition-transform ${evidenceOpen ? "rotate-180" : ""}`} />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="mt-2 space-y-3">
-                      <div className="grid gap-3 xl:grid-cols-3">
-                        <div className="flex flex-col gap-1">
-                          <p className="font-medium">正向</p>
-                          <ul className="text-muted-foreground list-inside list-disc">
-                            {activeReport.evidence_positive.map((x) => (
-                              <li key={x}>{x}</li>
-                            ))}
-                          </ul>
-                        </div>
-                        <div className="flex flex-col gap-1">
-                          <p className="font-medium">负向</p>
-                          <ul className="text-muted-foreground list-inside list-disc">
-                            {activeReport.evidence_negative.map((x) => (
-                              <li key={x}>{x}</li>
-                            ))}
-                          </ul>
-                        </div>
-                        {activeReport.evidence_conflicts?.length ? (
-                          <div className="flex flex-col gap-1">
-                            <p className="font-medium">冲突</p>
-                            <ul className="text-muted-foreground list-inside list-disc">
-                              {activeReport.evidence_conflicts.map((x) => (
-                                <li key={x}>{x}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col gap-1">
-                            <p className="font-medium">冲突</p>
-                            <p className="text-muted-foreground">当前无显著冲突信号。</p>
-                          </div>
-                        )}
-                      </div>
-                      <Separator />
+                  <div className="mt-2 space-y-3">
+                    <div className="grid gap-3 xl:grid-cols-3">
                       <div className="flex flex-col gap-1">
-                        <p className="font-medium">执行提醒</p>
+                        <p className="font-medium">正向</p>
                         <ul className="text-muted-foreground list-inside list-disc">
-                          {activeReport.reminders.map((x) => (
+                          {activeReport.evidence_positive.map((x) => (
                             <li key={x}>{x}</li>
                           ))}
                         </ul>
                       </div>
-                    </CollapsibleContent>
-                  </Collapsible>
+                      <div className="flex flex-col gap-1">
+                        <p className="font-medium">负向</p>
+                        <ul className="text-muted-foreground list-inside list-disc">
+                          {activeReport.evidence_negative.map((x) => (
+                            <li key={x}>{x}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      {activeReport.evidence_conflicts?.length ? (
+                        <div className="flex flex-col gap-1">
+                          <p className="font-medium">冲突</p>
+                          <ul className="text-muted-foreground list-inside list-disc">
+                            {activeReport.evidence_conflicts.map((x) => (
+                              <li key={x}>{x}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-1">
+                          <p className="font-medium">冲突</p>
+                          <p className="text-muted-foreground">当前无显著冲突信号。</p>
+                        </div>
+                      )}
+                    </div>
+                    <Separator />
+                    <div className="flex flex-col gap-1">
+                      <p className="font-medium">执行提醒</p>
+                      <ul className="text-muted-foreground list-inside list-disc">
+                        {activeReport.reminders.map((x) => (
+                          <li key={x}>{x}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
                 </section>
 
                 <section id="analyze-reflection" className="scroll-mt-28 flex flex-col gap-3 rounded-md border p-3">

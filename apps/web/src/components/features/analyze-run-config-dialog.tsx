@@ -502,13 +502,6 @@ export function AnalyzeRunConfigDialog({
     [loading, onOpenChange],
   );
 
-  const modelHint =
-    depth <= 2
-      ? "当前深度偏轻量，快模型承担主要推理；深模型用于关键结论复核。"
-      : depth >= 4
-        ? "当前深度偏高负载，建议深模型使用更强规格，以降低结论波动。"
-        : "标准深度下快模型覆盖大部分检索与归纳，深模型负责结构化决策链。";
-
   const toggleAnalyst = (id: AnalystRole, disabled?: boolean) => {
     if (disabled) return;
     setAnalysts((prev) => {
@@ -777,52 +770,7 @@ export function AnalyzeRunConfigDialog({
               <FieldSet className="gap-4 border-0 p-0" disabled={loading}>
                 <FieldLegend variant="label" className="flex items-center gap-1 px-0">
                   <span>高级选项</span>
-                  <HelpTip label="模型选择说明" content={modelHint} />
                 </FieldLegend>
-                <FieldGroup className="gap-4">
-                  <Field>
-                    <FieldLabel htmlFor={`${fieldId}-model-quick`}>快模型</FieldLabel>
-                    <Select
-                      value={quickModel}
-                      disabled={loading}
-                      onValueChange={(v) => v && setQuickModel(v)}
-                    >
-                      <SelectTrigger id={`${fieldId}-model-quick`} className="w-full min-w-0">
-                        <SelectValue>{quickModel}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          {MODEL_OPTIONS.map((m) => (
-                            <SelectItem key={m} value={m}>
-                              {m}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor={`${fieldId}-model-deep`}>深决策模型</FieldLabel>
-                    <Select
-                      value={deepModel}
-                      disabled={loading}
-                      onValueChange={(v) => v && setDeepModel(v)}
-                    >
-                      <SelectTrigger id={`${fieldId}-model-deep`} className="w-full min-w-0">
-                        <SelectValue>{deepModel}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          {MODEL_OPTIONS.map((m) => (
-                            <SelectItem key={m} value={m}>
-                              {m}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                </FieldGroup>
               </FieldSet>
 
               <Separator />
