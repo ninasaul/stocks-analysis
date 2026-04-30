@@ -47,6 +47,14 @@ function statusLabel(s: SubscriptionOrder["status"]) {
   return "已取消";
 }
 
+function paymentStatusLabel(s: "idle" | "pending" | "success" | "failed" | "cancelled") {
+  if (s === "idle") return "未支付";
+  if (s === "pending") return "处理中";
+  if (s === "success") return "支付成功";
+  if (s === "failed") return "支付失败";
+  return "已取消";
+}
+
 export default function SubscriptionPage() {
   const session = useAuthStore((s) => s.session);
   const syncSession = useAuthStore((s) => s.syncSession);
@@ -261,7 +269,7 @@ export default function SubscriptionPage() {
             </p>
           ) : null}
           {membershipError ? <p className="text-sm text-destructive">{membershipError}</p> : null}
-          <p className="text-muted-foreground text-xs">最近支付状态：{paymentStatus}</p>
+          <p className="text-muted-foreground text-xs">最近支付状态：{paymentStatusLabel(paymentStatus)}</p>
         </CardContent>
         <CardFooter className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" onClick={resetToFree}>

@@ -103,9 +103,16 @@ export type AnalyzeProgress = {
   progress: number;
   message: string;
 };
+export type AnalyzeTaskStatus = ApiAnalyzeTaskStatusResponse;
 
 type ApiHistoryResponse = {
   analysis_result?: ApiAnalyzeResponse[];
+  error?: string;
+};
+
+type ApiHistoryDetailResponse = {
+  record_id?: string;
+  analysis_result?: ApiAnalyzeResponse;
   error?: string;
 };
 
@@ -220,7 +227,11 @@ function buildAnalyzeQueryConfig(input: AnalysisInput): AnalyzeQueryConfig {
   };
 }
 
-function mapAnalyzeToTimingReport(input: AnalysisInput | null, payload: ApiAnalyzeResponse): TimingReport {
+function mapAnalyzeToTimingReport(
+  input: AnalysisInput | null,
+  payload: ApiAnalyzeResponse,
+  meta?: { record_id?: string; task_id?: string },
+): TimingReport {
   const signal = normalizeSignal(payload.final_signal ?? payload.technical_analysis?.signal);
   const total = clampNumber(Math.round(extractNumber(payload.final_score, payload.ratings?.overall ?? 50)), 0, 100);
   const technical = clampNumber(
@@ -273,6 +284,8 @@ function mapAnalyzeToTimingReport(input: AnalysisInput | null, payload: ApiAnaly
 
   return timingReportSchema.parse({
     id: `api-${market}.${symbol}-${parseApiCreatedAt(payload.created_at)}`,
+    record_id: meta?.record_id,
+    task_id: meta?.task_id,
     symbol,
     market,
     timeframe: input?.timeframe ?? "daily",
@@ -389,6 +402,7 @@ export async function requestTimingReport(
   input: AnalysisInput,
   options?: {
     onProgress?: (progress: AnalyzeProgress) => void;
+    onTaskCreated?: (task: { taskId: string; recordId?: string }) => void;
   },
 ): Promise<TimingReport> {
   const state = useAuthStore.getState();
@@ -436,13 +450,20 @@ export async function requestTimingReport(
   if (!taskId) {
     throw new Error("创建分析任务失败：缺少 task_id");
   }
+  options?.onTaskCreated?.({
+    taskId,
+    recordId: createPayload.record_id,
+  });
 
   options?.onProgress?.({ progress: 5, message: "任务创建成功，开始轮询进度..." });
   const payload = await pollAnalyzeResult(taskId, state.authenticatedFetch, options?.onProgress);
   if (typeof payload.error === "string" && payload.error.trim().length > 0) {
     throw new Error(payload.error);
   }
-  return mapAnalyzeToTimingReport(input, payload);
+  return mapAnalyzeToTimingReport(input, payload, {
+    record_id: createPayload.record_id,
+    task_id: taskId,
+  });
 }
 
 export async function requestAnalyzeHistory(): Promise<TimingReport[]> {
@@ -464,12 +485,62 @@ export async function requestAnalyzeHistory(): Promise<TimingReport[]> {
   return items
     .map((item) => {
       try {
-        return mapAnalyzeToTimingReport(null, item);
+        const recordId =
+          typeof (item as { record_id?: unknown }).record_id === "string"
+            ? (item as { record_id?: string }).record_id
+            : undefined;
+        return mapAnalyzeToTimingReport(null, item, { record_id: recordId });
       } catch {
         return null;
       }
     })
     .filter((item): item is TimingReport => item !== null);
+}
+
+export async function requestAnalyzeHistoryByRecordId(recordId: string): Promise<TimingReport> {
+  const state = useAuthStore.getState();
+  if (state.session !== "user" || !state.accessToken) {
+    throw new Error("当前未登录，请先登录后重试");
+  }
+  const normalized = recordId.trim();
+  if (!normalized) {
+    throw new Error("record_id 不能为空");
+  }
+
+  const url = new URL(`/api/analyze/history/${encodeURIComponent(normalized)}`, getPublicApiBaseUrl());
+  const response = await state.authenticatedFetch(url.toString(), { method: "GET" });
+  if (!response.ok) {
+    throw new Error(`获取分析详情失败（${response.status}）`);
+  }
+
+  const payload = (await response.json()) as ApiHistoryDetailResponse;
+  if (typeof payload.error === "string" && payload.error.trim().length > 0) {
+    throw new Error(payload.error);
+  }
+  if (!payload.analysis_result) {
+    throw new Error("分析详情不存在");
+  }
+  return mapAnalyzeToTimingReport(null, payload.analysis_result, {
+    record_id: payload.record_id ?? normalized,
+  });
+}
+
+export async function requestAnalyzeTaskStatus(taskId: string): Promise<AnalyzeTaskStatus> {
+  const state = useAuthStore.getState();
+  if (state.session !== "user" || !state.accessToken) {
+    throw new Error("当前未登录，请先登录后重试");
+  }
+  const normalized = taskId.trim();
+  if (!normalized) {
+    throw new Error("task_id 不能为空");
+  }
+
+  const url = new URL(`/api/analyze/${encodeURIComponent(normalized)}`, getPublicApiBaseUrl());
+  const response = await state.authenticatedFetch(url.toString(), { method: "GET" });
+  if (!response.ok) {
+    throw new Error(`查询分析任务失败（${response.status}）`);
+  }
+  return (await response.json()) as AnalyzeTaskStatus;
 }
 
 export async function requestReportFile(

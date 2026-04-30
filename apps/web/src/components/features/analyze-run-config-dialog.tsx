@@ -18,8 +18,10 @@ import { ANALYZE_MODEL_OPTIONS, coerceAnalyzeModel } from "@/lib/analyze-prefere
 import { useAnalyzePreferencesStore } from "@/stores/use-analyze-preferences-store";
 import { useStoreHydrated } from "@/hooks/use-store-hydrated";
 import {
+  formatAnalyzeBoardSymbol,
   fuzzyAnalyzeSymbolScore,
   parseAnalyzeSearchInput,
+  resolveAnalyzeExchange,
   type AnalyzeSymbolSearchItem,
 } from "@/lib/analyze-symbol-search";
 import { Button } from "@/components/ui/button";
@@ -299,6 +301,8 @@ function buildPreferenceSnapshot(args: {
 export type AnalyzeRunConfigConfirm = {
   input: AnalysisInput;
   displayKeyword: string;
+  stockName: string;
+  stockExchange?: string;
 };
 
 type AnalyzeRunConfigDialogProps = {
@@ -527,7 +531,9 @@ export function AnalyzeRunConfigDialog({
       preference_snapshot,
     };
     const displayKeyword = `${parsed.market}.${parsed.symbol}`;
-    const ok = await onConfirm({ input, displayKeyword });
+    const stockName = selectedSearchItem?.name?.trim() || parsed.symbol;
+    const stockExchange = selectedSearchItem?.exchange?.trim() || resolveAnalyzeExchange(parsed.market, parsed.symbol);
+    const ok = await onConfirm({ input, displayKeyword, stockName, stockExchange });
     if (ok) {
       useAnalyzePreferencesStore.getState().syncFromDialog({
         depth,
@@ -604,7 +610,7 @@ export function AnalyzeRunConfigDialog({
                       ariaLabel="分析配置标的搜索"
                       inputId={`${fieldId}-search`}
                       listId={`${fieldId}-search-listbox`}
-                      formatCode={(item) => `${item.market}.${item.symbol}`}
+                      formatCode={(item) => formatAnalyzeBoardSymbol(item.market, item.symbol)}
                       onSelect={applySearchItem}
                       openOnFocus={false}
                       onResolveEnter={(rawQuery, activeItem) => {

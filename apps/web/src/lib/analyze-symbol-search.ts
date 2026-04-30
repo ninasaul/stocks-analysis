@@ -6,6 +6,7 @@ export type AnalyzeSymbolSearchItem = {
   market: AnalysisInput["market"];
   symbol: string;
   name: string;
+  exchange?: string;
 };
 
 export const ANALYZE_SYMBOL_MOCK_UNIVERSE: AnalyzeSymbolSearchItem[] = [
@@ -33,6 +34,10 @@ export function formatAnalyzeBoardSymbol(market: AnalysisInput["market"], symbol
   if (/^(43|82|83|87|88|92)/.test(sym)) return `BJ:${sym}`;
   if (/^[69]/.test(sym)) return `SH:${sym}`;
   return `SZ:${sym}`;
+}
+
+export function resolveAnalyzeExchange(market: AnalysisInput["market"], symbol: string): string {
+  return formatAnalyzeBoardSymbol(market, symbol).split(":")[0] ?? market;
 }
 
 export function parseAnalyzeSearchInput(raw: string, fallbackMarket: AnalysisInput["market"]) {

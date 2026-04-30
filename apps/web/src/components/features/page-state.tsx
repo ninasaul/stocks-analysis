@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 type PageLoadingStateProps = {
   title?: string;
-  description?: string;
+  description?: ReactNode;
   className?: string;
 };
 
