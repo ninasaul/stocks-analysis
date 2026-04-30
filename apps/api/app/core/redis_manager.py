@@ -54,32 +54,7 @@ class RedisManager:
     def get_client(self) -> redis.Redis:
         """获取Redis客户端"""
         if self._client is None:
-            try:
-                self.initialize()
-            except Exception as e:
-                logger.warning(f"Redis初始化失败，速率限制功能将被禁用: {e}")
-                # 返回一个模拟的Redis客户端，所有操作都不做实际处理
-                class MockRedis:
-                    def pipeline(self):
-                        class MockPipeline:
-                            def zremrangebyscore(self, *args, **kwargs):
-                                return self
-                            def zadd(self, *args, **kwargs):
-                                return self
-                            def expire(self, *args, **kwargs):
-                                return self
-                            def zcard(self, *args, **kwargs):
-                                return self
-                            def execute(self):
-                                return [0, 0, 0, 0]
-                        return MockPipeline()
-                    def zrange(self, *args, **kwargs):
-                        return []
-                    def zremrangebyscore(self, *args, **kwargs):
-                        pass
-                    def zcard(self, *args, **kwargs):
-                        return 0
-                self._client = MockRedis()
+            self.initialize()
         return self._client
 
 

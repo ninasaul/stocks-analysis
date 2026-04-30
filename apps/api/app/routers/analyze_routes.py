@@ -7,6 +7,7 @@ from pydantic import BaseModel
 import json
 import os
 import asyncio
+import uuid
 
 from ..core.stock_service import StockService
 from ..core.indicators import TimingScorer
